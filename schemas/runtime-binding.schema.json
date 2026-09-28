@@ -4,12 +4,7 @@
   "title": "RuntimeBinding",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ],
+  "required": ["apiVersion", "kind", "metadata", "spec"],
   "properties": {
     "apiVersion": {
       "const": "agentplane.io/v1alpha1"
@@ -19,9 +14,7 @@
     },
     "metadata": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "properties": {
         "name": {
           "type": "string"
@@ -32,10 +25,7 @@
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "type",
-        "provider"
-      ],
+      "required": ["type", "provider"],
       "properties": {
         "type": {
           "enum": [
@@ -46,7 +36,8 @@
             "sandbox",
             "tool",
             "traffic",
-            "model"
+            "model",
+            "decision"
           ]
         },
         "provider": {
