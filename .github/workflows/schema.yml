@@ -1,0 +1,16 @@
+name: schema
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate-json:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate JSON schemas
+        run: |
+          python -m json.tool schemas/agent-bundle.schema.json >/dev/null
+          python -m json.tool schemas/agent-release.schema.json >/dev/null
+          python -m json.tool schemas/runtime-binding.schema.json >/dev/null
