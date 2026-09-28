@@ -4,7 +4,11 @@ from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Sequence
 
 from .eval_engine import EvalResult, evaluate_gate
-from .executors import ExecutionReceipt, ExecutorRegistry
+from .executors import (
+    ExecutionReceipt,
+    ExecutorRegistry,
+    RollbackReceipt,
+)
 from .plan import ResolvedReleasePlan
 from .registry import ProviderRegistry
 from .state_machine import ReleasePhase, ReleaseState
@@ -15,16 +19,13 @@ class ApplyResult:
     release_name: str
     phase: str
     receipts: tuple[ExecutionReceipt, ...]
+    rollback_receipts: tuple[RollbackReceipt, ...]
     eval_results: tuple[EvalResult, ...]
     evidence: Mapping[str, Any]
 
 
 class ApplyReconciler:
-    """Apply a resolved release through explicit provider executors.
-
-    Provider preparation, provider mutation, and evaluation remain separate steps.
-    A release is promoted only after every configured evaluation gate passes.
-    """
+    """Apply a resolved release through explicit provider executors."""
 
     _TYPE_ORDER = {
         "sandbox": 10,
@@ -70,19 +71,21 @@ class ApplyReconciler:
         )
 
         receipts: list[ExecutionReceipt] = []
+        applied: list[tuple[dict[str, Any], ExecutionReceipt]] = []
+
         for binding_name, binding in ordered_bindings:
             spec = binding["spec"]
             executor = self.executors.get(
                 spec["type"],
                 spec["provider"],
             )
-            receipts.append(
-                executor.apply(
-                    plan=plan,
-                    binding=binding,
-                    prepared=prepared[binding_name],
-                )
+            receipt = executor.apply(
+                plan=plan,
+                binding=binding,
+                prepared=prepared[binding_name],
             )
+            receipts.append(receipt)
+            applied.append((binding, receipt))
 
         state.transition(ReleasePhase.EVALUATING)
 
@@ -91,16 +94,50 @@ class ApplyReconciler:
             for gate in eval_gates
         )
 
-        if any(not result.passed for result in eval_results):
-            state.transition(ReleasePhase.BLOCKED)
-        else:
+        failed = [
+            (gate, result)
+            for gate, result in zip(eval_gates, eval_results, strict=True)
+            if not result.passed
+        ]
+
+        rollback_receipts: list[RollbackReceipt] = []
+
+        if not failed:
             state.transition(ReleasePhase.PROMOTED)
+        else:
+            actions = {
+                gate.get("spec", {}).get("onFailure", "block")
+                for gate, _ in failed
+            }
+
+            if "rollback" in actions:
+                for binding, receipt in reversed(applied):
+                    spec = binding["spec"]
+                    executor = self.executors.get(
+                        spec["type"],
+                        spec["provider"],
+                    )
+                    rollback_receipts.append(
+                        executor.rollback(
+                            plan=plan,
+                            binding=binding,
+                            receipt=receipt,
+                        )
+                    )
+                state.transition(ReleasePhase.ROLLED_BACK)
+            else:
+                # "block" and "manual-review" both stop promotion.
+                state.transition(ReleasePhase.BLOCKED)
 
         evidence = {
             "kind": "ReleaseEvidence",
             "release": plan.release_name,
             "prepared": prepared,
             "receipts": [asdict(receipt) for receipt in receipts],
+            "rollback_receipts": [
+                asdict(receipt)
+                for receipt in rollback_receipts
+            ],
             "eval_results": [
                 {
                     "passed": result.passed,
@@ -108,8 +145,16 @@ class ApplyReconciler:
                         asdict(violation)
                         for violation in result.violations
                     ],
+                    "on_failure": gate.get("spec", {}).get(
+                        "onFailure",
+                        "block",
+                    ),
                 }
-                for result in eval_results
+                for gate, result in zip(
+                    eval_gates,
+                    eval_results,
+                    strict=True,
+                )
             ],
             "phase": state.phase.value,
         }
@@ -118,6 +163,7 @@ class ApplyReconciler:
             release_name=plan.release_name,
             phase=state.phase.value,
             receipts=tuple(receipts),
+            rollback_receipts=tuple(rollback_receipts),
             eval_results=eval_results,
             evidence=evidence,
         )
