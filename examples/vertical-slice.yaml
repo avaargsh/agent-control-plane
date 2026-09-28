@@ -1,0 +1,101 @@
+---
+apiVersion: agentplane.io/v1alpha1
+kind: AgentBundle
+metadata:
+  name: sre-investigator
+spec:
+  entrypoint: sre_investigator
+  capabilities:
+    - metrics.read
+    - logs.read
+    - kubernetes.read
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: decision-hot-path
+spec:
+  type: decision
+  provider: decision-gateway
+  endpointRef: service://agent-decision-lab
+  config:
+    decisionTypes:
+      - mcp_tool_router
+      - severity
+      - escalation
+    fallbackBinding: harness-codex
+    policyRef: bounded-automation-default
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: harness-codex
+spec:
+  type: harness
+  provider: codex
+  config:
+    mode: reasoning-fallback
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: workflow-temporal
+spec:
+  type: workflow
+  provider: temporal
+  endpointRef: service://temporal
+  config:
+    workflowType: AgentRunWorkflow
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: tools-observability
+spec:
+  type: tool
+  provider: mcp
+  endpointRef: service://observability-mcp
+  config:
+    mode: read-only
+    capabilities:
+      - metrics.read
+      - logs.read
+      - kubernetes.read
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: sandbox-k8s
+spec:
+  type: sandbox
+  provider: k8s-agent-sandbox
+  config:
+    isolation: gvisor
+    warmPool: true
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: AgentRelease
+metadata:
+  name: sre-investigator-v1
+spec:
+  bundleRef: sre-investigator
+  version: v1
+  bindings:
+    - decision-hot-path
+    - harness-codex
+    - workflow-temporal
+    - tools-observability
+    - sandbox-k8s
+  policyRefs:
+    - read-only-investigation
+  evalGates:
+    - rca-smoke
+  rollout:
+    strategy: canary
+    percentage: 10
