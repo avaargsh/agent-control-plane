@@ -1,0 +1,73 @@
+# Conceptual example. Provider-specific extensions intentionally remain opaque.
+bundle:
+  apiVersion: agentplane.io/v1alpha1
+  kind: AgentBundle
+  metadata:
+    name: sre-rca-agent
+  spec:
+    entrypoint: sre_rca
+    instructionsRef: artifact://prompts/sre-rca.md
+    capabilities:
+      - metrics.read
+      - logs.read
+      - kubernetes.read
+    providerExtensions:
+      openai:
+        response_format: structured
+
+release:
+  apiVersion: agentplane.io/v1alpha1
+  kind: AgentRelease
+  metadata:
+    name: sre-rca-agent-v1
+  spec:
+    bundleRef: sre-rca-agent
+    version: v1
+    bindings:
+      - harness-openai
+      - workflow-temporal
+      - sandbox-k8s
+      - tools-mcp-observability
+    policyRefs:
+      - read-only-investigation
+    evalGates:
+      - rca-regression-suite
+    rollout:
+      strategy: canary
+      percentage: 10
+
+bindings:
+  - apiVersion: agentplane.io/v1alpha1
+    kind: RuntimeBinding
+    metadata:
+      name: harness-openai
+    spec:
+      type: harness
+      provider: openai-agents
+      config: {}
+
+  - apiVersion: agentplane.io/v1alpha1
+    kind: RuntimeBinding
+    metadata:
+      name: workflow-temporal
+    spec:
+      type: workflow
+      provider: temporal
+      endpointRef: service://temporal-frontend
+
+  - apiVersion: agentplane.io/v1alpha1
+    kind: RuntimeBinding
+    metadata:
+      name: sandbox-k8s
+    spec:
+      type: sandbox
+      provider: k8s-agent-sandbox
+
+  - apiVersion: agentplane.io/v1alpha1
+    kind: RuntimeBinding
+    metadata:
+      name: tools-mcp-observability
+    spec:
+      type: tool
+      provider: mcp
+      endpointRef: service://observability-mcp
