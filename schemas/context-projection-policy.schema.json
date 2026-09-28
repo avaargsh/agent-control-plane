@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContextProjectionPolicy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "agentplane.io/v1alpha1"
+    },
+    "kind": {
+      "const": "ContextProjectionPolicy"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sources",
+        "limits"
+      ],
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ref",
+              "mode"
+            ],
+            "properties": {
+              "ref": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mode": {
+                "enum": [
+                  "required",
+                  "optional",
+                  "on-demand"
+                ]
+              },
+              "redactionPolicyRef": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxTokens": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxBytes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "recordProjectionEvidence": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    }
+  }
+}
