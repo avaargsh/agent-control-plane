@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "agentplane.io/v1alpha1"
+    },
+    "kind": {
+      "const": "Session"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agentRef",
+        "releaseRef",
+        "tenantRef"
+      ],
+      "properties": {
+        "agentRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "releaseRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tenantRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "providerRefs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "stateRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}
