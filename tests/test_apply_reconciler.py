@@ -1,6 +1,9 @@
 from agent_control_plane.apply_reconciler import ApplyReconciler
 from agent_control_plane.decision_adapter import DecisionGatewayAdapter
-from agent_control_plane.executors import ExecutorRegistry, InMemoryExecutor
+from agent_control_plane.executors import (
+    ExecutorRegistry,
+    InMemoryExecutor,
+)
 from agent_control_plane.example_adapters import (
     CodexHarnessAdapter,
     KubernetesSandboxAdapter,
@@ -19,23 +22,42 @@ def build_plan() -> ResolvedReleasePlan:
         bindings={
             "sandbox": {
                 "metadata": {"name": "sandbox"},
-                "spec": {"type": "sandbox", "provider": "k8s-agent-sandbox"},
+                "spec": {
+                    "type": "sandbox",
+                    "provider": "k8s-agent-sandbox",
+                },
             },
             "tools": {
                 "metadata": {"name": "tools"},
-                "spec": {"type": "tool", "provider": "mcp"},
+                "spec": {
+                    "type": "tool",
+                    "provider": "mcp",
+                    "dependsOn": ["sandbox"],
+                },
             },
             "harness": {
                 "metadata": {"name": "harness"},
-                "spec": {"type": "harness", "provider": "codex"},
+                "spec": {
+                    "type": "harness",
+                    "provider": "codex",
+                    "dependsOn": ["tools"],
+                },
             },
             "workflow": {
                 "metadata": {"name": "workflow"},
-                "spec": {"type": "workflow", "provider": "temporal"},
+                "spec": {
+                    "type": "workflow",
+                    "provider": "temporal",
+                    "dependsOn": ["harness"],
+                },
             },
             "decision": {
                 "metadata": {"name": "decision"},
-                "spec": {"type": "decision", "provider": "decision-gateway"},
+                "spec": {
+                    "type": "decision",
+                    "provider": "decision-gateway",
+                    "dependsOn": ["workflow"],
+                },
             },
         },
     )
@@ -51,18 +73,34 @@ def provider_registry() -> ProviderRegistry:
     return registry
 
 
-def executor_registry() -> ExecutorRegistry:
+def executor_registry(
+    *,
+    failing_workflow: bool = False,
+) -> ExecutorRegistry:
     registry = ExecutorRegistry()
-    for provider_type, provider_name in [
-        ("sandbox", "k8s-agent-sandbox"),
-        ("tool", "mcp"),
-        ("harness", "codex"),
-        ("workflow", "temporal"),
-        ("decision", "decision-gateway"),
-    ]:
+
+    registry.register(
+        InMemoryExecutor("sandbox", "k8s-agent-sandbox")
+    )
+    registry.register(InMemoryExecutor("tool", "mcp"))
+    registry.register(InMemoryExecutor("harness", "codex"))
+
+    if failing_workflow:
+        class FailingWorkflowExecutor(InMemoryExecutor):
+            def apply(self, **kwargs):
+                raise RuntimeError("temporal unavailable")
+
         registry.register(
-            InMemoryExecutor(provider_type, provider_name)
+            FailingWorkflowExecutor("workflow", "temporal")
         )
+    else:
+        registry.register(
+            InMemoryExecutor("workflow", "temporal")
+        )
+
+    registry.register(
+        InMemoryExecutor("decision", "decision-gateway")
+    )
     return registry
 
 
@@ -79,14 +117,18 @@ PASS_GATE = {
 ROLLBACK_GATE = {
     "spec": {
         "conditions": [
-            {"metric": "false_automation_rate", "op": "lte", "value": 0.01},
+            {
+                "metric": "false_automation_rate",
+                "op": "lte",
+                "value": 0.01,
+            },
         ],
         "onFailure": "rollback",
     }
 }
 
 
-def test_apply_promotes_only_after_gate_passes() -> None:
+def test_apply_promotes_in_dependency_order() -> None:
     result = ApplyReconciler(
         providers=provider_registry(),
         executors=executor_registry(),
@@ -97,12 +139,43 @@ def test_apply_promotes_only_after_gate_passes() -> None:
     )
 
     assert result.phase == "promoted"
-    assert len(result.receipts) == 5
+    assert [
+        receipt.binding_name
+        for receipt in result.receipts
+    ] == [
+        "sandbox",
+        "tools",
+        "harness",
+        "workflow",
+        "decision",
+    ]
     assert result.rollback_receipts == ()
     assert result.eval_results[0].passed is True
 
 
-def test_apply_blocks_failed_gate() -> None:
+def test_apply_is_idempotent_on_retry() -> None:
+    executors = executor_registry()
+    reconciler = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executors,
+    )
+
+    first = reconciler.reconcile(
+        build_plan(),
+        eval_gates=[PASS_GATE],
+        metrics={"accuracy": 0.95, "ece": 0.03},
+    )
+    second = reconciler.reconcile(
+        build_plan(),
+        eval_gates=[PASS_GATE],
+        metrics={"accuracy": 0.95, "ece": 0.03},
+    )
+
+    assert all(item.changed for item in first.receipts)
+    assert all(not item.changed for item in second.receipts)
+
+
+def test_apply_blocks_failed_gate_without_compensation() -> None:
     result = ApplyReconciler(
         providers=provider_registry(),
         executors=executor_registry(),
@@ -117,7 +190,7 @@ def test_apply_blocks_failed_gate() -> None:
     assert result.eval_results[0].passed is False
 
 
-def test_failed_rollback_gate_compensates_all_bindings() -> None:
+def test_failed_rollback_gate_compensates_reverse_apply_order() -> None:
     result = ApplyReconciler(
         providers=provider_registry(),
         executors=executor_registry(),
@@ -128,12 +201,47 @@ def test_failed_rollback_gate_compensates_all_bindings() -> None:
     )
 
     assert result.phase == "rolled_back"
-    assert len(result.rollback_receipts) == 5
-
-    # Applied order ends with decision, so compensation starts there.
-    assert result.rollback_receipts[0].binding_name == "decision"
-    assert result.rollback_receipts[-1].binding_name == "sandbox"
+    assert [
+        item.binding_name
+        for item in result.rollback_receipts
+    ] == [
+        "decision",
+        "workflow",
+        "harness",
+        "tools",
+        "sandbox",
+    ]
     assert all(item.rolled_back for item in result.rollback_receipts)
+
+
+def test_partial_apply_failure_compensates_completed_bindings() -> None:
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(
+            failing_workflow=True,
+        ),
+    ).reconcile(
+        build_plan(),
+    )
+
+    assert result.phase == "rolled_back"
+    assert result.error == "temporal unavailable"
+    assert [
+        item.binding_name
+        for item in result.receipts
+    ] == [
+        "sandbox",
+        "tools",
+        "harness",
+    ]
+    assert [
+        item.binding_name
+        for item in result.rollback_receipts
+    ] == [
+        "harness",
+        "tools",
+        "sandbox",
+    ]
 
 
 def test_missing_metric_fails_closed() -> None:
