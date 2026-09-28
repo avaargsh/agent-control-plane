@@ -9,15 +9,19 @@
 - [x] canonical Session / Run / StateRef schema
 - [x] ContextProjectionPolicy
 - [x] EvidenceRef / EvalGate schema
+- [x] Decision Plane binding type
 
 ## v0.2 — Local controller
 - [x] manifest validation
 - [x] binding resolver
-- [ ] multi-document manifest loader
-- [ ] release state machine
-- [ ] provider adapter interface
-- [ ] local OpenAI/Codex harness adapter example
-- [ ] Temporal workflow binding example
+- [x] multi-document manifest loader
+- [x] resolved release plan compiler
+- [x] release state machine
+- [x] provider adapter interface / registry
+- [x] Codex harness adapter example
+- [x] Temporal workflow binding example
+- [x] Kubernetes sandbox adapter example
+- [x] Decision Gateway adapter example
 
 ## v0.3 — Kubernetes integration
 - [ ] optional CRDs for desired state
