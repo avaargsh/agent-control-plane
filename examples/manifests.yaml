@@ -1,0 +1,67 @@
+---
+apiVersion: agentplane.io/v1alpha1
+kind: AgentBundle
+metadata:
+  name: coding-agent
+spec:
+  entrypoint: coding_agent
+  capabilities:
+    - code.read
+    - code.write
+    - tests.run
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: harness-codex
+spec:
+  type: harness
+  provider: codex
+  config: {}
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: workflow-temporal
+spec:
+  type: workflow
+  provider: temporal
+  endpointRef: service://temporal
+  config:
+    workflowType: AgentRunWorkflow
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: sandbox-k8s
+spec:
+  type: sandbox
+  provider: k8s-agent-sandbox
+  config:
+    isolation: gvisor
+    warmPool: true
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: AgentRelease
+metadata:
+  name: coding-agent-v1
+spec:
+  bundleRef: coding-agent
+  version: v1
+  bindings:
+    - harness-codex
+    - workflow-temporal
+    - sandbox-k8s
+  policyRefs:
+    - coding-default
+  evalGates:
+    - coding-smoke
+  placement:
+    region: local
+  rollout:
+    strategy: canary
+    percentage: 10
