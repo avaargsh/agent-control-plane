@@ -24,8 +24,12 @@
 - [x] Decision Gateway adapter example
 - [x] MCP Tool adapter example
 - [x] local dry-run reconciler
-- [x] release-plan evidence
+- [x] executor registry / apply boundary
+- [x] execution receipts
+- [x] release evidence
 - [x] deterministic EvalGate engine
+- [x] block / manual-review / rollback semantics
+- [x] reverse-order compensation in local executor
 
 ## v0.3 — Kubernetes integration
 - [ ] optional CRDs for desired state
@@ -33,13 +37,15 @@
 - [ ] placement adapter
 - [ ] rollout / canary controller
 - [ ] policy integration
+- [ ] explicit binding dependency graph
 
 ## v0.4 — Production slice
 - [ ] Alertmanager -> AgentRelease
 - [ ] real Temporal durable workflow execution
+- [x] Decision Gateway runtime client
 - [x] MCP read-tool binding contract
 - [x] isolated sandbox binding contract
-- [x] evidence contract + dry-run evidence
+- [x] evidence contract + local evidence
 - [x] eval gate contract + local evaluator
 - [ ] replay executor
-- [ ] real provider executors / apply mode
+- [ ] real provider-specific executors
