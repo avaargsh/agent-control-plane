@@ -46,6 +46,14 @@
         "endpointRef": {
           "type": "string"
         },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
         "config": {
           "type": "object",
           "additionalProperties": true
