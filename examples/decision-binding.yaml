@@ -1,0 +1,16 @@
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: decision-hot-path
+spec:
+  type: decision
+  provider: decision-gateway
+  endpointRef: service://agent-decision-lab
+  config:
+    decisionTypes:
+      - mcp_tool_router
+      - severity
+      - escalation
+    fallbackBinding: harness-codex
+    policyRef: bounded-automation-default
