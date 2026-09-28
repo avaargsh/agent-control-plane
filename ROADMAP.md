@@ -29,7 +29,11 @@
 - [x] release evidence
 - [x] deterministic EvalGate engine
 - [x] block / manual-review / rollback semantics
-- [x] reverse-order compensation in local executor
+- [x] explicit binding dependency graph
+- [x] cycle / missing-dependency validation
+- [x] idempotent executor reference semantics
+- [x] reverse dependency compensation
+- [x] partial apply failure compensation
 
 ## v0.3 — Kubernetes integration
 - [ ] optional CRDs for desired state
@@ -37,7 +41,7 @@
 - [ ] placement adapter
 - [ ] rollout / canary controller
 - [ ] policy integration
-- [ ] explicit binding dependency graph
+- [ ] dependency-aware Kubernetes apply
 
 ## v0.4 — Production slice
 - [ ] Alertmanager -> AgentRelease
