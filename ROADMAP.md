@@ -22,6 +22,10 @@
 - [x] Temporal workflow binding example
 - [x] Kubernetes sandbox adapter example
 - [x] Decision Gateway adapter example
+- [x] MCP Tool adapter example
+- [x] local dry-run reconciler
+- [x] release-plan evidence
+- [x] deterministic EvalGate engine
 
 ## v0.3 — Kubernetes integration
 - [ ] optional CRDs for desired state
@@ -32,9 +36,10 @@
 
 ## v0.4 — Production slice
 - [ ] Alertmanager -> AgentRelease
-- [ ] Temporal durable workflow
-- [ ] MCP read tools
-- [ ] isolated sandbox
-- [ ] evidence
-- [ ] eval gate
-- [ ] replay
+- [ ] real Temporal durable workflow execution
+- [x] MCP read-tool binding contract
+- [x] isolated sandbox binding contract
+- [x] evidence contract + dry-run evidence
+- [x] eval gate contract + local evaluator
+- [ ] replay executor
+- [ ] real provider executors / apply mode
