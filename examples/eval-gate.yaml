@@ -1,0 +1,21 @@
+apiVersion: agentplane.io/v1alpha1
+kind: EvalGate
+metadata:
+  name: bounded-decision-regression
+spec:
+  suiteRef: benchmark://agent-decision-lab/tool-router-v1
+  conditions:
+    - metric: accuracy
+      op: gte
+      value: 0.90
+    - metric: ece
+      op: lte
+      value: 0.05
+    - metric: false_automation_rate
+      op: lte
+      value: 0.01
+    - metric: p95_latency_ms
+      op: lte
+      value: 50
+  evidenceRequired: true
+  onFailure: block
