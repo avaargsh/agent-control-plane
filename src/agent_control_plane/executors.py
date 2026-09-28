@@ -16,6 +16,16 @@ class ExecutionReceipt:
     evidence: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class RollbackReceipt:
+    binding_name: str
+    provider_type: str
+    provider_name: str
+    resource_ref: str
+    rolled_back: bool
+    evidence: dict[str, Any]
+
+
 class BindingExecutor(Protocol):
     provider_type: str
     provider_name: str
@@ -27,6 +37,15 @@ class BindingExecutor(Protocol):
         binding: dict[str, Any],
         prepared: dict[str, Any],
     ) -> ExecutionReceipt:
+        ...
+
+    def rollback(
+        self,
+        *,
+        plan: ResolvedReleasePlan,
+        binding: dict[str, Any],
+        receipt: ExecutionReceipt,
+    ) -> RollbackReceipt:
         ...
 
 
@@ -75,5 +94,24 @@ class InMemoryExecutor:
             evidence={
                 "prepared_kind": prepared.get("kind"),
                 "release": plan.release_name,
+            },
+        )
+
+    def rollback(
+        self,
+        *,
+        plan: ResolvedReleasePlan,
+        binding: dict[str, Any],
+        receipt: ExecutionReceipt,
+    ) -> RollbackReceipt:
+        return RollbackReceipt(
+            binding_name=receipt.binding_name,
+            provider_type=receipt.provider_type,
+            provider_name=receipt.provider_name,
+            resource_ref=receipt.resource_ref,
+            rolled_back=receipt.changed,
+            evidence={
+                "release": plan.release_name,
+                "reason": "local-compensation",
             },
         )
