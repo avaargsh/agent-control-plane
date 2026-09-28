@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Sequence
 
+from .dependency_graph import dependency_order
 from .eval_engine import EvalResult, evaluate_gate
 from .executors import (
     ExecutionReceipt,
@@ -22,22 +23,11 @@ class ApplyResult:
     rollback_receipts: tuple[RollbackReceipt, ...]
     eval_results: tuple[EvalResult, ...]
     evidence: Mapping[str, Any]
+    error: str | None = None
 
 
 class ApplyReconciler:
-    """Apply a resolved release through explicit provider executors."""
-
-    _TYPE_ORDER = {
-        "sandbox": 10,
-        "tool": 20,
-        "model": 30,
-        "context": 40,
-        "memory": 50,
-        "harness": 60,
-        "workflow": 70,
-        "decision": 80,
-        "traffic": 90,
-    }
+    """Apply a resolved release through dependency-ordered provider executors."""
 
     def __init__(
         self,
@@ -47,6 +37,30 @@ class ApplyReconciler:
     ) -> None:
         self.providers = providers
         self.executors = executors
+
+    def _rollback(
+        self,
+        *,
+        plan: ResolvedReleasePlan,
+        applied: list[tuple[dict[str, Any], ExecutionReceipt]],
+    ) -> list[RollbackReceipt]:
+        rollback_receipts: list[RollbackReceipt] = []
+
+        for binding, receipt in reversed(applied):
+            spec = binding["spec"]
+            executor = self.executors.get(
+                spec["type"],
+                spec["provider"],
+            )
+            rollback_receipts.append(
+                executor.rollback(
+                    plan=plan,
+                    binding=binding,
+                    receipt=receipt,
+                )
+            )
+
+        return rollback_receipts
 
     def reconcile(
         self,
@@ -60,32 +74,59 @@ class ApplyReconciler:
         state.transition(ReleasePhase.RESOLVED)
 
         prepared = self.providers.prepare(plan)
-        state.transition(ReleasePhase.DEPLOYING)
+        order = dependency_order(plan.bindings)
 
-        ordered_bindings = sorted(
-            plan.bindings.items(),
-            key=lambda item: (
-                self._TYPE_ORDER.get(item[1]["spec"]["type"], 100),
-                item[0],
-            ),
-        )
+        state.transition(ReleasePhase.DEPLOYING)
 
         receipts: list[ExecutionReceipt] = []
         applied: list[tuple[dict[str, Any], ExecutionReceipt]] = []
 
-        for binding_name, binding in ordered_bindings:
-            spec = binding["spec"]
-            executor = self.executors.get(
-                spec["type"],
-                spec["provider"],
-            )
-            receipt = executor.apply(
+        try:
+            for binding_name in order:
+                binding = plan.bindings[binding_name]
+                spec = binding["spec"]
+                executor = self.executors.get(
+                    spec["type"],
+                    spec["provider"],
+                )
+                receipt = executor.apply(
+                    plan=plan,
+                    binding=binding,
+                    prepared=prepared[binding_name],
+                )
+                receipts.append(receipt)
+                applied.append((binding, receipt))
+        except Exception as exc:
+            rollback_receipts = self._rollback(
                 plan=plan,
-                binding=binding,
-                prepared=prepared[binding_name],
+                applied=applied,
             )
-            receipts.append(receipt)
-            applied.append((binding, receipt))
+            state.transition(ReleasePhase.ROLLED_BACK)
+
+            evidence = {
+                "kind": "ReleaseEvidence",
+                "release": plan.release_name,
+                "dependency_order": order,
+                "prepared": prepared,
+                "receipts": [asdict(receipt) for receipt in receipts],
+                "rollback_receipts": [
+                    asdict(receipt)
+                    for receipt in rollback_receipts
+                ],
+                "eval_results": [],
+                "phase": state.phase.value,
+                "apply_error": str(exc),
+            }
+
+            return ApplyResult(
+                release_name=plan.release_name,
+                phase=state.phase.value,
+                receipts=tuple(receipts),
+                rollback_receipts=tuple(rollback_receipts),
+                eval_results=(),
+                evidence=evidence,
+                error=str(exc),
+            )
 
         state.transition(ReleasePhase.EVALUATING)
 
@@ -96,7 +137,11 @@ class ApplyReconciler:
 
         failed = [
             (gate, result)
-            for gate, result in zip(eval_gates, eval_results, strict=True)
+            for gate, result in zip(
+                eval_gates,
+                eval_results,
+                strict=True,
+            )
             if not result.passed
         ]
 
@@ -106,32 +151,26 @@ class ApplyReconciler:
             state.transition(ReleasePhase.PROMOTED)
         else:
             actions = {
-                gate.get("spec", {}).get("onFailure", "block")
+                gate.get("spec", {}).get(
+                    "onFailure",
+                    "block",
+                )
                 for gate, _ in failed
             }
 
             if "rollback" in actions:
-                for binding, receipt in reversed(applied):
-                    spec = binding["spec"]
-                    executor = self.executors.get(
-                        spec["type"],
-                        spec["provider"],
-                    )
-                    rollback_receipts.append(
-                        executor.rollback(
-                            plan=plan,
-                            binding=binding,
-                            receipt=receipt,
-                        )
-                    )
+                rollback_receipts = self._rollback(
+                    plan=plan,
+                    applied=applied,
+                )
                 state.transition(ReleasePhase.ROLLED_BACK)
             else:
-                # "block" and "manual-review" both stop promotion.
                 state.transition(ReleasePhase.BLOCKED)
 
         evidence = {
             "kind": "ReleaseEvidence",
             "release": plan.release_name,
+            "dependency_order": order,
             "prepared": prepared,
             "receipts": [asdict(receipt) for receipt in receipts],
             "rollback_receipts": [
