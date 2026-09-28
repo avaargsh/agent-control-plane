@@ -1,0 +1,39 @@
+---
+apiVersion: agentplane.io/v1alpha1
+kind: Session
+metadata:
+  id: session-01
+spec:
+  agentRef: sre-rca-agent
+  releaseRef: sre-rca-agent-v1
+  tenantRef: tenant-a
+  providerRefs:
+    openaiThread: thread-example
+    temporalWorkflow: workflow-example
+  stateRefs:
+    - state://session-01/context
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: StateRef
+metadata:
+  id: session-01-context
+spec:
+  type: memory
+  uri: postgres://agent_state/session-01
+  version: "7"
+  immutable: false
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: EvidenceRef
+metadata:
+  id: evidence-01
+spec:
+  uri: s3://agent-evidence/session-01/run-01/trace.json
+  mediaType: application/json
+  checksum: sha256:example
+  provenance:
+    runRef: run-01
+    source: otel-export
+  immutable: true
