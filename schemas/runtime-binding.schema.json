@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/runtime-binding.schema.json",
+  "title": "RuntimeBinding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "agentplane.io/v1alpha1"
+    },
+    "kind": {
+      "const": "RuntimeBinding"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "provider"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "harness",
+            "workflow",
+            "context",
+            "memory",
+            "sandbox",
+            "tool",
+            "traffic",
+            "model"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "endpointRef": {
+          "type": "string"
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "secretRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}
