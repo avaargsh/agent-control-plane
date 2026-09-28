@@ -6,13 +6,14 @@
 - [x] RuntimeBinding schema
 - [x] Golden Slice
 - [x] thin-control-plane ADR
-- [ ] canonical Session / Run / StateRef schema
-- [ ] ContextProjectionPolicy
-- [ ] EvidenceRef / EvalGate schema
+- [x] canonical Session / Run / StateRef schema
+- [x] ContextProjectionPolicy
+- [x] EvidenceRef / EvalGate schema
 
 ## v0.2 — Local controller
-- [ ] manifest loader and validation
-- [ ] binding resolver
+- [x] manifest validation
+- [x] binding resolver
+- [ ] multi-document manifest loader
 - [ ] release state machine
 - [ ] provider adapter interface
 - [ ] local OpenAI/Codex harness adapter example
