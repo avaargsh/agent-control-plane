@@ -14,18 +14,31 @@ spec:
 apiVersion: agentplane.io/v1alpha1
 kind: RuntimeBinding
 metadata:
-  name: decision-hot-path
+  name: sandbox-k8s
 spec:
-  type: decision
-  provider: decision-gateway
-  endpointRef: service://agent-decision-lab
+  type: sandbox
+  provider: k8s-agent-sandbox
   config:
-    decisionTypes:
-      - mcp_tool_router
-      - severity
-      - escalation
-    fallbackBinding: harness-codex
-    policyRef: bounded-automation-default
+    isolation: gvisor
+    warmPool: true
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: tools-observability
+spec:
+  type: tool
+  provider: mcp
+  endpointRef: service://observability-mcp
+  dependsOn:
+    - sandbox-k8s
+  config:
+    mode: read-only
+    capabilities:
+      - metrics.read
+      - logs.read
+      - kubernetes.read
 
 ---
 apiVersion: agentplane.io/v1alpha1
@@ -35,6 +48,8 @@ metadata:
 spec:
   type: harness
   provider: codex
+  dependsOn:
+    - tools-observability
   config:
     mode: reasoning-fallback
 
@@ -47,6 +62,8 @@ spec:
   type: workflow
   provider: temporal
   endpointRef: service://temporal
+  dependsOn:
+    - harness-codex
   config:
     workflowType: AgentRunWorkflow
 
@@ -54,29 +71,20 @@ spec:
 apiVersion: agentplane.io/v1alpha1
 kind: RuntimeBinding
 metadata:
-  name: tools-observability
+  name: decision-hot-path
 spec:
-  type: tool
-  provider: mcp
-  endpointRef: service://observability-mcp
+  type: decision
+  provider: decision-gateway
+  endpointRef: service://agent-decision-lab
+  dependsOn:
+    - harness-codex
   config:
-    mode: read-only
-    capabilities:
-      - metrics.read
-      - logs.read
-      - kubernetes.read
-
----
-apiVersion: agentplane.io/v1alpha1
-kind: RuntimeBinding
-metadata:
-  name: sandbox-k8s
-spec:
-  type: sandbox
-  provider: k8s-agent-sandbox
-  config:
-    isolation: gvisor
-    warmPool: true
+    decisionTypes:
+      - mcp_tool_router
+      - severity
+      - escalation
+    fallbackBinding: harness-codex
+    policyRef: bounded-automation-default
 
 ---
 apiVersion: agentplane.io/v1alpha1
@@ -87,11 +95,11 @@ spec:
   bundleRef: sre-investigator
   version: v1
   bindings:
-    - decision-hot-path
+    - sandbox-k8s
+    - tools-observability
     - harness-codex
     - workflow-temporal
-    - tools-observability
-    - sandbox-k8s
+    - decision-hot-path
   policyRefs:
     - read-only-investigation
   evalGates:
