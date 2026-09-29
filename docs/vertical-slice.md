@@ -1,63 +1,74 @@
-# Local Vertical Slice
+# Production Golden Slice
 
-This repository now has one complete **dry-run control-plane slice**.
+The project now targets one production-shaped reference path rather than broad framework coverage.
 
 ```text
-AgentBundle
-   |
-AgentRelease
-   |
-Compile + Resolve
-   |
+Alertmanager
+    |
+    v
+Agent Gateway
+    |
+    v
+AgentRelease + Release Policy
+    |
+    v
 ResolvedReleasePlan
-   |
-Provider Registry
-   |
-   +--> Decision Gateway
-   |      low confidence -> Codex fallback
-   |
-   +--> Temporal Workflow
-   |
-   +--> MCP read-only tools
-   |
-   +--> Kubernetes Agent Sandbox
-   |
-Release Plan Evidence
-   |
-Eval phase
-   |
-Promoted (dry-run only)
+    |
+    +--> capability / conformance check
+    |
+    v
+Temporal WorkflowBinding
+    |
+    v
+OpenAI Agents HarnessBinding
+    |
+    +--> Decision Gateway
+    |      confidence gate
+    |      low confidence -> System-2 harness
+    |
+    +--> MCP read-only capability
+    |
+    +--> Kubernetes Agent Sandbox claim
+    |
+    v
+ExecutionReceipt + external_refs
+    |
+    v
+OTel trace correlation
+    |
+    v
+Evidence / Replay Metrics
+    |
+    v
+EvalGate
+    |
+    +--> promote
+    +--> manual review
+    +--> rollback
 ```
 
-## What is real
+## Control-plane ownership
 
-- portable manifests,
-- schema validation,
-- binding resolution,
-- resolved release plan,
-- provider registry,
-- provider-specific preparation plans,
-- release lifecycle,
-- evidence record for the prepared plan.
+The control plane owns release intent, binding resolution, capability requirements, policy, placement intent, evidence correlation and promotion gates.
 
-## What is intentionally mocked
+It does not own Temporal workflow history, the harness model loop, MCP transport semantics, sandbox process lifecycle, or provider-native telemetry.
 
-- network calls to Decision Gateway,
-- Codex execution,
-- Temporal workflow start,
-- MCP calls,
-- sandbox provisioning,
-- evaluation execution,
-- Kubernetes reconciliation.
+## Definition of done
 
-This boundary is deliberate. The v0.2 goal is to prove **control-plane contracts and ownership** before adding external mutation.
+The golden slice is production-shaped when:
 
-## Run
+- every mutable provider action returns an idempotent receipt,
+- canonical Run/Session/Release identity survives provider changes,
+- provider IDs remain external refs,
+- required capabilities fail closed before mutation,
+- one trace can correlate workflow, harness, decision, tool and sandbox activity,
+- replay metrics feed EvalGate,
+- rollback only compensates resources proven to be owned by the apply operation.
 
-```bash
-python examples/reconcile_vertical_slice.py
-```
+## Remaining executable work
 
-The result should end in `promoted` because dry-run treats preparation as the evaluated artifact.
-
-Real apply mode remains blocked until provider executors, deterministic policy and evidence-backed evaluation gates are implemented.
+1. run conformance checks automatically before provider apply,
+2. add async provider worker boundary,
+3. connect Alertmanager ingress to AgentRelease,
+4. execute replay from stored evidence,
+5. add integration tests against real Temporal and Agent Sandbox environments.
