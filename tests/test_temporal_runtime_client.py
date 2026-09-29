@@ -1,0 +1,54 @@
+from agent_control_plane.temporal_runtime_client import TemporalWorkflowClient
+
+
+class FakeTemporalApi:
+    def __init__(self):
+        self.workflows = {}
+        self.starts = 0
+        self.terminated = []
+
+    def describe(self, *, workflow_id):
+        return self.workflows.get(workflow_id)
+
+    def start(self, *, workflow_id, workflow_type, task_queue, input):
+        self.starts += 1
+        value = {"runId": "run-001", "status": "RUNNING"}
+        self.workflows[workflow_id] = value
+        return value
+
+    def terminate(self, *, workflow_id, reason):
+        self.terminated.append((workflow_id, reason))
+        return {"terminated": True, "workflowId": workflow_id}
+
+
+def desired():
+    return {
+        "release": "gpu-xid-remediation-v1",
+        "workflow_type": "GpuXidRemediationWorkflow",
+        "input": {"incidentId": "inc-gpu-xid-001"},
+    }
+
+
+def test_temporal_client_starts_once_and_preserves_workflow_identity():
+    api = FakeTemporalApi()
+    client = TemporalWorkflowClient(api)
+
+    first = client.ensure_workflow(desired())
+    second = client.ensure_workflow(desired())
+
+    assert first.changed is True
+    assert second.changed is False
+    assert api.starts == 1
+    assert first.evidence["workflowId"] == "agent-release/gpu-xid-remediation-v1"
+    assert second.evidence["runId"] == "run-001"
+
+
+def test_temporal_client_terminates_by_stable_workflow_identity():
+    api = FakeTemporalApi()
+    client = TemporalWorkflowClient(api)
+    result = client.ensure_workflow(desired())
+
+    terminated = client.terminate_workflow(result.resource_ref)
+
+    assert terminated["terminated"] is True
+    assert api.terminated[0][0] == "agent-release/gpu-xid-remediation-v1"
