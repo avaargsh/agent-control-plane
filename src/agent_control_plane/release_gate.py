@@ -36,10 +36,11 @@ def evaluate_release_gate(
     if evidence_required and not verify_release_evidence(evidence):
         return ReleaseGateDecision("BLOCK", False, release_ref, runtime_run_id, "INVALID_RELEASE_EVIDENCE", empty_eval)
 
+    required_provenance = set(gate.get("spec", {}).get("requiredProvenance", ()))
     operation_id = evidence.get("operation_id")
     operation_phase = evidence.get("operation_phase")
     operation_evidence_refs = evidence.get("operation_evidence_refs")
-    if evidence_required:
+    if "operation" in required_provenance:
         if not isinstance(operation_id, str) or not operation_id:
             return ReleaseGateDecision("BLOCK", False, release_ref, runtime_run_id, "MISSING_OPERATION_ID", empty_eval)
         if operation_phase != "VERIFIED":
