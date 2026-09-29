@@ -25,8 +25,8 @@
 The priority is to prove stable control-plane contracts against real runtimes before introducing CRDs.
 
 - [x] OpenAI Agents HarnessBinding contract + executor seam
-- [x] Temporal WorkflowBinding executor seam (SDK transport pending)
-- [ ] Kubernetes Agent SandboxBinding
+- [x] Temporal WorkflowBinding executor + SDK transport
+- [x] Kubernetes Agent SandboxBinding executor + SDK transport
 - [ ] stateless MCP ToolCapabilityBinding
 - [ ] agentgateway Traffic/FabricBinding
 - [ ] A2A AgentBinding
