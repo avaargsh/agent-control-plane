@@ -1,6 +1,8 @@
 from agent_control_plane.alertmanager_ingress import (
     AlertmanagerIngressError,
     compile_alertmanager_incidents,
+    materialize_incident_manifests,
+    temporal_run_request,
 )
 
 
@@ -57,3 +59,37 @@ def test_ingress_fails_closed_without_identity_fields() -> None:
         assert "groupKey" in str(exc)
     else:
         raise AssertionError("missing groupKey must fail closed")
+
+
+def test_incident_materializes_canonical_session_and_run() -> None:
+    incident = compile_alertmanager_incidents(
+        PAYLOAD,
+        release_ref="sre-v4",
+    )[0]
+
+    session, run = materialize_incident_manifests(
+        incident,
+        agent_ref="sre-investigator",
+        tenant_ref="platform",
+    )
+
+    assert session["metadata"]["id"] == incident.session_id
+    assert run["metadata"]["id"] == incident.run_id
+    assert run["spec"]["sessionRef"] == incident.session_id
+    assert run["spec"]["releaseRef"] == "sre-v4"
+    assert run["spec"]["workflowRef"] == f"temporal:{incident.run_id}"
+    assert run["spec"]["providerRefs"] == {}
+
+
+def test_temporal_request_uses_canonical_run_as_workflow_id() -> None:
+    incident = compile_alertmanager_incidents(
+        PAYLOAD,
+        release_ref="sre-v4",
+    )[0]
+
+    request = temporal_run_request(incident)
+
+    assert request["workflow_id"] == incident.run_id
+    assert request["input"]["run_id"] == incident.run_id
+    assert request["input"]["session_id"] == incident.session_id
+    assert "temporal.run_id" not in request["input"]
