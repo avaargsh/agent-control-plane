@@ -1,13 +1,110 @@
 from agent_control_plane.apply_reconciler import ApplyReconciler
 from agent_control_plane.golden_run import RecoveryGoldenRun, run_recovery_golden_slice
 
-from tests.test_apply_reconciler import (
-    PASS_GATE,
-    build_plan,
-    executor_registry,
-    provider_registry,
+from agent_control_plane.decision_adapter import DecisionGatewayAdapter
+from agent_control_plane.executors import (
+    ExecutorRegistry,
+    InMemoryExecutor,
 )
+from agent_control_plane.example_adapters import (
+    CodexHarnessAdapter,
+    KubernetesSandboxAdapter,
+    TemporalWorkflowAdapter,
+)
+from agent_control_plane.plan import ResolvedReleasePlan
+from agent_control_plane.registry import ProviderRegistry
+from agent_control_plane.tool_adapter import MCPToolAdapter
 
+
+def build_plan() -> ResolvedReleasePlan:
+    return ResolvedReleasePlan(
+        release_name="sre-v1",
+        bundle_name="sre",
+        version="v1",
+        placement={"target": "cell-b", "migrationStrategy": "drain-rebind"},
+        bindings={
+            "sandbox": {
+                "metadata": {"name": "sandbox"},
+                "spec": {
+                    "type": "sandbox",
+                    "provider": "k8s-agent-sandbox",
+                },
+            },
+            "tools": {
+                "metadata": {"name": "tools"},
+                "spec": {
+                    "type": "tool",
+                    "provider": "mcp",
+                    "dependsOn": ["sandbox"],
+                },
+            },
+            "harness": {
+                "metadata": {"name": "harness"},
+                "spec": {
+                    "type": "harness",
+                    "provider": "codex",
+                    "dependsOn": ["tools"],
+                },
+            },
+            "workflow": {
+                "metadata": {"name": "workflow"},
+                "spec": {
+                    "type": "workflow",
+                    "provider": "temporal",
+                    "dependsOn": ["harness"],
+                },
+            },
+            "decision": {
+                "metadata": {"name": "decision"},
+                "spec": {
+                    "type": "decision",
+                    "provider": "decision-gateway",
+                    "dependsOn": ["workflow"],
+                },
+            },
+        },
+    )
+
+
+def provider_registry() -> ProviderRegistry:
+    registry = ProviderRegistry()
+    registry.register(KubernetesSandboxAdapter())
+    registry.register(MCPToolAdapter())
+    registry.register(CodexHarnessAdapter())
+    registry.register(TemporalWorkflowAdapter())
+    registry.register(DecisionGatewayAdapter())
+    return registry
+
+
+def executor_registry(
+    *,
+    failing_workflow: bool = False,
+) -> ExecutorRegistry:
+    registry = ExecutorRegistry()
+
+    registry.register(
+        InMemoryExecutor("sandbox", "k8s-agent-sandbox")
+    )
+    registry.register(InMemoryExecutor("tool", "mcp"))
+    registry.register(InMemoryExecutor("harness", "codex"))
+
+    if failing_workflow:
+        class FailingWorkflowExecutor(InMemoryExecutor):
+            def apply(self, **kwargs):
+                raise RuntimeError("temporal unavailable")
+
+        registry.register(
+            FailingWorkflowExecutor("workflow", "temporal")
+        )
+    else:
+        registry.register(
+            InMemoryExecutor("workflow", "temporal")
+        )
+
+    registry.register(
+        InMemoryExecutor("decision", "decision-gateway")
+    )
+    return registry
 
 def reconciler(*, failing_workflow: bool = False) -> ApplyReconciler:
     return ApplyReconciler(
