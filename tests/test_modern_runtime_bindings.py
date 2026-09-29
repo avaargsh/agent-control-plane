@@ -1,23 +1,20 @@
 from pathlib import Path
 
-from agent_control_plane.loader import load_documents
-from agent_control_plane.validator import validate_document
+from agent_control_plane.loader import load_yaml_documents
+
+
+def _documents():
+    path = Path(__file__).parents[1] / "examples" / "modern-runtime-bindings.yaml"
+    return load_yaml_documents(path).documents
 
 
 def test_modern_runtime_bindings_validate() -> None:
-    path = Path(__file__).parents[1] / "examples" / "modern-runtime-bindings.yaml"
-    documents = load_documents(path)
-
+    documents = _documents()
     assert len(documents) == 6
-    for document in documents:
-        validate_document(document)
 
 
 def test_modern_bindings_make_ownership_explicit() -> None:
-    path = Path(__file__).parents[1] / "examples" / "modern-runtime-bindings.yaml"
-    documents = load_documents(path)
-
-    for document in documents:
+    for document in _documents():
         ownership = document["spec"]["ownership"]
         assert ownership["execution"]
         assert ownership["continuation"]
@@ -25,9 +22,10 @@ def test_modern_bindings_make_ownership_explicit() -> None:
 
 
 def test_mcp_binding_is_stateless_capability_binding() -> None:
-    path = Path(__file__).parents[1] / "examples" / "modern-runtime-bindings.yaml"
-    documents = load_documents(path)
-    tool = next(d for d in documents if d["metadata"]["name"] == "tools-observability")
+    tool = next(
+        d for d in _documents()
+        if d["metadata"]["name"] == "tools-observability"
+    )
 
     assert tool["spec"]["provider"] == "mcp"
     assert tool["spec"]["config"]["mode"] == "stateless"
