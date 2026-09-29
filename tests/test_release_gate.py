@@ -4,6 +4,7 @@ from agent_control_plane.release_gate import evaluate_release_gate
 
 GATE = {
     "spec": {
+        "suiteRef": "golden-remediation",
         "evidenceRequired": True,
         "requiredProvenance": ["operation"],
         "onFailure": "block",
