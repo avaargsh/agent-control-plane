@@ -36,6 +36,19 @@ def evaluate_release_gate(
     if evidence_required and not verify_release_evidence(evidence):
         return ReleaseGateDecision("BLOCK", False, release_ref, runtime_run_id, "INVALID_RELEASE_EVIDENCE", empty_eval)
 
+    operation_id = evidence.get("operation_id")
+    operation_phase = evidence.get("operation_phase")
+    operation_evidence_refs = evidence.get("operation_evidence_refs")
+    if evidence_required:
+        if not isinstance(operation_id, str) or not operation_id:
+            return ReleaseGateDecision("BLOCK", False, release_ref, runtime_run_id, "MISSING_OPERATION_ID", empty_eval)
+        if operation_phase != "VERIFIED":
+            return ReleaseGateDecision("BLOCK", False, release_ref, runtime_run_id, "OPERATION_NOT_VERIFIED", empty_eval)
+        if not isinstance(operation_evidence_refs, list) or not operation_evidence_refs:
+            return ReleaseGateDecision("BLOCK", False, release_ref, runtime_run_id, "MISSING_OPERATION_EVIDENCE", empty_eval)
+        if not all(isinstance(ref, str) and ref for ref in operation_evidence_refs):
+            return ReleaseGateDecision("BLOCK", False, release_ref, runtime_run_id, "INVALID_OPERATION_EVIDENCE", empty_eval)
+
     eval_result = evaluate_gate(gate, metrics)
     if not eval_result.passed:
         failure = str(gate.get("spec", {}).get("onFailure", "block")).upper().replace("-", "_")
