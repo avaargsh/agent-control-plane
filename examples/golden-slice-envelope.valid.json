@@ -1,0 +1,16 @@
+{
+  "apiVersion": "agentinfra.dev/v1alpha1",
+  "kind": "GoldenSliceEnvelope",
+  "runId": "run-golden-001",
+  "workflowId": "wf-golden-001",
+  "sandboxId": "sandbox-cell-b-002",
+  "evidenceId": "evidence-001",
+  "evidenceDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "decisionId": "decision-001",
+  "releaseId": "sre-v1",
+  "traceId": "0123456789abcdef0123456789abcdef",
+  "phase": "verifying",
+  "refs": {
+    "incident": "incident-001"
+  }
+}
