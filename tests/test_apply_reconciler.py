@@ -19,6 +19,7 @@ def build_plan() -> ResolvedReleasePlan:
         release_name="sre-v1",
         bundle_name="sre",
         version="v1",
+        placement={"target": "cell-b", "migrationStrategy": "drain-rebind"},
         bindings={
             "sandbox": {
                 "metadata": {"name": "sandbox"},
@@ -255,3 +256,21 @@ def test_missing_metric_fails_closed() -> None:
     )
 
     assert result.phase == "blocked"
+
+
+def test_apply_records_placement_migration_evidence() -> None:
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        observed_placement="cell-a",
+    )
+
+    assert result.phase == "promoted"
+    assert result.evidence["placement"] == {
+        "source": "cell-a",
+        "target": "cell-b",
+        "migrating": True,
+        "strategy": "drain-rebind",
+    }
