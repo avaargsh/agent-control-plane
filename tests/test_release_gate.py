@@ -3,6 +3,9 @@ from agent_control_plane.release_gate import evaluate_release_gate
 
 
 GATE = {
+    "apiVersion": "agentplane.io/v1alpha1",
+    "kind": "EvalGate",
+    "metadata": {"name": "golden-operation-gate"},
     "spec": {
         "suiteRef": "golden-remediation",
         "evidenceRequired": True,
@@ -122,6 +125,9 @@ def test_missing_operation_evidence_blocks_promotion():
 
 def test_evidence_required_does_not_imply_operation_provenance():
     gate = {
+        "apiVersion": "agentplane.io/v1alpha1",
+        "kind": "EvalGate",
+        "metadata": {"name": "generic-evidence-gate"},
         "spec": {
             "suiteRef": "generic-smoke",
             "evidenceRequired": True,
