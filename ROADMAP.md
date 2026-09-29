@@ -24,14 +24,14 @@
 ## v0.3 — Real runtime bindings
 The priority is to prove stable control-plane contracts against real runtimes before introducing CRDs.
 
-- [ ] OpenAI Agents HarnessBinding
-- [ ] Temporal WorkflowBinding with durable execution
+- [x] OpenAI Agents HarnessBinding contract + executor seam
+- [x] Temporal WorkflowBinding executor seam (SDK transport pending)
 - [ ] Kubernetes Agent SandboxBinding
 - [ ] stateless MCP ToolCapabilityBinding
 - [ ] agentgateway Traffic/FabricBinding
 - [ ] A2A AgentBinding
 - [x] Decision Gateway Binding
-- [ ] provider capability discovery
+- [ ] provider capability discovery / conformance handshake
 - [ ] conformance tests for provider ownership boundaries
 
 ## v0.4 — Production golden slice
