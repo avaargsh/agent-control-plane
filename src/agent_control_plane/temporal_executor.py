@@ -1,10 +1,28 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from .executors import ExecutionReceipt, RollbackReceipt
 from .plan import ResolvedReleasePlan
-from .provider_runtime import TemporalTransport
+from .provider_runtime import ExternalResource
+
+
+class TemporalTransport(Protocol):
+    def start_workflow(
+        self,
+        *,
+        workflow_type: str,
+        workflow_id: str,
+        task_queue: str,
+        input: dict[str, Any],
+    ) -> ExternalResource: ...
+
+    def terminate_workflow(
+        self,
+        *,
+        workflow_id: str,
+        reason: str,
+    ) -> dict[str, Any]: ...
 
 
 class TemporalWorkflowExecutor:
