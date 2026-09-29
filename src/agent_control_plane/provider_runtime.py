@@ -56,3 +56,26 @@ class HarnessTransport(Protocol):
         reason: str,
     ) -> dict[str, Any]:
         ...
+
+
+class SandboxTransport(Protocol):
+    """Lifecycle seam for Kubernetes Agent Sandbox or compatible providers."""
+
+    def ensure_sandbox(
+        self,
+        *,
+        claim_name: str,
+        namespace: str,
+        warm_pool: str,
+        ttl_seconds: int | None,
+        labels: dict[str, str],
+    ) -> ExternalResource:
+        ...
+
+    def delete_sandbox(
+        self,
+        *,
+        claim_name: str,
+        namespace: str,
+    ) -> dict[str, Any]:
+        ...
