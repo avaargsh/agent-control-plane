@@ -5,6 +5,28 @@ from typing import Any
 from .plan import ResolvedReleasePlan
 
 
+class OpenAIAgentsHarnessAdapter:
+    provider_type = "harness"
+    provider_name = "openai-agents"
+
+    def prepare(
+        self,
+        plan: ResolvedReleasePlan,
+        binding: dict[str, Any],
+    ) -> dict[str, Any]:
+        spec = binding.get("spec", {})
+        config = dict(spec.get("config", {}))
+        return {
+            "kind": "HarnessPlan",
+            "provider": self.provider_name,
+            "release": plan.release_name,
+            "manifest_ref": config.get("manifestRef"),
+            "capabilities": list(spec.get("capabilities", [])),
+            "ownership": dict(spec.get("ownership", {})),
+            "config": config,
+        }
+
+
 class CodexHarnessAdapter:
     provider_type = "harness"
     provider_name = "codex"
@@ -42,6 +64,15 @@ class TemporalWorkflowAdapter:
                 "workflowType",
                 "AgentRunWorkflow",
             ),
+            "task_queue": spec.get("config", {}).get(
+                "taskQueue",
+                "agent-runtime",
+            ),
+            "workflow_id": (
+                f"{plan.release_name}:"
+                f"{binding.get('metadata', {}).get('name', 'workflow')}"
+            ),
+            "ownership": dict(spec.get("ownership", {})),
         }
 
 
