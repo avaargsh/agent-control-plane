@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Portable contracts and local validation for a thin Agent control plane."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
   "jsonschema>=4.23",
   "PyYAML>=6.0",
