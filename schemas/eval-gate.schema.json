@@ -83,6 +83,16 @@
             "manual-review"
           ],
           "default": "block"
+        },
+        "requiredProvenance": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "operation"
+            ]
+          },
+          "uniqueItems": true,
+          "default": []
         }
       }
     }
