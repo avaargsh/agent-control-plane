@@ -118,7 +118,9 @@ class ApplyReconciler:
         ] | None = None,
         observed_placement: str | None = None,
         recovery_evidence: Mapping[str, Any] | None = None,
+        golden_slice: Mapping[str, Any] | None = None,
     ) -> ApplyResult:
+        golden_slice_provenance = dict(golden_slice or {})
         placement = placement_evidence(
             plan.placement,
             observed_target=observed_placement,
@@ -147,6 +149,7 @@ class ApplyReconciler:
             evidence = {
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
+                "golden_slice": golden_slice_provenance,
                 "placement": placement,
                 "recovery": recovery,
                 "policy": asdict(
@@ -178,6 +181,7 @@ class ApplyReconciler:
             evidence = {
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
+                "golden_slice": golden_slice_provenance,
                 "placement": placement,
                 "recovery": recovery,
                 "policy": asdict(policy_decision),
@@ -268,6 +272,7 @@ class ApplyReconciler:
             evidence = {
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
+                "golden_slice": golden_slice_provenance,
                 "placement": placement,
                 "recovery": recovery,
                 "policy": asdict(
@@ -368,6 +373,7 @@ class ApplyReconciler:
         evidence = {
             "kind": "ReleaseEvidence",
             "release": plan.release_name,
+            "golden_slice": golden_slice_provenance,
             "placement": placement,
             "recovery": recovery,
             "policy": asdict(
