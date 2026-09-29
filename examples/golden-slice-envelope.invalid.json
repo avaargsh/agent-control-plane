@@ -1,0 +1,9 @@
+{
+  "apiVersion": "agentinfra.dev/v1alpha1",
+  "kind": "GoldenSliceEnvelope",
+  "runId": "run-golden-001",
+  "evidenceId": "evidence-001",
+  "evidenceDigest": "mutable-digest",
+  "releaseId": "sre-v1",
+  "phase": "invented-runtime-phase"
+}
