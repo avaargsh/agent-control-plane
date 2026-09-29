@@ -6,6 +6,8 @@ A public v0.1 candidate should satisfy all of the following:
 
 - [x] deterministic Golden Incident demo
 - [x] replay-verifiable ReleaseEvidence
+- [x] release acceptance contract covers promote / block / partial rollback / recovery identity loss
+- [x] replayable Golden Slice trajectory preserves canonical identity across sandbox replacement
 - [x] explicit Kubernetes/Temporal runtime boundaries
 - [x] opt-in live smoke preflight
 - [x] kubectl and Temporal CLI transports
@@ -21,6 +23,7 @@ A public v0.1 candidate should satisfy all of the following:
 - [x] GitHub Actions runner issue documented
 - [ ] fresh-clone demo verification complete
 - [x] v0.1.0 release notes prepared
+- [x] stale pre-RC pull requests reconciled; no open pull requests remain at final RC audit
 - [ ] v0.1.0 tag/release created
 
 ## Dependency/license review
@@ -34,7 +37,7 @@ Declared direct/build/dev dependencies are intentionally small:
 
 No direct copyleft dependency was identified in the declared project metadata. Transitive dependencies should still be checked from a resolved lock/environment before a formal distribution review.
 
-The package metadata now explicitly declares `Apache-2.0` and includes `LICENSE`.
+The package metadata explicitly declares `Apache-2.0` and includes `LICENSE`.
 
 ## Open-source audit
 
@@ -44,7 +47,7 @@ Before changing repository visibility:
 2. Verify example incident IDs, node names, evidence URIs and topology names are synthetic.
 3. Ensure no production ReleaseEvidence, approval payloads or secrets are committed.
 4. Review provider names and integration examples for trademark/license concerns.
-5. Run `make demo` from a fresh clone.
+5. Run `make verify-release` from a fresh clone.
 6. Run the live smoke profile in a controlled local environment and capture the outcome outside git.
 7. Confirm README claims are limited to behavior actually exercised.
 
@@ -55,7 +58,9 @@ Current default-branch code search returned no matches for representative creden
 
 Spot checks also returned no matches for generic customer markers or known prior-employer naming. Repository-tree review confirmed README-linked `DEVELOPMENT.md` and `RELEASE_READINESS.md` exist.
 
-Recent commit metadata was reviewed for suspicious credential/private-data wording with no obvious finding. This does **not** inspect every historical blob: a local full-history scanner such as gitleaks/trufflehog remains required before repository visibility changes.
+Recent commit metadata was reviewed for suspicious credential/private-data wording with no obvious finding. This does **not** inspect every historical blob: `make audit-history` from a real clone remains required before repository visibility changes.
+
+The final RC audit reconciled stale pre-RC pull requests after preserving the release-acceptance contract and Golden Slice trajectory replay proof on main.
 
 ## Known limitations
 
