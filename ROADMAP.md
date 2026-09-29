@@ -12,44 +12,57 @@
 - [x] Decision Plane binding type
 
 ## v0.2 — Local controller
-- [x] manifest validation
-- [x] binding resolver
-- [x] multi-document manifest loader
+- [x] manifest validation and binding resolver
 - [x] resolved release plan compiler
 - [x] release state machine
-- [x] provider adapter interface / registry
-- [x] Codex harness adapter example
-- [x] Temporal workflow binding example
-- [x] Kubernetes sandbox adapter example
-- [x] Decision Gateway adapter example
-- [x] MCP Tool adapter example
-- [x] local dry-run reconciler
-- [x] executor registry / apply boundary
-- [x] execution receipts
-- [x] release evidence
-- [x] deterministic EvalGate engine
-- [x] block / manual-review / rollback semantics
-- [x] explicit binding dependency graph
-- [x] cycle / missing-dependency validation
-- [x] idempotent executor reference semantics
-- [x] reverse dependency compensation
-- [x] partial apply failure compensation
+- [x] provider adapter / executor boundary
+- [x] dependency graph, idempotency and compensation
+- [x] execution receipts and release evidence
+- [x] deterministic policy and EvalGate engine
+- [x] Decision Gateway runtime client
 
-## v0.3 — Kubernetes integration
-- [ ] optional CRDs for desired state
+## v0.3 — Real runtime bindings
+The priority is to prove stable control-plane contracts against real runtimes before introducing CRDs.
+
+- [ ] OpenAI Agents HarnessBinding
+- [ ] Temporal WorkflowBinding with durable execution
+- [ ] Kubernetes Agent SandboxBinding
+- [ ] stateless MCP ToolCapabilityBinding
+- [ ] agentgateway Traffic/FabricBinding
+- [ ] A2A AgentBinding
+- [x] Decision Gateway Binding
+- [ ] provider capability discovery
+- [ ] conformance tests for provider ownership boundaries
+
+## v0.4 — Production golden slice
+- [ ] Alertmanager -> AgentRelease ingress
+- [ ] Temporal -> harness -> decision -> MCP -> sandbox execution
+- [ ] canonical Run identity propagated to provider external refs
+- [ ] OTel trace/evidence correlation
+- [ ] replay executor
+- [ ] evidence-backed EvalGate
+- [ ] promote / manual-review / rollback demonstration
+
+## v0.5 — Kubernetes control plane
+Only stable desired-state contracts become Kubernetes APIs.
+
+- [ ] optional AgentRelease / AgentBinding CRDs
 - [ ] reconciliation loop
 - [ ] placement adapter
 - [ ] rollout / canary controller
 - [ ] policy integration
 - [ ] dependency-aware Kubernetes apply
 
-## v0.4 — Production slice
-- [ ] Alertmanager -> AgentRelease
-- [ ] real Temporal durable workflow execution
-- [x] Decision Gateway runtime client
-- [x] MCP read-tool binding contract
-- [x] isolated sandbox binding contract
-- [x] evidence contract + local evidence
-- [x] eval gate contract + local evaluator
-- [ ] replay executor
-- [ ] real provider-specific executors
+## v0.6 — Multi-agent federation
+- [ ] execution / continuation / context ownership model
+- [ ] A2A interoperability
+- [ ] agentgateway routing and policy
+- [ ] cross-agent canonical identity
+- [ ] distributed evidence correlation
+
+## Explicit non-goals
+- building another agent framework
+- implementing a durable workflow engine
+- implementing a sandbox runtime
+- owning MCP or A2A wire protocols
+- storing high-frequency runtime state in CRDs
