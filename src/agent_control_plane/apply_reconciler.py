@@ -224,6 +224,7 @@ class ApplyReconciler:
             evidence = {
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
+                "placement": placement,
                 "policy": asdict(
                     policy_decision
                 ),
