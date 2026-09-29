@@ -10,14 +10,16 @@ A public v0.1 candidate should satisfy all of the following:
 - [x] opt-in live smoke preflight
 - [x] kubectl and Temporal CLI transports
 - [x] known limitations documented
-- [ ] repository license selected and added
-- [ ] CONTRIBUTING.md added
+- [x] repository license selected and added (Apache-2.0)
+- [x] CONTRIBUTING.md added
 - [ ] public README links/screenshots checked
-- [ ] secret/token scan clean
-- [ ] private/customer identifiers review complete
+- [x] current-tree secret/token pattern scan clean
+- [x] current-tree private/customer identifier spot-check clean
+- [ ] full git-history secret/private-data scan complete
 - [ ] dependency/license review complete
 - [ ] live kind/minikube + Temporal smoke exercised and documented
-- [ ] GitHub Actions runner issue resolved or documented
+- [x] GitHub Actions runner issue documented
+- [ ] fresh-clone demo verification complete
 - [ ] v0.1.0 tag/release notes prepared
 
 ## Open-source audit
@@ -28,10 +30,19 @@ Before changing repository visibility:
 2. Verify example incident IDs, node names, evidence URIs and topology names are synthetic.
 3. Ensure no production ReleaseEvidence, approval payloads or secrets are committed.
 4. Review provider names and integration examples for trademark/license concerns.
-5. Choose a license deliberately; do not publish with no license.
-6. Run `make demo` from a fresh clone.
-7. Run the live smoke profile in a controlled local environment and capture the outcome outside git.
-8. Confirm README claims are limited to behavior actually exercised.
+5. Run `make demo` from a fresh clone.
+6. Run the live smoke profile in a controlled local environment and capture the outcome outside git.
+7. Confirm README claims are limited to behavior actually exercised.
+
+### Audit performed in this hardening pass
+
+Current default-branch code search returned no matches for representative credential patterns:
+
+`BEGIN PRIVATE KEY`, `AKIA`, `ghp_`, `sk-`, `api_key`, `Bearer`, `ssh-rsa`, `password`.
+
+Spot checks also returned no matches for generic customer markers or known prior-employer naming.
+
+This is a current-tree search only. It does **not** prove that unreachable/old git history is clean. A local full-history scanner such as gitleaks/trufflehog remains required before repository visibility changes.
 
 ## Known limitations
 
