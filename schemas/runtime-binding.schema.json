@@ -6,20 +6,12 @@
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "metadata", "spec"],
   "properties": {
-    "apiVersion": {
-      "const": "agentplane.io/v1alpha1"
-    },
-    "kind": {
-      "const": "RuntimeBinding"
-    },
+    "apiVersion": {"const": "agentplane.io/v1alpha1"},
+    "kind": {"const": "RuntimeBinding"},
     "metadata": {
       "type": "object",
       "required": ["name"],
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      },
+      "properties": {"name": {"type": "string", "minLength": 1}},
       "additionalProperties": false
     },
     "spec": {
@@ -29,40 +21,35 @@
       "properties": {
         "type": {
           "enum": [
-            "harness",
-            "workflow",
-            "context",
-            "memory",
-            "sandbox",
-            "tool",
-            "traffic",
-            "model",
-            "decision"
+            "harness", "workflow", "context", "memory", "sandbox",
+            "tool", "traffic", "model", "decision", "agent"
           ]
         },
-        "provider": {
-          "type": "string"
-        },
-        "endpointRef": {
-          "type": "string"
-        },
+        "provider": {"type": "string", "minLength": 1},
+        "endpointRef": {"type": "string"},
         "dependsOn": {
           "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
+          "items": {"type": "string", "minLength": 1},
           "uniqueItems": true
         },
-        "config": {
-          "type": "object",
-          "additionalProperties": true
+        "capabilities": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
         },
+        "ownership": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "execution": {"enum": ["caller", "provider", "target", "distributed"]},
+            "continuation": {"enum": ["caller", "provider", "target", "distributed"]},
+            "context": {"enum": ["caller", "provider", "target", "shared", "projected"]}
+          }
+        },
+        "config": {"type": "object", "additionalProperties": true},
         "secretRefs": {
           "type": "array",
-          "items": {
-            "type": "string"
-          },
+          "items": {"type": "string"},
           "uniqueItems": true
         }
       }
