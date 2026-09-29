@@ -17,6 +17,7 @@ from .policy_engine import (
     ReleasePolicyEngine,
 )
 from .registry import ProviderRegistry
+from .recovery import normalize_recovery_evidence
 from .state_machine import ReleasePhase, ReleaseState
 
 
@@ -116,10 +117,14 @@ class ApplyReconciler:
             float,
         ] | None = None,
         observed_placement: str | None = None,
+        recovery_evidence: Mapping[str, Any] | None = None,
     ) -> ApplyResult:
         placement = placement_evidence(
             plan.placement,
             observed_target=observed_placement,
+        )
+        recovery, recovery_metrics = normalize_recovery_evidence(
+            recovery_evidence
         )
         state = ReleaseState(
             plan.release_name
@@ -143,6 +148,7 @@ class ApplyReconciler:
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
                 "placement": placement,
+                "recovery": recovery,
                 "policy": asdict(
                     policy_decision
                 ),
@@ -225,6 +231,7 @@ class ApplyReconciler:
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
                 "placement": placement,
+                "recovery": recovery,
                 "policy": asdict(
                     policy_decision
                 ),
@@ -267,7 +274,7 @@ class ApplyReconciler:
         eval_results = tuple(
             evaluate_gate(
                 gate,
-                metrics or {},
+                {**(metrics or {}), **recovery_metrics},
             )
             for gate in eval_gates
         )
@@ -324,6 +331,7 @@ class ApplyReconciler:
             "kind": "ReleaseEvidence",
             "release": plan.release_name,
             "placement": placement,
+            "recovery": recovery,
             "policy": asdict(
                 policy_decision
             ),
