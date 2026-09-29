@@ -45,7 +45,7 @@ def test_registry_prepares_provider_plans() -> None:
 
     assert prepared["harness"]["provider"] == "codex"
     assert prepared["workflow"]["provider"] == "temporal"
-    assert prepared["sandbox"]["warm_pool"] is True
+    assert prepared["sandbox"]["warm_pool"] == "default"
 
 
 def test_unknown_provider_fails() -> None:
