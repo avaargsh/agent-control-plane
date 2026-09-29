@@ -188,7 +188,7 @@ class ApplyReconciler:
         }
         if incompatible:
             state.transition(ReleasePhase.BLOCKED)
-            evidence = {
+            evidence = seal_release_evidence({
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
                 "golden_slice": golden_slice_provenance,
@@ -203,7 +203,7 @@ class ApplyReconciler:
                 "rollback_receipts": [],
                 "eval_results": [],
                 "phase": state.phase.value,
-            }
+            })
             missing = "; ".join(
                 f"{name}: {','.join(result.missing)}"
                 for name, result in incompatible.items()
@@ -279,7 +279,7 @@ class ApplyReconciler:
                 ReleasePhase.ROLLED_BACK
             )
 
-            evidence = {
+            evidence = seal_release_evidence({
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
                 "golden_slice": golden_slice_provenance,
@@ -303,7 +303,7 @@ class ApplyReconciler:
                 "eval_results": [],
                 "phase": state.phase.value,
                 "apply_error": str(exc),
-            }
+            })
 
             return ApplyResult(
                 release_name=plan.release_name,
