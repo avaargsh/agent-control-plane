@@ -11,6 +11,7 @@ from .executors import (
     RollbackReceipt,
 )
 from .plan import ResolvedReleasePlan
+from .placement import placement_evidence
 from .policy_engine import (
     PolicyDecision,
     ReleasePolicyEngine,
@@ -114,7 +115,12 @@ class ApplyReconciler:
             str,
             float,
         ] | None = None,
+        observed_placement: str | None = None,
     ) -> ApplyResult:
+        placement = placement_evidence(
+            plan.placement,
+            observed_target=observed_placement,
+        )
         state = ReleaseState(
             plan.release_name
         )
@@ -136,6 +142,7 @@ class ApplyReconciler:
             evidence = {
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
+                "placement": placement,
                 "policy": asdict(
                     policy_decision
                 ),
@@ -217,6 +224,7 @@ class ApplyReconciler:
             evidence = {
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
+                "placement": placement,
                 "policy": asdict(
                     policy_decision
                 ),
@@ -315,6 +323,7 @@ class ApplyReconciler:
         evidence = {
             "kind": "ReleaseEvidence",
             "release": plan.release_name,
+            "placement": placement,
             "policy": asdict(
                 policy_decision
             ),
