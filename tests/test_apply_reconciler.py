@@ -330,3 +330,47 @@ def test_failed_recovery_rolls_back_release() -> None:
 
     assert result.phase == "rolled_back"
     assert result.eval_results[0].passed is False
+
+
+def test_provider_feature_mismatch_blocks_before_mutation() -> None:
+    plan = build_plan()
+    plan.bindings["workflow"]["spec"]["requires"] = {
+        "features": ["durable-execution"]
+    }
+
+    class CountingExecutor(InMemoryExecutor):
+        calls = 0
+
+        def apply(self, **kwargs):
+            type(self).calls += 1
+            return super().apply(**kwargs)
+
+    executors = ExecutorRegistry()
+    for provider_type, provider_name in [
+        ("sandbox", "k8s-agent-sandbox"),
+        ("tool", "mcp"),
+        ("harness", "codex"),
+        ("workflow", "temporal"),
+        ("decision", "decision-gateway"),
+    ]:
+        executors.register(CountingExecutor(provider_type, provider_name))
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executors,
+    ).reconcile(plan)
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert CountingExecutor.calls == 0
+    assert "workflow: durable-execution" in result.error
+
+
+def test_bindings_without_provider_feature_requirements_remain_compatible() -> None:
+    plan = build_plan()
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(plan)
+
+    assert result.phase == "promoted"

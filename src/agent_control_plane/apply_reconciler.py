@@ -167,6 +167,44 @@ class ApplyReconciler:
                 policy_decision=policy_decision,
             )
 
+        conformance = self.providers.conformance(plan)
+        incompatible = {
+            name: result
+            for name, result in conformance.items()
+            if not result.compatible
+        }
+        if incompatible:
+            state.transition(ReleasePhase.BLOCKED)
+            evidence = {
+                "kind": "ReleaseEvidence",
+                "release": plan.release_name,
+                "placement": placement,
+                "recovery": recovery,
+                "policy": asdict(policy_decision),
+                "conformance": {
+                    name: asdict(result)
+                    for name, result in conformance.items()
+                },
+                "receipts": [],
+                "rollback_receipts": [],
+                "eval_results": [],
+                "phase": state.phase.value,
+            }
+            missing = "; ".join(
+                f"{name}: {','.join(result.missing)}"
+                for name, result in incompatible.items()
+            )
+            return ApplyResult(
+                release_name=plan.release_name,
+                phase=state.phase.value,
+                receipts=(),
+                rollback_receipts=(),
+                eval_results=(),
+                evidence=evidence,
+                policy_decision=policy_decision,
+                error=f"provider feature mismatch: {missing}",
+            )
+
         prepared = self.providers.prepare(
             plan
         )
