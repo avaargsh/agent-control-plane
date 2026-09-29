@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Sequence
 
 from .dependency_graph import dependency_order
+from .golden_slice_replay import freeze_json_mapping
+from .frozen_evidence import FrozenEvidence, resume_from_frozen_evidence
 from .eval_engine import EvalResult, evaluate_gate
 from .executors import (
     ExecutionReceipt,
@@ -18,6 +20,7 @@ from .policy_engine import (
 )
 from .registry import ProviderRegistry
 from .recovery import normalize_recovery_evidence
+from .release_evidence import seal_release_evidence
 from .state_machine import ReleasePhase, ReleaseState
 
 
@@ -119,8 +122,15 @@ class ApplyReconciler:
         observed_placement: str | None = None,
         recovery_evidence: Mapping[str, Any] | None = None,
         golden_slice: Mapping[str, Any] | None = None,
+        approved_evidence: FrozenEvidence | None = None,
     ) -> ApplyResult:
-        golden_slice_provenance = dict(golden_slice or {})
+        if approved_evidence is not None:
+            golden_slice_provenance = resume_from_frozen_evidence(
+                approved_evidence,
+                continuation=freeze_json_mapping,
+            )
+        else:
+            golden_slice_provenance = freeze_json_mapping(golden_slice or {})
         placement = placement_evidence(
             plan.placement,
             observed_target=observed_placement,
@@ -146,7 +156,7 @@ class ApplyReconciler:
             state.transition(
                 ReleasePhase.BLOCKED
             )
-            evidence = {
+            evidence = seal_release_evidence({
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
                 "golden_slice": golden_slice_provenance,
@@ -159,7 +169,7 @@ class ApplyReconciler:
                 "rollback_receipts": [],
                 "eval_results": [],
                 "phase": state.phase.value,
-            }
+            })
             return ApplyResult(
                 release_name=plan.release_name,
                 phase=state.phase.value,
@@ -178,7 +188,7 @@ class ApplyReconciler:
         }
         if incompatible:
             state.transition(ReleasePhase.BLOCKED)
-            evidence = {
+            evidence = seal_release_evidence({
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
                 "golden_slice": golden_slice_provenance,
@@ -193,7 +203,7 @@ class ApplyReconciler:
                 "rollback_receipts": [],
                 "eval_results": [],
                 "phase": state.phase.value,
-            }
+            })
             missing = "; ".join(
                 f"{name}: {','.join(result.missing)}"
                 for name, result in incompatible.items()
@@ -269,7 +279,7 @@ class ApplyReconciler:
                 ReleasePhase.ROLLED_BACK
             )
 
-            evidence = {
+            evidence = seal_release_evidence({
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
                 "golden_slice": golden_slice_provenance,
@@ -293,7 +303,7 @@ class ApplyReconciler:
                 "eval_results": [],
                 "phase": state.phase.value,
                 "apply_error": str(exc),
-            }
+            })
 
             return ApplyResult(
                 release_name=plan.release_name,
@@ -370,7 +380,7 @@ class ApplyReconciler:
                     ReleasePhase.BLOCKED
                 )
 
-        evidence = {
+        evidence = seal_release_evidence({
             "kind": "ReleaseEvidence",
             "release": plan.release_name,
             "golden_slice": golden_slice_provenance,
@@ -417,7 +427,7 @@ class ApplyReconciler:
                 )
             ],
             "phase": state.phase.value,
-        }
+        })
 
         return ApplyResult(
             release_name=plan.release_name,
