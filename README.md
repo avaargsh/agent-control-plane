@@ -60,4 +60,6 @@ Alertmanager
 
 ## Status
 
-Private incubation repository. Initial work is documentation-first: contracts, schemas, adapters and one complete vertical slice before broad feature work.
+Private incubation repository. The v0.2 local controller is implemented and covered by unit/contract CI: manifest validation, binding resolution, release planning/state transitions, provider adapter registry, apply/compensation semantics, release evidence and deterministic EvalGate behavior.
+
+The repository remains private while the v0.3/v0.4 production slice is hardened. Public release is intentionally deferred until the project has a repeatable end-to-end acceptance path rather than a collection of partial demos.
