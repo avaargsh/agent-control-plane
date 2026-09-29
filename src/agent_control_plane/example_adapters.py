@@ -33,15 +33,19 @@ class TemporalWorkflowAdapter:
         binding: dict[str, Any],
     ) -> dict[str, Any]:
         spec = binding.get("spec", {})
+        config = dict(spec.get("config", {}))
+        binding_name = binding["metadata"]["name"]
         return {
             "kind": "WorkflowPlan",
             "provider": self.provider_name,
             "release": plan.release_name,
             "endpointRef": spec.get("endpointRef"),
-            "workflow_type": spec.get("config", {}).get(
-                "workflowType",
-                "AgentRunWorkflow",
+            "workflow_type": config.get("workflowType", "AgentRunWorkflow"),
+            "workflow_id": config.get(
+                "workflowId",
+                f"{plan.release_name}-{binding_name}",
             ),
+            "task_queue": config.get("taskQueue", "agent-runtime"),
         }
 
 
