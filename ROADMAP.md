@@ -32,7 +32,7 @@ The priority is to prove stable control-plane contracts against real runtimes be
 - [ ] A2A AgentBinding
 - [x] Decision Gateway Binding
 - [x] provider capability discovery / conformance contract
-- [ ] enforce conformance before provider mutation
+- [x] enforce conformance before provider mutation
 - [ ] conformance tests for provider ownership boundaries
 
 ## v0.4 — Production golden slice
