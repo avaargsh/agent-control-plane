@@ -5,6 +5,7 @@ from typing import Any, Mapping, Sequence
 
 from .dependency_graph import dependency_order
 from .golden_slice_replay import freeze_json_mapping
+from .frozen_evidence import FrozenEvidence, resume_from_frozen_evidence
 from .eval_engine import EvalResult, evaluate_gate
 from .executors import (
     ExecutionReceipt,
@@ -120,8 +121,15 @@ class ApplyReconciler:
         observed_placement: str | None = None,
         recovery_evidence: Mapping[str, Any] | None = None,
         golden_slice: Mapping[str, Any] | None = None,
+        approved_evidence: FrozenEvidence | None = None,
     ) -> ApplyResult:
-        golden_slice_provenance = freeze_json_mapping(golden_slice or {})
+        if approved_evidence is not None:
+            golden_slice_provenance = resume_from_frozen_evidence(
+                approved_evidence,
+                continuation=freeze_json_mapping,
+            )
+        else:
+            golden_slice_provenance = freeze_json_mapping(golden_slice or {})
         placement = placement_evidence(
             plan.placement,
             observed_target=observed_placement,
