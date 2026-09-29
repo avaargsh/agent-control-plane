@@ -122,6 +122,7 @@ def test_missing_operation_evidence_blocks_promotion():
 def test_evidence_required_does_not_imply_operation_provenance():
     gate = {
         "spec": {
+            "suiteRef": "generic-smoke",
             "evidenceRequired": True,
             "onFailure": "block",
             "conditions": [
