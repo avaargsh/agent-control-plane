@@ -31,14 +31,15 @@ The priority is to prove stable control-plane contracts against real runtimes be
 - [ ] agentgateway Traffic/FabricBinding
 - [ ] A2A AgentBinding
 - [x] Decision Gateway Binding
-- [ ] provider capability discovery / conformance handshake
+- [x] provider capability discovery / conformance contract
+- [ ] enforce conformance before provider mutation
 - [ ] conformance tests for provider ownership boundaries
 
 ## v0.4 — Production golden slice
 - [ ] Alertmanager -> AgentRelease ingress
 - [ ] Temporal -> harness -> decision -> MCP -> sandbox execution
 - [ ] canonical Run identity propagated to provider external refs
-- [ ] OTel trace/evidence correlation
+- [x] OTel trace/evidence correlation contract
 - [ ] replay executor
 - [ ] evidence-backed EvalGate
 - [ ] promote / manual-review / rollback demonstration
