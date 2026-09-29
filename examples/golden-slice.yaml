@@ -1,4 +1,10 @@
-# Conceptual example. Provider-specific extensions intentionally remain opaque.
+# Conceptual reference for the Golden Slice.
+#
+# This file intentionally uses a grouped, human-readable shape rather than the
+# canonical multi-document manifest stream consumed by `agent-control-plane
+# validate`. Use `examples/vertical-slice.yaml` for an executable contract
+# example. Keeping the distinction explicit prevents conceptual documentation
+# from masquerading as deployable desired state.
 bundle:
   apiVersion: agentplane.io/v1alpha1
   kind: AgentBundle
