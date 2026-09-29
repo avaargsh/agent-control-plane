@@ -274,3 +274,59 @@ def test_apply_records_placement_migration_evidence() -> None:
         "migrating": True,
         "strategy": "drain-rebind",
     }
+
+
+RECOVERY_GATE = {
+    "spec": {
+        "conditions": [
+            {
+                "metric": "recovery_success",
+                "op": "eq",
+                "value": 1.0,
+            },
+            {
+                "metric": "recovery_identity_preserved",
+                "op": "eq",
+                "value": 1.0,
+            },
+        ],
+        "onFailure": "rollback",
+    }
+}
+
+
+def test_recovery_evidence_feeds_eval_gate() -> None:
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        eval_gates=[RECOVERY_GATE],
+        recovery_evidence={
+            "success": True,
+            "identityPreserved": True,
+            "sourceSandboxRef": "sandbox://cell-a/old",
+            "targetSandboxRef": "sandbox://cell-b/new",
+            "snapshotRef": "snapshot://old",
+        },
+    )
+
+    assert result.phase == "promoted"
+    assert result.evidence["recovery"]["identityPreserved"] is True
+
+
+def test_failed_recovery_rolls_back_release() -> None:
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        eval_gates=[RECOVERY_GATE],
+        recovery_evidence={
+            "success": False,
+            "identityPreserved": True,
+        },
+    )
+
+    assert result.phase == "rolled_back"
+    assert result.eval_results[0].passed is False
