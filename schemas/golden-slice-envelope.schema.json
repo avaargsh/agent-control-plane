@@ -8,8 +8,7 @@
     "apiVersion",
     "kind",
     "runId",
-    "evidenceId",
-    "releaseId"
+    "phase"
   ],
   "properties": {
     "apiVersion": {
@@ -70,5 +69,83 @@
       "minLength": 1,
       "maxLength": 256
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": [
+              "evidence_frozen",
+              "decided",
+              "approval_pending",
+              "executing",
+              "verifying",
+              "promoted",
+              "blocked",
+              "rolled_back"
+            ]
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "required": [
+          "evidenceId",
+          "evidenceDigest"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": [
+              "decided",
+              "approval_pending",
+              "executing",
+              "verifying",
+              "promoted",
+              "blocked",
+              "rolled_back"
+            ]
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "required": [
+          "decisionId"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": [
+              "executing",
+              "verifying",
+              "promoted",
+              "blocked",
+              "rolled_back"
+            ]
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "required": [
+          "releaseId",
+          "workflowId"
+        ]
+      }
+    }
+  ]
 }
