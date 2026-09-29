@@ -34,6 +34,7 @@
       "additionalProperties": false,
       "required": [
         "sessionRef",
+        "releaseRef",
         "status"
       ],
       "properties": {
@@ -70,6 +71,18 @@
             "type": "string"
           },
           "uniqueItems": true
+        },
+        "releaseRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workflowRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sandboxRef": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }
