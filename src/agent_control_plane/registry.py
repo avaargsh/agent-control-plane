@@ -4,6 +4,7 @@ from typing import Any
 
 from .plan import ResolvedReleasePlan
 from .providers import ProviderAdapter
+from .capabilities import ProviderDescriptor, check_conformance
 
 
 class ProviderRegistry:
@@ -22,6 +23,23 @@ class ProviderRegistry:
             return self._adapters[key]
         except KeyError as exc:
             raise KeyError(f"no provider adapter registered for {key}") from exc
+
+    def conformance(self, plan: ResolvedReleasePlan) -> dict[str, object]:
+        results = {}
+        for binding_name, binding in plan.bindings.items():
+            spec = binding["spec"]
+            adapter = self.get(spec["type"], spec["provider"])
+            provider = ProviderDescriptor(
+                provider_type=spec["type"],
+                provider_name=spec["provider"],
+                features=frozenset(getattr(adapter, "features", ())),
+            )
+            required = spec.get("requires", {}).get("features", ())
+            results[binding_name] = check_conformance(
+                required=required,
+                provider=provider,
+            )
+        return results
 
     def prepare(self, plan: ResolvedReleasePlan) -> dict[str, dict[str, Any]]:
         prepared: dict[str, dict[str, Any]] = {}
