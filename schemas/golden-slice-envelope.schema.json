@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-control-plane.dev/schemas/golden-slice-envelope.schema.json",
+  "title": "GoldenSliceEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "runId",
+    "phase"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "agentinfra.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "GoldenSliceEnvelope"
+    },
+    "runId": {
+      "$ref": "#/$defs/id"
+    },
+    "workflowId": {
+      "$ref": "#/$defs/id"
+    },
+    "sandboxId": {
+      "$ref": "#/$defs/id"
+    },
+    "evidenceId": {
+      "$ref": "#/$defs/id"
+    },
+    "decisionId": {
+      "$ref": "#/$defs/id"
+    },
+    "releaseId": {
+      "$ref": "#/$defs/id"
+    },
+    "traceId": {
+      "$ref": "#/$defs/id"
+    },
+    "evidenceDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-fA-F0-9]{64}$"
+    },
+    "phase": {
+      "enum": [
+        "observed",
+        "evidence_frozen",
+        "decided",
+        "approval_pending",
+        "executing",
+        "verifying",
+        "promoted",
+        "blocked",
+        "rolled_back"
+      ]
+    },
+    "refs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": [
+              "evidence_frozen",
+              "decided",
+              "approval_pending",
+              "executing",
+              "verifying",
+              "promoted",
+              "blocked",
+              "rolled_back"
+            ]
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "required": [
+          "evidenceId",
+          "evidenceDigest"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": [
+              "decided",
+              "approval_pending",
+              "executing",
+              "verifying",
+              "promoted",
+              "blocked",
+              "rolled_back"
+            ]
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "required": [
+          "decisionId"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": [
+              "executing",
+              "verifying",
+              "promoted",
+              "blocked",
+              "rolled_back"
+            ]
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "required": [
+          "releaseId",
+          "workflowId"
+        ]
+      }
+    }
+  ]
+}
