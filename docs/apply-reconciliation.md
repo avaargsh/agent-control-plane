@@ -37,21 +37,16 @@ It should be safe to:
 
 This separation prevents validation code from silently creating external resources.
 
-## Deterministic execution order
+## Dependency-driven execution order
 
-The local reconciler currently applies bindings in a deterministic type order:
+Bindings are applied in the explicit dependency order produced by the resolved
+release graph. There is no semantic global ordering by binding type.
 
-1. sandbox
-2. tool
-3. model
-4. context
-5. memory
-6. harness
-7. workflow
-8. decision
-9. traffic
+This matters for ownership: the control plane coordinates declared release
+dependencies, but it does not infer business workflow sequencing from labels
+such as `workflow`, `sandbox`, `tool`, or `harness`.
 
-This is a bootstrap rule, not a final dependency model. A later release graph should express explicit dependencies.
+Missing dependencies and dependency cycles fail closed before provider mutation.
 
 ## Promotion
 
