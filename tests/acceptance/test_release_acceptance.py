@@ -1,7 +1,7 @@
 from agent_control_plane.apply_reconciler import ApplyReconciler
 from agent_control_plane.golden_run import RecoveryGoldenRun, run_recovery_golden_slice
 
-from test_apply_reconciler import (
+from tests.test_apply_reconciler import (
     PASS_GATE,
     build_plan,
     executor_registry,
