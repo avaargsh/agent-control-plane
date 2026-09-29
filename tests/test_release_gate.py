@@ -5,6 +5,7 @@ from agent_control_plane.release_gate import evaluate_release_gate
 GATE = {
     "spec": {
         "evidenceRequired": True,
+        "requiredProvenance": ["operation"],
         "onFailure": "block",
         "conditions": [
             {"metric": "recovery_success_rate", "op": "gte", "value": 1.0},
@@ -116,3 +117,29 @@ def test_missing_operation_evidence_blocks_promotion():
         sealed,
     )
     assert result.reason == "MISSING_OPERATION_EVIDENCE"
+
+
+def test_evidence_required_does_not_imply_operation_provenance():
+    gate = {
+        "spec": {
+            "evidenceRequired": True,
+            "onFailure": "block",
+            "conditions": [
+                {"metric": "recovery_success_rate", "op": "gte", "value": 1.0},
+            ],
+        }
+    }
+    sealed = seal_release_evidence({
+        "release_ref": "generic-release-v1",
+        "runtime_run_id": "run-generic",
+        "bundle_sha256": "abc",
+        "remediation_status": "VERIFIED",
+        "post_action_ref": "artifact://run-generic/post-action-evidence.json",
+    })
+    result = evaluate_release_gate(
+        gate,
+        {"recovery_success_rate": 1.0},
+        sealed,
+    )
+    assert result.passed is True
+    assert result.decision == "PROMOTE"
