@@ -74,3 +74,64 @@ def compile_alertmanager_incidents(
         )
 
     return tuple(compiled)
+
+
+def materialize_incident_manifests(
+    incident: IncidentIngress,
+    *,
+    agent_ref: str,
+    tenant_ref: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Materialize canonical desired-state Session and Run documents.
+
+    The Temporal workflow id is derived from the canonical run id, while the
+    provider's own execution/run id is populated later in spec.providerRefs.
+    """
+    session = {
+        "apiVersion": "agentplane.io/v1alpha1",
+        "kind": "Session",
+        "metadata": {"id": incident.session_id},
+        "spec": {
+            "agentRef": agent_ref,
+            "releaseRef": incident.release_ref,
+            "tenantRef": tenant_ref,
+            "providerRefs": {},
+            "stateRefs": [],
+        },
+    }
+    run = {
+        "apiVersion": "agentplane.io/v1alpha1",
+        "kind": "Run",
+        "metadata": {"id": incident.run_id},
+        "spec": {
+            "sessionRef": incident.session_id,
+            "releaseRef": incident.release_ref,
+            "status": "created",
+            "providerRefs": {},
+            "artifactRefs": [],
+            "evidenceRefs": [],
+            "workflowRef": f"temporal:{incident.run_id}",
+        },
+    }
+    return session, run
+
+
+def temporal_run_request(
+    incident: IncidentIngress,
+    *,
+    workflow_type: str = "IncidentRunWorkflow",
+    task_queue: str = "agent-runtime",
+) -> dict[str, Any]:
+    """Build the provider request without making provider IDs canonical."""
+    return {
+        "workflow_type": workflow_type,
+        "workflow_id": incident.run_id,
+        "task_queue": task_queue,
+        "input": {
+            "release": incident.release_ref,
+            "session_id": incident.session_id,
+            "run_id": incident.run_id,
+            "incident_key": incident.incident_key,
+            "alert": dict(incident.payload),
+        },
+    }
