@@ -289,3 +289,37 @@ def test_capability_mismatch_blocks_before_any_mutation() -> None:
     assert CountingExecutor.calls == 0
     assert "workflow: durable,signal" in result.error
     assert result.evidence["conformance"]["workflow"]["compatible"] is False
+
+
+def test_capability_mismatch_blocks_before_any_mutation() -> None:
+    plan = build_plan()
+    plan.bindings["workflow"]["spec"]["capabilities"] = ["durable", "signal"]
+
+    class CountingExecutor(InMemoryExecutor):
+        calls = 0
+
+        def apply(self, **kwargs):
+            type(self).calls += 1
+            return super().apply(**kwargs)
+
+    executors = ExecutorRegistry()
+    for provider_type, provider_name in [
+        ("sandbox", "k8s-agent-sandbox"),
+        ("tool", "mcp"),
+        ("harness", "codex"),
+        ("workflow", "temporal"),
+        ("decision", "decision-gateway"),
+    ]:
+        executors.register(CountingExecutor(provider_type, provider_name))
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executors,
+    ).reconcile(plan)
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.rollback_receipts == ()
+    assert CountingExecutor.calls == 0
+    assert "workflow: durable,signal" in result.error
+    assert result.evidence["conformance"]["workflow"]["compatible"] is False
