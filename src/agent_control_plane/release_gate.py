@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Mapping
+
+from .eval_engine import EvalResult, evaluate_gate
+from .release_evidence import verify_release_evidence
+
+
+@dataclass(frozen=True)
+class ReleaseGateDecision:
+    decision: str
+    passed: bool
+    release_ref: str | None
+    runtime_run_id: str | None
+    reason: str
+    eval_result: EvalResult
+
+
+def evaluate_release_gate(
+    gate: Mapping[str, Any],
+    metrics: Mapping[str, float],
+    evidence: Mapping[str, Any],
+) -> ReleaseGateDecision:
+    """Fail-closed promotion decision over metrics + sealed runtime evidence."""
+    release_ref = evidence.get("release_ref")
+    runtime_run_id = evidence.get("runtime_run_id")
+    empty_eval = EvalResult(False, ())
+
+    if not isinstance(release_ref, str) or not release_ref:
+        return ReleaseGateDecision("BLOCK", False, None, runtime_run_id if isinstance(runtime_run_id, str) else None, "MISSING_RELEASE_REF", empty_eval)
+    if not isinstance(runtime_run_id, str) or not runtime_run_id:
+        return ReleaseGateDecision("BLOCK", False, release_ref, None, "MISSING_RUNTIME_RUN_ID", empty_eval)
+
+    evidence_required = bool(gate.get("spec", {}).get("evidenceRequired", True))
+    if evidence_required and not verify_release_evidence(evidence):
+        return ReleaseGateDecision("BLOCK", False, release_ref, runtime_run_id, "INVALID_RELEASE_EVIDENCE", empty_eval)
+
+    eval_result = evaluate_gate(gate, metrics)
+    if not eval_result.passed:
+        failure = str(gate.get("spec", {}).get("onFailure", "block")).upper().replace("-", "_")
+        return ReleaseGateDecision(failure, False, release_ref, runtime_run_id, "EVAL_GATE_FAILED", eval_result)
+
+    return ReleaseGateDecision("PROMOTE", True, release_ref, runtime_run_id, "EVAL_GATE_PASSED", eval_result)
