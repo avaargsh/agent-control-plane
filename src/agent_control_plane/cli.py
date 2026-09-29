@@ -8,6 +8,7 @@ from pathlib import Path
 from .compiler import compile_release_plan
 from .eval_engine import evaluate_gate
 from .loader import load_yaml_documents
+from .release_gate import evaluate_release_gate
 
 
 def _load_metric_map(
@@ -52,6 +53,10 @@ def main() -> None:
         "--metrics",
         required=True,
     )
+    gate.add_argument(
+        "--evidence",
+        required=False,
+    )
 
     args = parser.parse_args()
 
@@ -78,12 +83,21 @@ def main() -> None:
                 "EvalGate document"
             )
 
-        result = evaluate_gate(
-            gates[0],
-            _load_metric_map(
-                args.metrics
-            ),
-        )
+        metrics = _load_metric_map(args.metrics)
+        if args.evidence:
+            evidence = json.loads(
+                Path(args.evidence).read_text(encoding="utf-8")
+            )
+            result = evaluate_release_gate(
+                gates[0],
+                metrics,
+                evidence,
+            )
+        else:
+            result = evaluate_gate(
+                gates[0],
+                metrics,
+            )
         print(
             json.dumps(
                 asdict(result),
