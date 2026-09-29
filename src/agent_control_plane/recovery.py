@@ -25,6 +25,8 @@ def normalize_recovery_evidence(
         "sourceSandboxRef": evidence.get("sourceSandboxRef"),
         "targetSandboxRef": evidence.get("targetSandboxRef"),
         "snapshotRef": evidence.get("snapshotRef"),
+        "verificationEvidenceRef": evidence.get("verificationEvidenceRef"),
+        "verificationWindowSeconds": evidence.get("verificationWindowSeconds"),
     }
     metrics = {
         "recovery_success": 1.0 if success else 0.0,
