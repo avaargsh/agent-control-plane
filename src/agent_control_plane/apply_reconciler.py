@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Sequence
 
 from .dependency_graph import dependency_order
+from .golden_slice_replay import freeze_json_mapping
 from .eval_engine import EvalResult, evaluate_gate
 from .executors import (
     ExecutionReceipt,
@@ -120,7 +121,7 @@ class ApplyReconciler:
         recovery_evidence: Mapping[str, Any] | None = None,
         golden_slice: Mapping[str, Any] | None = None,
     ) -> ApplyResult:
-        golden_slice_provenance = dict(golden_slice or {})
+        golden_slice_provenance = freeze_json_mapping(golden_slice or {})
         placement = placement_evidence(
             plan.placement,
             observed_target=observed_placement,
