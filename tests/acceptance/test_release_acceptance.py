@@ -106,6 +106,17 @@ def executor_registry(
     )
     return registry
 
+PASS_GATE = {
+    "spec": {
+        "conditions": [
+            {"metric": "accuracy", "op": "gte", "value": 0.9},
+            {"metric": "ece", "op": "lte", "value": 0.05},
+        ],
+        "onFailure": "block",
+    }
+}
+
+
 def reconciler(*, failing_workflow: bool = False) -> ApplyReconciler:
     return ApplyReconciler(
         providers=provider_registry(),
