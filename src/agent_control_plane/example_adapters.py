@@ -55,11 +55,21 @@ class KubernetesSandboxAdapter:
         binding: dict[str, Any],
     ) -> dict[str, Any]:
         config = dict(binding.get("spec", {}).get("config", {}))
+        binding_name = binding["metadata"]["name"]
+        warm_pool = config.get("warmPoolRef")
+        if warm_pool is None and config.get("warmPool"):
+            warm_pool = "default"
         return {
             "kind": "SandboxPlan",
             "provider": self.provider_name,
             "release": plan.release_name,
-            "isolation": config.get("isolation", "gvisor"),
-            "warm_pool": bool(config.get("warmPool", False)),
+            "claim_name": config.get(
+                "claimName",
+                f"{plan.release_name}-{binding_name}".lower().replace("_", "-"),
+            ),
+            "namespace": config.get("namespace", "default"),
+            "isolation": config.get("runtimeClass", config.get("isolation", "gvisor")),
+            "warm_pool": warm_pool,
+            "ttl_seconds": config.get("ttlSeconds"),
             "placement": dict(plan.placement),
         }
