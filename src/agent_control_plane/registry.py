@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .capabilities import ProviderCapabilities, check_conformance
 from .plan import ResolvedReleasePlan
 from .providers import ProviderAdapter
 
@@ -22,6 +23,25 @@ class ProviderRegistry:
             return self._adapters[key]
         except KeyError as exc:
             raise KeyError(f"no provider adapter registered for {key}") from exc
+
+    def conformance(self, plan: ResolvedReleasePlan) -> dict[str, object]:
+        results = {}
+        for binding_name, binding in plan.bindings.items():
+            spec = binding["spec"]
+            adapter = self.get(spec["type"], spec["provider"])
+            supported = getattr(adapter, "capabilities", None)
+            # Backward-compatible adapters with no declaration can only satisfy
+            # bindings that require no explicit capabilities.
+            provider = ProviderCapabilities(
+                provider_type=spec["type"],
+                provider_name=spec["provider"],
+                capabilities=frozenset(supported or ()),
+            )
+            results[binding_name] = check_conformance(
+                required=spec.get("capabilities", ()),
+                provider=provider,
+            )
+        return results
 
     def prepare(self, plan: ResolvedReleasePlan) -> dict[str, dict[str, Any]]:
         prepared: dict[str, dict[str, Any]] = {}
