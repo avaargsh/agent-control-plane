@@ -20,6 +20,7 @@ from .policy_engine import (
 )
 from .registry import ProviderRegistry
 from .recovery import normalize_recovery_evidence
+from .release_evidence import seal_release_evidence
 from .state_machine import ReleasePhase, ReleaseState
 
 
@@ -155,7 +156,7 @@ class ApplyReconciler:
             state.transition(
                 ReleasePhase.BLOCKED
             )
-            evidence = {
+            evidence = seal_release_evidence({
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
                 "golden_slice": golden_slice_provenance,
@@ -168,7 +169,7 @@ class ApplyReconciler:
                 "rollback_receipts": [],
                 "eval_results": [],
                 "phase": state.phase.value,
-            }
+            })
             return ApplyResult(
                 release_name=plan.release_name,
                 phase=state.phase.value,
@@ -379,7 +380,7 @@ class ApplyReconciler:
                     ReleasePhase.BLOCKED
                 )
 
-        evidence = {
+        evidence = seal_release_evidence({
             "kind": "ReleaseEvidence",
             "release": plan.release_name,
             "golden_slice": golden_slice_provenance,
@@ -426,7 +427,7 @@ class ApplyReconciler:
                 )
             ],
             "phase": state.phase.value,
-        }
+        })
 
         return ApplyResult(
             release_name=plan.release_name,
