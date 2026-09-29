@@ -1,0 +1,123 @@
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: harness-openai-agents
+spec:
+  type: harness
+  provider: openai-agents
+  capabilities:
+    - tools
+    - handoff
+    - tracing
+  ownership:
+    execution: provider
+    continuation: provider
+    context: projected
+  config:
+    manifestRef: sre-investigator
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: workflow-temporal
+spec:
+  type: workflow
+  provider: temporal
+  endpointRef: service://temporal
+  dependsOn:
+    - harness-openai-agents
+  ownership:
+    execution: provider
+    continuation: provider
+    context: projected
+  config:
+    workflowType: AgentRunWorkflow
+    taskQueue: agent-runtime
+    retryProfile: standard
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: sandbox-agent-sandbox
+spec:
+  type: sandbox
+  provider: kubernetes-agent-sandbox
+  ownership:
+    execution: provider
+    continuation: caller
+    context: projected
+  config:
+    templateRef: sre-agent
+    runtimeClass: gvisor
+    warmPoolRef: sre-general
+    ttl: 30m
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: tools-observability
+spec:
+  type: tool
+  provider: mcp
+  endpointRef: service://observability-mcp
+  dependsOn:
+    - sandbox-agent-sandbox
+  capabilities:
+    - metrics.read
+    - logs.read
+    - kubernetes.read
+  ownership:
+    execution: provider
+    continuation: caller
+    context: projected
+  config:
+    mode: stateless
+    access: read-only
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: traffic-agentgateway
+spec:
+  type: traffic
+  provider: agentgateway
+  capabilities:
+    - mcp
+    - a2a
+    - llm
+  ownership:
+    execution: provider
+    continuation: caller
+    context: projected
+  config:
+    policyRef: sre-runtime-traffic
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: RuntimeBinding
+metadata:
+  name: decision-hot-path
+spec:
+  type: decision
+  provider: decision-gateway
+  endpointRef: service://agent-decision-lab
+  dependsOn:
+    - harness-openai-agents
+  capabilities:
+    - mcp_tool_router
+    - severity
+    - escalation
+  ownership:
+    execution: provider
+    continuation: caller
+    context: projected
+  config:
+    calibrationRef: router-v3-isotonic
+    minConfidence: 0.93
+    fallbackBinding: harness-openai-agents
+    policyRef: bounded-automation-default
