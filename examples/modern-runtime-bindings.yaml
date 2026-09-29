@@ -44,7 +44,7 @@ metadata:
   name: sandbox-agent-sandbox
 spec:
   type: sandbox
-  provider: kubernetes-agent-sandbox
+  provider: k8s-agent-sandbox
   ownership:
     execution: provider
     continuation: caller
@@ -53,7 +53,7 @@ spec:
     templateRef: sre-agent
     runtimeClass: gvisor
     warmPoolRef: sre-general
-    ttl: 30m
+    ttlSeconds: 1800
 
 ---
 apiVersion: agentplane.io/v1alpha1
