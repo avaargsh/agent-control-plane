@@ -169,8 +169,59 @@ def validate_decision_eval_artifact(
             reason="FALLBACK_MEASURED_INVALID",
             metrics={},
         )
+
     metrics["fallback_measured"] = 1.0 if measured else 0.0
     metrics["dataset_case_count"] = float(case_count)
+
+    if measured:
+        adapter = fallback.get("adapter")
+        if not isinstance(adapter, str) or not adapter:
+            return DecisionEvalValidation(
+                valid=False,
+                reason="FALLBACK_ADAPTER_REQUIRED",
+                metrics={},
+            )
+
+        numeric_fields = {
+            "threshold": "system2_threshold",
+            "eligible_case_count": "system2_eligible_case_count",
+            "fallback_case_count": "system2_fallback_case_count",
+            "fallback_rate": "system2_fallback_rate",
+            "accuracy": "system2_accuracy",
+            "p50_latency_ms": "system2_p50_latency_ms",
+            "p95_latency_ms": "system2_p95_latency_ms",
+            "mean_tokens_processed": "system2_mean_tokens_processed",
+        }
+        for source, metric_name in numeric_fields.items():
+            value = fallback.get(source)
+            if value is None and source in {
+                "accuracy",
+                "p50_latency_ms",
+                "p95_latency_ms",
+                "mean_tokens_processed",
+            }:
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return DecisionEvalValidation(
+                    valid=False,
+                    reason=f"FALLBACK_METRIC_INVALID:{source}",
+                    metrics={},
+                )
+            metrics[metric_name] = float(value)
+
+        cases = fallback.get("cases")
+        if not isinstance(cases, list):
+            return DecisionEvalValidation(
+                valid=False,
+                reason="FALLBACK_CASES_REQUIRED",
+                metrics={},
+            )
+        if int(fallback["fallback_case_count"]) != len(cases):
+            return DecisionEvalValidation(
+                valid=False,
+                reason="FALLBACK_CASE_COUNT_MISMATCH",
+                metrics={},
+            )
 
     return DecisionEvalValidation(
         valid=True,
