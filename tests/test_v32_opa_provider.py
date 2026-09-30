@@ -1,7 +1,9 @@
 import pytest
 
-from agent_control_plane.providers.opa import compile_opa_bundle
-from agent_control_plane.providers.opa.compiler import OPACompileError
+from agent_control_plane.opa_provider import (
+    OPACompileError,
+    compile_opa_bundle,
+)
 
 
 def test_capabilities_compile_to_independent_or_rules() -> None:

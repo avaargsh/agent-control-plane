@@ -27,7 +27,7 @@ def test_reconciler_executes_from_approved_snapshot_not_mutated_live_evidence():
         approved_evidence=approved,
     )
 
-    assert result.phase == "Promoted"
+    assert result.phase == "promoted"
     assert result.evidence["golden_slice"]["severity"] == "critical"
     assert (
         result.evidence["golden_slice"]["refs"]["evidenceBundle"]

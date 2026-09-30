@@ -2,8 +2,31 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping, Protocol
 from urllib import request
+
+
+@dataclass(frozen=True)
+class RuntimeApplyResult:
+    resource_ref: str
+    changed: bool
+    evidence: Mapping[str, Any]
+
+
+class KubernetesRuntimeClient(Protocol):
+    def ensure_sandbox(self, desired: Mapping[str, Any]) -> RuntimeApplyResult:
+        ...
+
+    def delete_sandbox(self, resource_ref: str) -> Mapping[str, Any]:
+        ...
+
+
+class TemporalRuntimeClient(Protocol):
+    def ensure_workflow(self, desired: Mapping[str, Any]) -> RuntimeApplyResult:
+        ...
+
+    def terminate_workflow(self, resource_ref: str) -> Mapping[str, Any]:
+        ...
 
 
 @dataclass(frozen=True)

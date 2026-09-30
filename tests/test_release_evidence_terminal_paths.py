@@ -20,5 +20,5 @@ def test_policy_blocked_release_is_sealed_for_replay():
         executors=executor_registry(),
     ).reconcile(plan)
 
-    assert result.phase == "Blocked"
+    assert result.phase == "blocked"
     assert verify_release_evidence(result.evidence)
