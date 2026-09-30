@@ -138,3 +138,62 @@ def test_temporal_rollback_does_not_terminate_preexisting_workflow():
         "reason": "resource-preexisted",
     }
     assert client.terminated == []
+
+
+
+class UpdatedKubernetesClient(FakeKubernetesClient):
+    def __init__(self):
+        super().__init__()
+        self.restored = []
+
+    def ensure_sandbox(self, desired):
+        return RuntimeApplyResult(
+            resource_ref="k8s://sandbox/existing",
+            changed=True,
+            evidence={
+                "changeType": "updated",
+                "previousManaged": {
+                    "apiVersion": "agents.openai.com/v1alpha1",
+                    "kind": "Sandbox",
+                    "metadata": {
+                        "name": "existing",
+                        "namespace": "agent-runtime",
+                    },
+                    "spec": {
+                        "isolation": "none",
+                        "warmPool": False,
+                        "placement": {},
+                    },
+                },
+            },
+        )
+
+    def restore_sandbox(self, previous):
+        self.restored.append(previous)
+        return {"restored": True}
+
+
+def test_kubernetes_rollback_restores_updated_preexisting_sandbox():
+    client = UpdatedKubernetesClient()
+    executor = KubernetesSandboxExecutor(client)
+    plan = build_plan()
+    binding = plan.bindings["sandbox"]
+
+    receipt = executor.apply(
+        plan=plan,
+        binding=binding,
+        prepared={"kind": "SandboxPlan"},
+    )
+    rollback = executor.rollback(
+        plan=plan,
+        binding=binding,
+        receipt=receipt,
+    )
+
+    assert receipt.changed is True
+    assert receipt.evidence["changeType"] == "updated"
+    assert rollback.rolled_back is True
+    assert rollback.evidence["restored"] is True
+    assert client.deleted == []
+    assert len(client.restored) == 1
+    assert client.restored[0]["spec"]["isolation"] == "none"
