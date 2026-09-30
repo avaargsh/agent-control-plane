@@ -126,5 +126,70 @@ def test_temporal_terminate_classifies_uncertain_failure(monkeypatch):
     with pytest.raises(RuntimeMutationUncertain):
         TemporalCliApi(address="127.0.0.1:7233").terminate(
             workflow_id="agent-release/demo",
+            run_id="run-old-001",
             reason="rollback",
         )
+
+
+
+def test_temporal_terminate_scopes_cli_command_to_run_id(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(
+            stdout="",
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr(
+        "agent_control_plane.cli_runtime_transports.subprocess.run",
+        run,
+    )
+
+    result = TemporalCliApi(
+        address="127.0.0.1:7233"
+    ).terminate(
+        workflow_id="agent-release/demo",
+        run_id="run-old-001",
+        reason="rollback",
+    )
+
+    command = calls[0]
+    assert "--workflow-id" in command
+    assert "agent-release/demo" in command
+    assert "--run-id" in command
+    assert "run-old-001" in command
+    assert result["runId"] == "run-old-001"
+
+
+def test_temporal_describe_can_target_exact_run_id(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(
+            stdout=json.dumps({
+                "execution": {"runId": "run-old-001"},
+                "status": "Terminated",
+            }),
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr(
+        "agent_control_plane.cli_runtime_transports.subprocess.run",
+        run,
+    )
+
+    result = TemporalCliApi(
+        address="127.0.0.1:7233"
+    ).describe(
+        workflow_id="agent-release/demo",
+        run_id="run-old-001",
+    )
+
+    assert "--run-id" in calls[0]
+    assert "run-old-001" in calls[0]
+    assert result["runId"] == "run-old-001"
