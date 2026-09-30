@@ -118,3 +118,26 @@ def test_kubernetes_client_still_updates_managed_spec_drift():
 
     assert second.changed is True
     assert api.apply_calls == 2
+
+
+
+def test_kubernetes_client_ignores_defaulted_unmanaged_spec_fields():
+    api = FakeApi()
+    client = KubernetesSandboxClient(api)
+    first = client.ensure_sandbox(desired())
+
+    name = first.resource_ref.rsplit("/", 1)[-1]
+    existing = api.resources[("agent-runtime", name)]
+    api.resources[("agent-runtime", name)] = {
+        **existing,
+        "spec": {
+            **existing["spec"],
+            "runtimeClassName": "gvisor",
+            "restartPolicy": "Never",
+        },
+    }
+
+    second = client.ensure_sandbox(desired())
+
+    assert second.changed is False
+    assert api.apply_calls == 1
