@@ -5,6 +5,7 @@ metadata:
   name: checkout-remediator-prod
 spec:
   fleetRef: sre-prod
+  teamRef: team://sre-platform
   agentRef: checkout-remediator
   releaseRef: checkout-remediator-v1
   runtimeRefs:
