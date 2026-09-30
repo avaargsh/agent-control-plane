@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import math
 from typing import Any, Mapping
 
 
@@ -25,6 +26,226 @@ def _canonical_json(value: Mapping[str, Any]) -> bytes:
         separators=(",", ":"),
         ensure_ascii=False,
     ).encode("utf-8")
+
+
+def _is_finite_number(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+    )
+
+
+def _percentile(values: list[float], quantile: float) -> float:
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = quantile * (len(ordered) - 1)
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    weight = position - lower
+    return (
+        ordered[lower] * (1.0 - weight)
+        + ordered[upper] * weight
+    )
+
+
+def _fallback_semantics_reason(
+    fallback: Mapping[str, Any],
+    *,
+    dataset_case_ids: list[str],
+) -> str | None:
+    eligible = fallback.get("eligible_case_count")
+    if (
+        isinstance(eligible, bool)
+        or not isinstance(eligible, int)
+        or eligible != len(dataset_case_ids)
+    ):
+        return "FALLBACK_ELIGIBLE_CASE_COUNT_MISMATCH"
+
+    fallback_count = fallback.get("fallback_case_count")
+    if (
+        isinstance(fallback_count, bool)
+        or not isinstance(fallback_count, int)
+        or not 0 <= fallback_count <= eligible
+    ):
+        return "FALLBACK_CASE_COUNT_INVALID"
+
+    rate = fallback.get("fallback_rate")
+    if not _is_finite_number(rate):
+        return "FALLBACK_RATE_INVALID"
+    expected_rate = (
+        fallback_count / eligible
+        if eligible
+        else 0.0
+    )
+    if not math.isclose(
+        float(rate),
+        expected_rate,
+        rel_tol=1e-9,
+        abs_tol=1e-9,
+    ):
+        return "FALLBACK_RATE_MISMATCH"
+
+    cases = fallback.get("cases")
+    if not isinstance(cases, list):
+        return "FALLBACK_CASES_REQUIRED"
+    if len(cases) != fallback_count:
+        return "FALLBACK_CASE_COUNT_MISMATCH"
+
+    dataset_ids = set(dataset_case_ids)
+    seen: set[str] = set()
+    latencies: list[float] = []
+    token_counts: list[int] = []
+    parse_values: list[bool] = []
+    correct_count = 0
+
+    for case in cases:
+        if not isinstance(case, Mapping):
+            return "FALLBACK_CASE_INVALID"
+        case_id = case.get("case_id")
+        if (
+            not isinstance(case_id, str)
+            or not case_id
+            or case_id not in dataset_ids
+        ):
+            return "FALLBACK_CASE_ID_INVALID"
+        if case_id in seen:
+            return "FALLBACK_CASE_ID_DUPLICATE"
+        seen.add(case_id)
+
+        confidence = case.get("fast_confidence")
+        if (
+            not _is_finite_number(confidence)
+            or not 0.0 <= float(confidence) <= 1.0
+        ):
+            return "FALLBACK_CONFIDENCE_INVALID"
+
+        for field in (
+            "fast_predicted",
+            "fallback_predicted",
+            "gold",
+        ):
+            value = case.get(field)
+            if not isinstance(value, str) or not value:
+                return f"FALLBACK_CASE_FIELD_INVALID:{field}"
+
+        correct = case.get("correct")
+        if not isinstance(correct, bool):
+            return "FALLBACK_CORRECT_INVALID"
+        correct_count += int(correct)
+
+        latency = case.get("latency_ms")
+        if (
+            not _is_finite_number(latency)
+            or float(latency) < 0
+        ):
+            return "FALLBACK_LATENCY_INVALID"
+        latencies.append(float(latency))
+
+        tokens = case.get("tokens_processed")
+        if tokens is not None:
+            if (
+                isinstance(tokens, bool)
+                or not isinstance(tokens, int)
+                or tokens < 0
+            ):
+                return "FALLBACK_TOKENS_INVALID"
+            token_counts.append(tokens)
+
+        parse_valid = case.get("parse_valid")
+        if parse_valid is not None:
+            if not isinstance(parse_valid, bool):
+                return "FALLBACK_PARSE_VALID_INVALID"
+            parse_values.append(parse_valid)
+
+    accuracy = fallback.get("accuracy")
+    p50 = fallback.get("p50_latency_ms")
+    p95 = fallback.get("p95_latency_ms")
+    mean_tokens = fallback.get("mean_tokens_processed")
+
+    if fallback_count == 0:
+        if any(
+            value is not None
+            for value in (accuracy, p50, p95, mean_tokens)
+        ):
+            return "FALLBACK_EMPTY_MEASUREMENTS_NON_NULL"
+    else:
+        if not _is_finite_number(accuracy):
+            return "FALLBACK_ACCURACY_INVALID"
+        expected_accuracy = correct_count / fallback_count
+        if not math.isclose(
+            float(accuracy),
+            expected_accuracy,
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        ):
+            return "FALLBACK_ACCURACY_MISMATCH"
+
+        if (
+            not _is_finite_number(p50)
+            or not _is_finite_number(p95)
+        ):
+            return "FALLBACK_LATENCY_PERCENTILES_INVALID"
+        if not math.isclose(
+            float(p50),
+            _percentile(latencies, 0.5),
+            rel_tol=1e-9,
+            abs_tol=1e-6,
+        ):
+            return "FALLBACK_P50_MISMATCH"
+        if not math.isclose(
+            float(p95),
+            _percentile(latencies, 0.95),
+            rel_tol=1e-9,
+            abs_tol=1e-6,
+        ):
+            return "FALLBACK_P95_MISMATCH"
+
+        expected_tokens = (
+            sum(token_counts) / len(token_counts)
+            if token_counts
+            else None
+        )
+        if expected_tokens is None:
+            if mean_tokens is not None:
+                return "FALLBACK_MEAN_TOKENS_MISMATCH"
+        elif (
+            not _is_finite_number(mean_tokens)
+            or not math.isclose(
+                float(mean_tokens),
+                expected_tokens,
+                rel_tol=1e-9,
+                abs_tol=1e-9,
+            )
+        ):
+            return "FALLBACK_MEAN_TOKENS_MISMATCH"
+
+    parse_rate = fallback.get("parse_valid_rate")
+    if parse_rate is not None:
+        if (
+            not _is_finite_number(parse_rate)
+            or not 0.0 <= float(parse_rate) <= 1.0
+        ):
+            return "FALLBACK_PARSE_VALID_RATE_INVALID"
+        if len(parse_values) != fallback_count:
+            return "FALLBACK_PARSE_VALID_CASES_INCOMPLETE"
+        expected_parse_rate = (
+            sum(parse_values) / fallback_count
+            if fallback_count
+            else 0.0
+        )
+        if not math.isclose(
+            float(parse_rate),
+            expected_parse_rate,
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        ):
+            return "FALLBACK_PARSE_VALID_RATE_MISMATCH"
+
+    return None
 
 
 def _is_sha256(value: object) -> bool:
@@ -101,6 +322,7 @@ def validate_decision_eval_artifact(
         or not all(isinstance(item, str) and item for item in case_ids)
         or not isinstance(case_count, int)
         or case_count != len(case_ids)
+        or len(set(case_ids)) != len(case_ids)
     ):
         return DecisionEvalValidation(
             valid=False,
@@ -120,7 +342,7 @@ def validate_decision_eval_artifact(
     for name, value in raw_metrics.items():
         if value is None:
             continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if not _is_finite_number(value):
             return DecisionEvalValidation(
                 valid=False,
                 reason=f"METRIC_INVALID:{name}",
@@ -147,7 +369,7 @@ def validate_decision_eval_artifact(
             value = operating.get(name)
             if value is None:
                 continue
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
+            if not _is_finite_number(value):
                 return DecisionEvalValidation(
                     valid=False,
                     reason=f"OPERATING_METRIC_INVALID:{name}",
@@ -216,10 +438,14 @@ def validate_decision_eval_artifact(
                 reason="FALLBACK_CASES_REQUIRED",
                 metrics={},
             )
-        if int(fallback["fallback_case_count"]) != len(cases):
+        semantic_reason = _fallback_semantics_reason(
+            fallback,
+            dataset_case_ids=case_ids,
+        )
+        if semantic_reason is not None:
             return DecisionEvalValidation(
                 valid=False,
-                reason="FALLBACK_CASE_COUNT_MISMATCH",
+                reason=semantic_reason,
                 metrics={},
             )
 
