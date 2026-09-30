@@ -14,6 +14,10 @@ from .factory_acceptance import (
     factory_acceptance_evidence,
     validate_factory_acceptance_artifact,
 )
+from .factory_attestation import (
+    FactoryAttestationVerifier,
+    trusted_factory_acceptance_metrics,
+)
 from .golden_slice_replay import freeze_json_mapping
 from .frozen_evidence import FrozenEvidence, resume_from_frozen_evidence
 from .eval_engine import EvalResult, evaluate_gate
@@ -56,10 +60,12 @@ class ApplyReconciler:
         providers: ProviderRegistry,
         executors: ExecutorRegistry,
         policy_engine: ReleasePolicyEngine | None = None,
+        factory_attestation_verifier: FactoryAttestationVerifier | None = None,
     ) -> None:
         self.providers = providers
         self.executors = executors
         self.policy_engine = policy_engine
+        self.factory_attestation_verifier = factory_attestation_verifier
 
     def _rollback(
         self,
@@ -134,6 +140,7 @@ class ApplyReconciler:
         recovery_evidence: Mapping[str, Any] | None = None,
         decision_eval_artifact: Mapping[str, Any] | None = None,
         factory_acceptance_artifact: Mapping[str, Any] | None = None,
+        factory_acceptance_attestation: Mapping[str, Any] | None = None,
         golden_slice: Mapping[str, Any] | None = None,
         approved_evidence: FrozenEvidence | None = None,
         deployed_authority: Mapping[str, Any] | None = None,
@@ -167,6 +174,7 @@ class ApplyReconciler:
         decision_eval_evidence: Mapping[str, Any] | None = None
         decision_eval_metrics: Mapping[str, float] = {}
         factory_acceptance_binding: Mapping[str, Any] | None = None
+        factory_acceptance_metrics: Mapping[str, float] = {}
         if decision_eval_artifact is not None:
             decision_eval_evidence = freeze_json_mapping(
                 decision_eval_artifact
@@ -204,6 +212,36 @@ class ApplyReconciler:
                     error=decision_error,
                 )
             decision_eval_metrics = decision_validation.metrics
+
+        if (
+            factory_acceptance_attestation is not None
+            and factory_acceptance_artifact is None
+        ):
+            state.transition(ReleasePhase.BLOCKED)
+            factory_error = "FACTORY_ACCEPTANCE_ARTIFACT_REQUIRED"
+            evidence = seal_release_evidence({
+                "kind": "ReleaseEvidence",
+                "release": plan.release_name,
+                "golden_slice": golden_slice_provenance,
+                "placement": placement,
+                "recovery": recovery,
+                "decision_eval": decision_eval_evidence,
+                "factory_acceptance": None,
+                "receipts": [],
+                "rollback_receipts": [],
+                "eval_results": [],
+                "phase": state.phase.value,
+                "factory_acceptance_error": factory_error,
+            })
+            return ApplyResult(
+                release_name=plan.release_name,
+                phase=state.phase.value,
+                receipts=(),
+                rollback_receipts=(),
+                eval_results=(),
+                evidence=evidence,
+                error=factory_error,
+            )
 
         if factory_acceptance_artifact is not None:
             factory_snapshot = freeze_json_mapping(
@@ -255,6 +293,96 @@ class ApplyReconciler:
             factory_acceptance_binding = freeze_json_mapping(
                 factory_acceptance_evidence(factory_snapshot)
             )
+
+            if factory_acceptance_attestation is not None:
+                if self.factory_attestation_verifier is None:
+                    state.transition(ReleasePhase.BLOCKED)
+                    factory_error = "FACTORY_ATTESTATION_VERIFIER_REQUIRED"
+                    evidence = seal_release_evidence({
+                        "kind": "ReleaseEvidence",
+                        "release": plan.release_name,
+                        "golden_slice": golden_slice_provenance,
+                        "placement": placement,
+                        "recovery": recovery,
+                        "decision_eval": decision_eval_evidence,
+                        "factory_acceptance": factory_acceptance_binding,
+                        "receipts": [],
+                        "rollback_receipts": [],
+                        "eval_results": [],
+                        "phase": state.phase.value,
+                        "factory_acceptance_error": factory_error,
+                    })
+                    return ApplyResult(
+                        release_name=plan.release_name,
+                        phase=state.phase.value,
+                        receipts=(),
+                        rollback_receipts=(),
+                        eval_results=(),
+                        evidence=evidence,
+                        error=factory_error,
+                    )
+
+                attestation_snapshot = freeze_json_mapping(
+                    factory_acceptance_attestation
+                )
+                attestation_validation = (
+                    self.factory_attestation_verifier.verify(
+                        factory_snapshot,
+                        attestation_snapshot,
+                    )
+                )
+                if (
+                    not attestation_validation.valid
+                    or not attestation_validation.trusted
+                ):
+                    state.transition(ReleasePhase.BLOCKED)
+                    factory_error = (
+                        "FACTORY_ATTESTATION_INVALID:"
+                        + str(attestation_validation.reason)
+                    )
+                    evidence = seal_release_evidence({
+                        "kind": "ReleaseEvidence",
+                        "release": plan.release_name,
+                        "golden_slice": golden_slice_provenance,
+                        "placement": placement,
+                        "recovery": recovery,
+                        "decision_eval": decision_eval_evidence,
+                        "factory_acceptance": {
+                            **dict(factory_acceptance_binding),
+                            "attestation": attestation_snapshot,
+                            "trusted": False,
+                            "gate_eligible": False,
+                        },
+                        "receipts": [],
+                        "rollback_receipts": [],
+                        "eval_results": [],
+                        "phase": state.phase.value,
+                        "factory_acceptance_error": factory_error,
+                    })
+                    return ApplyResult(
+                        release_name=plan.release_name,
+                        phase=state.phase.value,
+                        receipts=(),
+                        rollback_receipts=(),
+                        eval_results=(),
+                        evidence=evidence,
+                        error=factory_error,
+                    )
+
+                factory_acceptance_binding = freeze_json_mapping({
+                    **dict(factory_acceptance_binding),
+                    "attestation": attestation_snapshot,
+                    "attestation_key_id": (
+                        attestation_validation.key_id
+                    ),
+                    "trusted": True,
+                    "gate_eligible": True,
+                })
+                factory_acceptance_metrics = (
+                    trusted_factory_acceptance_metrics(
+                        factory_snapshot
+                    )
+                )
 
         authority_decision: AuthorityAdmissionDecision | None = None
         authority_error: str | None = None
@@ -509,6 +637,7 @@ class ApplyReconciler:
                 {
                     **(metrics or {}),
                     **decision_eval_metrics,
+                    **factory_acceptance_metrics,
                     **recovery_metrics,
                 },
             )
