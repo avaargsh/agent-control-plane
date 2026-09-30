@@ -239,3 +239,73 @@ def test_kubernetes_client_propagates_uncertain_error_when_postcondition_is_abse
 
     with pytest.raises(RuntimeMutationUncertain):
         client.ensure_sandbox(desired())
+
+
+class LostAckDeleteApi(FakeApi):
+    def delete(self, *, namespace, name):
+        super().delete(namespace=namespace, name=name)
+        raise RuntimeMutationUncertain("connection reset after delete")
+
+
+def test_kubernetes_delete_recovers_after_lost_ack():
+    api = LostAckDeleteApi()
+    client = KubernetesSandboxClient(api)
+    result = client.ensure_sandbox(desired())
+
+    deleted = client.delete_sandbox(result.resource_ref)
+
+    assert deleted["deleted"] is True
+    assert deleted["verifiedAfterUncertainMutation"] is True
+
+
+class UncommittedDeleteApi(FakeApi):
+    def delete(self, *, namespace, name):
+        raise RuntimeMutationUncertain("connection refused")
+
+
+def test_kubernetes_delete_propagates_when_resource_still_exists():
+    api = UncommittedDeleteApi()
+    client = KubernetesSandboxClient(api)
+    result = client.ensure_sandbox(desired())
+
+    with pytest.raises(RuntimeMutationUncertain):
+        client.delete_sandbox(result.resource_ref)
+
+
+class LostAckRestoreApi(FakeApi):
+    def __init__(self):
+        super().__init__()
+        self.raise_after_apply = False
+
+    def apply(self, *, namespace, manifest):
+        value = super().apply(namespace=namespace, manifest=manifest)
+        if self.raise_after_apply:
+            raise RuntimeMutationUncertain("unexpected EOF after restore")
+        return value
+
+
+def test_kubernetes_restore_recovers_after_lost_ack():
+    api = LostAckRestoreApi()
+    client = KubernetesSandboxClient(api)
+    created = client.ensure_sandbox(desired())
+    name = created.resource_ref.rsplit("/", 1)[-1]
+    previous = {
+        "apiVersion": "agents.openai.com/v1alpha1",
+        "kind": "Sandbox",
+        "metadata": {
+            "name": name,
+            "namespace": "agent-runtime",
+        },
+        "spec": {
+            "isolation": "none",
+            "warmPool": False,
+            "placement": {},
+        },
+    }
+    api.raise_after_apply = True
+
+    restored = client.restore_sandbox(previous)
+
+    assert restored["restored"] is True
+    assert restored["verifiedAfterUncertainMutation"] is True
+    assert api.resources[("agent-runtime", name)]["spec"]["isolation"] == "none"
