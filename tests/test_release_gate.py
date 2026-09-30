@@ -61,6 +61,9 @@ def evaluate(payload):
             "false_automation_rate": 0.0,
         },
         payload,
+        expected_authority_digest=(
+            "sha256:" + "a" * 64
+        ),
     )
 
 
@@ -132,6 +135,21 @@ def test_missing_operation_evidence_blocks_promotion():
     assert (
         result.reason
         == "MISSING_OPERATION_EVIDENCE"
+    )
+
+
+def test_missing_expected_authority_digest_blocks_promotion():
+    result = evaluate_release_gate(
+        GATE,
+        {
+            "recovery_success_rate": 1.0,
+            "false_automation_rate": 0.0,
+        },
+        evidence(),
+    )
+    assert (
+        result.reason
+        == "EXPECTED_AUTHORITY_DIGEST_REQUIRED"
     )
 
 
