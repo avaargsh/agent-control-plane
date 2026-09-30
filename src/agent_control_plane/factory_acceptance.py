@@ -96,6 +96,7 @@ def validate_factory_acceptance_artifact(
         )
 
     case_id = artifact.get("caseId")
+    issued_at = artifact.get("issuedAt")
     disposition = artifact.get("disposition")
     accepted = artifact.get("accepted")
     gates = artifact.get("gates")
@@ -105,6 +106,15 @@ def validate_factory_acceptance_artifact(
         return FactoryAcceptanceValidation(
             False,
             "CASE_ID_REQUIRED",
+            str(digest),
+            True,
+            False,
+            False,
+        )
+    if not isinstance(issued_at, str) or not issued_at:
+        return FactoryAcceptanceValidation(
+            False,
+            "ISSUED_AT_REQUIRED",
             str(digest),
             True,
             False,
@@ -204,8 +214,51 @@ def validate_factory_acceptance_artifact(
                 False,
                 False,
             )
+        gate_reasons = gate.get("reasons")
+        if not isinstance(gate_reasons, list) or not all(
+            isinstance(item, str)
+            for item in gate_reasons
+        ):
+            return FactoryAcceptanceValidation(
+                False,
+                "GATE_REASONS_INVALID",
+                str(digest),
+                True,
+                False,
+                False,
+            )
         gate_ids.add(gate_id)
         gate_statuses.add(str(status))
+
+    reasons = artifact.get("reasons")
+    if not isinstance(reasons, list) or not all(
+        isinstance(item, str)
+        for item in reasons
+    ):
+        return FactoryAcceptanceValidation(
+            False,
+            "REASONS_INVALID",
+            str(digest),
+            True,
+            False,
+            False,
+        )
+
+    if not all(
+        isinstance(key, str)
+        and key
+        and isinstance(value, str)
+        and value
+        for key, value in evidence_refs.items()
+    ):
+        return FactoryAcceptanceValidation(
+            False,
+            "EVIDENCE_REFS_INVALID",
+            str(digest),
+            True,
+            False,
+            False,
+        )
 
     if gate_statuses & {"FAIL", "ERROR", "BLOCKED"}:
         expected_disposition = "REJECT"
