@@ -135,6 +135,24 @@ def test_missing_operation_evidence_blocks_promotion():
     )
 
 
+def test_expected_authority_digest_mismatch_blocks_promotion():
+    result = evaluate_release_gate(
+        GATE,
+        {
+            "recovery_success_rate": 1.0,
+            "false_automation_rate": 0.0,
+        },
+        evidence(),
+        expected_authority_digest=(
+            "sha256:" + "b" * 64
+        ),
+    )
+    assert (
+        result.reason
+        == "AUTHORITY_DIGEST_MISMATCH"
+    )
+
+
 def test_invalid_authority_digest_blocks_promotion():
     payload = dict(evidence())
     payload.pop("replay_digest")
