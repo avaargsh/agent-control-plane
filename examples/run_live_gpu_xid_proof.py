@@ -119,7 +119,7 @@ def main() -> None:
         Path(args.golden_slice_evidence).read_text(encoding="utf-8")
     )
 
-    validate_live_proof_inputs(
+    live_inputs = validate_live_proof_inputs(
         LiveProofInputs(
             decision_artifact=decision,
             factory_artifact=factory,
@@ -128,7 +128,10 @@ def main() -> None:
         factory_verifier=verifier,
     )
     assert_live_release_evidence(
-        {"golden_slice": golden_slice}
+        {"golden_slice": golden_slice},
+        expected_decision_artifact_id=live_inputs[
+            "decision_artifact_id"
+        ],
     )
 
     identity = golden_slice["identity"]
@@ -173,7 +176,12 @@ def main() -> None:
 
     if not verify_release_evidence(result.evidence):
         raise SystemExit("final ReleaseEvidence replay verification failed")
-    assert_live_release_evidence(result.evidence)
+    assert_live_release_evidence(
+        result.evidence,
+        expected_decision_artifact_id=live_inputs[
+            "decision_artifact_id"
+        ],
+    )
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
