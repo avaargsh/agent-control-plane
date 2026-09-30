@@ -197,3 +197,73 @@ def test_kubernetes_rollback_restores_updated_preexisting_sandbox():
     assert client.deleted == []
     assert len(client.restored) == 1
     assert client.restored[0]["spec"]["isolation"] == "none"
+
+
+class RecoveredKubernetesClient(FakeKubernetesClient):
+    def ensure_sandbox(self, desired):
+        return RuntimeApplyResult(
+            resource_ref="k8s://sandbox/recovered",
+            changed=True,
+            evidence={
+                "changeType": "created",
+                "verifiedAfterUncertainMutation": True,
+            },
+        )
+
+
+def test_recovered_kubernetes_mutation_receipt_remains_compensatable():
+    client = RecoveredKubernetesClient()
+    executor = KubernetesSandboxExecutor(client)
+    plan = build_plan()
+    binding = plan.bindings["sandbox"]
+
+    receipt = executor.apply(
+        plan=plan,
+        binding=binding,
+        prepared={"kind": "SandboxPlan"},
+    )
+    rollback = executor.rollback(
+        plan=plan,
+        binding=binding,
+        receipt=receipt,
+    )
+
+    assert receipt.changed is True
+    assert receipt.evidence["verifiedAfterUncertainMutation"] is True
+    assert rollback.rolled_back is True
+    assert client.deleted == ["k8s://sandbox/recovered"]
+
+
+class RecoveredTemporalClient(FakeTemporalClient):
+    def ensure_workflow(self, desired):
+        return RuntimeApplyResult(
+            resource_ref="temporal://workflow/recovered",
+            changed=True,
+            evidence={
+                "workflowId": "recovered",
+                "runId": "run-recovered",
+                "verifiedAfterUncertainMutation": True,
+            },
+        )
+
+
+def test_recovered_temporal_mutation_receipt_remains_compensatable():
+    client = RecoveredTemporalClient()
+    executor = TemporalWorkflowExecutor(client)
+    plan = build_plan()
+    binding = plan.bindings["workflow"]
+
+    receipt = executor.apply(
+        plan=plan,
+        binding=binding,
+        prepared={"kind": "WorkflowPlan"},
+    )
+    rollback = executor.rollback(
+        plan=plan,
+        binding=binding,
+        receipt=receipt,
+    )
+
+    assert receipt.changed is True
+    assert rollback.rolled_back is True
+    assert client.terminated == ["temporal://workflow/recovered"]
