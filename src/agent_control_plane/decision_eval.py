@@ -461,6 +461,54 @@ def validate_decision_eval_artifact(
             metrics={},
         )
 
+    calibration = artifact.get("calibration")
+    calibration_case_count: int | None = None
+    if calibration is not None:
+        if not isinstance(calibration, Mapping):
+            return DecisionEvalValidation(
+                valid=False,
+                reason="CALIBRATION_PROVENANCE_INVALID",
+                metrics={},
+            )
+        calibration_digest = calibration.get("sha256")
+        calibration_case_ids = calibration.get("case_ids")
+        calibration_case_count = calibration.get("case_count")
+        if not _is_sha256(calibration_digest):
+            return DecisionEvalValidation(
+                valid=False,
+                reason="CALIBRATION_PROVENANCE_DIGEST_INVALID",
+                metrics={},
+            )
+        if calibration_sha256 != calibration_digest:
+            return DecisionEvalValidation(
+                valid=False,
+                reason="CALIBRATION_DIGEST_MISMATCH",
+                metrics={},
+            )
+        if (
+            not isinstance(calibration_case_ids, list)
+            or not calibration_case_ids
+            or not all(
+                isinstance(item, str) and item
+                for item in calibration_case_ids
+            )
+            or not isinstance(calibration_case_count, int)
+            or isinstance(calibration_case_count, bool)
+            or calibration_case_count != len(calibration_case_ids)
+            or len(set(calibration_case_ids)) != len(calibration_case_ids)
+        ):
+            return DecisionEvalValidation(
+                valid=False,
+                reason="CALIBRATION_CASES_INVALID",
+                metrics={},
+            )
+        if set(case_ids).intersection(calibration_case_ids):
+            return DecisionEvalValidation(
+                valid=False,
+                reason="CALIBRATION_TEST_SPLIT_OVERLAP",
+                metrics={},
+            )
+
     raw_metrics = artifact.get("metrics")
     if not isinstance(raw_metrics, Mapping):
         return DecisionEvalValidation(
@@ -535,6 +583,10 @@ def validate_decision_eval_artifact(
 
     metrics["fallback_measured"] = 1.0 if measured else 0.0
     metrics["dataset_case_count"] = float(case_count)
+    if calibration_case_count is not None:
+        metrics["calibration_case_count"] = float(
+            calibration_case_count
+        )
 
     if measured:
         adapter = fallback.get("adapter")
