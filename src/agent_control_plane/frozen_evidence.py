@@ -50,4 +50,6 @@ def resume_from_frozen_evidence(
             "live evidence reader is forbidden after approval"
         )
 
-    return continuation(frozen.snapshot)
+    return continuation(
+        freeze_json_mapping(frozen.snapshot)
+    )
