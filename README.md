@@ -132,6 +132,19 @@ Normal unit CI does not imply that a live Kubernetes cluster or Temporal server 
 - AgentAuthorityEnvelope + Fleet/Agent authority inventory
 - deployment-time authority drift admission
 
+## Repository boundary in the broader AI infrastructure stack
+
+This repository is the **primary Agent Infra control-plane product**. Adjacent repositories have narrower roles:
+
+- `cloud-agent-runtime`: reference Run ↔ Workflow ↔ Sandbox lifecycle binding.
+- `agent-decision-lab`: bounded-decision benchmark/gateway experiments.
+- `gpu-compute-platform`: lower-layer accelerator workload control plane.
+- `ai-factory-engineering`: cross-layer infrastructure commissioning and acceptance.
+
+They share evidence/provenance patterns, but they do not share execution ownership or a single source of truth.
+
+See [docs/AI_INFRA_STACK.md](docs/AI_INFRA_STACK.md) for the ownership matrix, integration rules, and the first cross-project Golden Slice.
+
 ## Current status
 
 v0.1 release candidate.
