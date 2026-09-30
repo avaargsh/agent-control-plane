@@ -145,6 +145,30 @@ They share evidence/provenance patterns, but they do not share execution ownersh
 
 See [docs/AI_INFRA_STACK.md](docs/AI_INFRA_STACK.md) for the ownership matrix, integration rules, and the first cross-project Golden Slice.
 
+## Decision eval evidence gate
+
+The control plane can consume a content-addressed `decision-eval/v1` artifact
+produced by `agent-decision-lab`. The artifact digest is verified before any
+provider mutation, and only metrics sealed inside the verified artifact are
+projected into Eval Gates.
+
+This keeps model evaluation evidence separate from execution authorization:
+
+```text
+Decision Lab benchmark
+   -> decision-eval/v1 artifact
+   -> digest verification
+   -> metric projection
+   -> Eval Gate
+   -> promote / block / rollback
+
+Deterministic Policy / Approval
+   -> execution authorization
+```
+
+A gate may explicitly require `fallback_measured == 1` so an unmeasured
+placeholder System-2 fallback cannot satisfy a release criterion.
+
 ## Current status
 
 v0.1 release candidate.
