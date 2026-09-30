@@ -26,7 +26,7 @@ def run_release():
 def test_promoted_release_evidence_is_sealed_for_replay():
     result = run_release()
 
-    assert result.phase == "Promoted"
+    assert result.phase == "promoted"
     assert result.evidence["replay_digest"].startswith("sha256:")
     assert verify_release_evidence(result.evidence)
 
