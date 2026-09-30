@@ -373,3 +373,63 @@ def test_resealed_negative_token_metric_fails_closed():
         result.reason
         == "METRIC_INVALID:mean_tokens_processed_per_decision"
     )
+
+def test_disjoint_calibration_provenance_is_accepted_and_exposed():
+    value = artifact(measured=True)
+    value["calibration"] = {
+        "sha256": value["calibration_sha256"],
+        "case_count": 2,
+        "case_ids": ["cal-a", "cal-b"],
+    }
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is True
+    assert result.metrics["calibration_case_count"] == 2.0
+
+
+def test_resealed_calibration_test_overlap_fails_closed():
+    value = artifact(measured=True)
+    value["calibration"] = {
+        "sha256": value["calibration_sha256"],
+        "case_count": 2,
+        "case_ids": ["cal-a", "b"],
+    }
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "CALIBRATION_TEST_SPLIT_OVERLAP"
+
+
+def test_resealed_calibration_alias_mismatch_fails_closed():
+    value = artifact(measured=True)
+    value["calibration"] = {
+        "sha256": "sha256:" + "c" * 64,
+        "case_count": 2,
+        "case_ids": ["cal-a", "cal-b"],
+    }
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "CALIBRATION_DIGEST_MISMATCH"
+
+
+def test_resealed_invalid_calibration_cases_fail_closed():
+    value = artifact(measured=True)
+    value["calibration"] = {
+        "sha256": value["calibration_sha256"],
+        "case_count": 2,
+        "case_ids": ["cal-a", "cal-a"],
+    }
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "CALIBRATION_CASES_INVALID"
+
