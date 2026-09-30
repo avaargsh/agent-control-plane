@@ -931,3 +931,111 @@ def test_factory_artifact_rejects_empty_evidence_ref_after_reseal() -> None:
     assert result.error == (
         "FACTORY_ACCEPTANCE_INVALID:EVIDENCE_REFS_INVALID"
     )
+
+
+
+def test_apply_failure_preserves_original_error_when_rollback_is_incomplete() -> None:
+    class RollbackFailToolExecutor(InMemoryExecutor):
+        def rollback(self, **kwargs):
+            raise RuntimeError("tool rollback unavailable")
+
+    class ApplyFailWorkflowExecutor(InMemoryExecutor):
+        def apply(self, **kwargs):
+            raise RuntimeError("temporal unavailable")
+
+    executors = ExecutorRegistry()
+    executors.register(
+        InMemoryExecutor("sandbox", "k8s-agent-sandbox")
+    )
+    executors.register(
+        RollbackFailToolExecutor("tool", "mcp")
+    )
+    executors.register(
+        InMemoryExecutor("harness", "codex")
+    )
+    executors.register(
+        ApplyFailWorkflowExecutor("workflow", "temporal")
+    )
+    executors.register(
+        InMemoryExecutor("decision", "decision-gateway")
+    )
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executors,
+    ).reconcile(build_plan())
+
+    assert result.phase == "blocked"
+    assert result.error == "temporal unavailable"
+    assert [
+        item.binding_name
+        for item in result.rollback_receipts
+    ] == ["harness", "tools", "sandbox"]
+    assert [
+        item.rolled_back
+        for item in result.rollback_receipts
+    ] == [True, False, True]
+    assert result.rollback_receipts[1].evidence["reason"] == "rollback-error"
+    assert result.rollback_receipts[1].evidence["error"] == "tool rollback unavailable"
+    assert result.evidence["apply_error"] == "temporal unavailable"
+    assert result.evidence["rollback_errors"] == [
+        {
+            "binding": "tools",
+            "provider_type": "tool",
+            "provider_name": "mcp",
+            "resource_ref": "local://tool/mcp/sre-v1/tools",
+            "error": "tool rollback unavailable",
+        }
+    ]
+
+
+def test_eval_rollback_failure_is_blocked_but_keeps_all_compensation_evidence() -> None:
+    class RollbackFailWorkflowExecutor(InMemoryExecutor):
+        def rollback(self, **kwargs):
+            raise RuntimeError("temporal rollback unavailable")
+
+    executors = ExecutorRegistry()
+    executors.register(
+        InMemoryExecutor("sandbox", "k8s-agent-sandbox")
+    )
+    executors.register(InMemoryExecutor("tool", "mcp"))
+    executors.register(InMemoryExecutor("harness", "codex"))
+    executors.register(
+        RollbackFailWorkflowExecutor("workflow", "temporal")
+    )
+    executors.register(
+        InMemoryExecutor("decision", "decision-gateway")
+    )
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executors,
+    ).reconcile(
+        build_plan(),
+        eval_gates=[ROLLBACK_GATE],
+        metrics={"false_automation_rate": 0.20},
+    )
+
+    assert result.phase == "blocked"
+    assert result.error == "ROLLBACK_INCOMPLETE"
+    assert [
+        item.binding_name
+        for item in result.rollback_receipts
+    ] == [
+        "decision",
+        "workflow",
+        "harness",
+        "tools",
+        "sandbox",
+    ]
+    assert result.rollback_receipts[1].rolled_back is False
+    assert all(
+        item.rolled_back
+        for index, item in enumerate(result.rollback_receipts)
+        if index != 1
+    )
+    assert result.evidence["rollback_errors"][0]["binding"] == "workflow"
+    assert (
+        result.evidence["rollback_errors"][0]["error"]
+        == "temporal rollback unavailable"
+    )
