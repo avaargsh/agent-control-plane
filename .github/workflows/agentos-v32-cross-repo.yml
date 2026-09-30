@@ -1,0 +1,116 @@
+name: agentos-v32-cross-repo
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/agent_control_plane/opa_provider.py"
+      - "experiments/v3_2/opa_real_enforcement.py"
+      - ".github/workflows/agentos-v32-cross-repo.yml"
+      - "docs/v3.2-cross-repo-golden.md"
+  pull_request:
+    paths:
+      - "src/agent_control_plane/opa_provider.py"
+      - "experiments/v3_2/opa_real_enforcement.py"
+      - ".github/workflows/agentos-v32-cross-repo.yml"
+      - "docs/v3.2-cross-repo-golden.md"
+
+permissions:
+  contents: read
+
+env:
+  RUNTIME_SHA: 8dafeb1e8ec5f91e9b2ee7d787903f9ff0b0d401
+
+jobs:
+  cross-repo-golden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout agent-control-plane
+        uses: actions/checkout@v4
+        with:
+          path: control-plane
+
+      - name: Checkout pinned cloud-agent-runtime
+        uses: actions/checkout@v4
+        with:
+          repository: avaargsh/cloud-agent-runtime
+          ref: 8dafeb1e8ec5f91e9b2ee7d787903f9ff0b0d401
+          path: runtime
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install OPA v1.21.0
+        uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1
+        with:
+          version: 1.21.0
+
+      - uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: agentos-v32-cross-repo
+
+      - name: Install both contract implementations
+        run: |
+          python -m pip install -U pip
+          pip install -e ./control-plane -e "./runtime[dev]"
+
+      - name: Compile CapabilityIntent and freeze policy digest
+        run: |
+          python control-plane/experiments/v3_2/opa_real_enforcement.py --output /tmp/agentos-v32-opa | tee /tmp/control-policy-proof.txt
+          policy_digest="$(sed -n 's/^policy_digest=//p' /tmp/control-policy-proof.txt)"
+          test -n "$policy_digest"
+          actual_digest="sha256:$(sha256sum /tmp/agentos-v32-opa/policy.rego | awk '{print $1}')"
+          test "$policy_digest" = "$actual_digest"
+          echo "POLICY_DIGEST=$policy_digest" >> "$GITHUB_ENV"
+          echo "runtime_sha=$RUNTIME_SHA" | tee -a /tmp/control-policy-proof.txt
+
+      - name: Evaluate the compiled policy with real OPA
+        run: |
+          opa check /tmp/agentos-v32-opa/policy.rego
+          allowed="$(opa eval --format raw --data /tmp/agentos-v32-opa/policy.rego --input /tmp/agentos-v32-opa/allow-filesystem.json 'data.agentos.policy.allow')"
+          echo "allow-filesystem.json=$allowed" | tee -a /tmp/control-policy-proof.txt
+          test "$allowed" = "true"
+          for fixture in deny-aws-credentials.json deny-evil-egress.json deny-kubernetes-delete.json; do
+            denied="$(opa eval --format raw --data /tmp/agentos-v32-opa/policy.rego --input "/tmp/agentos-v32-opa/$fixture" 'data.agentos.policy.allow')"
+            echo "$fixture=$denied" | tee -a /tmp/control-policy-proof.txt
+            test "$denied" = "false"
+          done
+
+      - name: Run pinned Runtime Golden Slice with compiled policy digest
+        run: |
+          AGENTOS_POLICY_DIGEST="$POLICY_DIGEST" python runtime/scripts/kind-temporal-evidence-golden.py | tee /tmp/runtime-golden-proof.txt
+          grep -qx 'PASS' /tmp/runtime-golden-proof.txt
+          grep '^run_id=' /tmp/runtime-golden-proof.txt
+          grep '^session_id=' /tmp/runtime-golden-proof.txt
+          grep '^workflow_id=' /tmp/runtime-golden-proof.txt
+          grep '^evidence_manifest=' /tmp/runtime-golden-proof.txt
+          grep '^trace_id=' /tmp/runtime-golden-proof.txt
+          runtime_policy_digest="$(sed -n 's/^policy_digest=//p' /tmp/runtime-golden-proof.txt)"
+          test "$runtime_policy_digest" = "$POLICY_DIGEST"
+          echo "cross_repo_policy_digest=$runtime_policy_digest" | tee -a /tmp/runtime-golden-proof.txt
+
+      - name: Assert real sandbox replacement
+        run: |
+          sandbox_a_id="$(sed -n 's/^sandbox_a_id=//p' /tmp/runtime-golden-proof.txt)"
+          sandbox_b_id="$(sed -n 's/^sandbox_b_id=//p' /tmp/runtime-golden-proof.txt)"
+          test -n "$sandbox_a_id"
+          test -n "$sandbox_b_id"
+          test "$sandbox_a_id" != "$sandbox_b_id"
+          kubectl -n agentos-v32-golden wait --for=delete "pod/$sandbox_a_id" --timeout=60s
+          kubectl -n agentos-v32-golden wait --for=condition=Ready "pod/$sandbox_b_id" --timeout=60s
+          if kubectl -n agentos-v32-golden get "pod/$sandbox_a_id" >/dev/null 2>&1; then
+            echo "old sandbox Pod still exists" >&2
+            exit 1
+          fi
+
+      - name: Upload cross-repo provenance proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentos-v32-cross-repo-proof
+          path: |
+            /tmp/control-policy-proof.txt
+            /tmp/runtime-golden-proof.txt
+            /tmp/agentos-v32-opa/policy.rego
