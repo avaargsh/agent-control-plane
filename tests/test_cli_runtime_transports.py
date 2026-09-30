@@ -1,7 +1,11 @@
 import json
+import subprocess
 from types import SimpleNamespace
 
+import pytest
+
 from agent_control_plane.cli_runtime_transports import KubectlApi, TemporalCliApi
+from agent_control_plane.runtime_clients import RuntimeMutationUncertain
 
 
 def test_kubectl_apply_uses_stdin_json(monkeypatch):
@@ -30,3 +34,51 @@ def test_temporal_start_preserves_cli_run_id(monkeypatch):
 
     assert result["runId"] == "run-live-001"
     assert result["status"] == "RUNNING"
+
+
+def test_kubectl_apply_classifies_transport_failure_as_uncertain(monkeypatch):
+    def run(command, **kwargs):
+        return SimpleNamespace(
+            stdout="",
+            stderr="error: unexpected EOF",
+            returncode=1,
+            check_returncode=lambda: (_ for _ in ()).throw(
+                subprocess.CalledProcessError(1, command)
+            ),
+        )
+
+    monkeypatch.setattr(
+        "agent_control_plane.cli_runtime_transports.subprocess.run",
+        run,
+    )
+
+    with pytest.raises(RuntimeMutationUncertain):
+        KubectlApi(context="kind-acp").apply(
+            namespace="agent-runtime",
+            manifest={"kind": "Sandbox"},
+        )
+
+
+def test_temporal_start_preserves_semantic_failure(monkeypatch):
+    def run(command, **kwargs):
+        return SimpleNamespace(
+            stdout="",
+            stderr="workflow already started",
+            returncode=1,
+            check_returncode=lambda: (_ for _ in ()).throw(
+                subprocess.CalledProcessError(1, command)
+            ),
+        )
+
+    monkeypatch.setattr(
+        "agent_control_plane.cli_runtime_transports.subprocess.run",
+        run,
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        TemporalCliApi(address="127.0.0.1:7233").start(
+            workflow_id="agent-release/demo",
+            workflow_type="AgentRunWorkflow",
+            task_queue="agent-runtime",
+            input={"incidentId": "inc-1"},
+        )
