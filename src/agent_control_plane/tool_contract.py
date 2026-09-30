@@ -87,11 +87,6 @@ def execute_with_contract(
     for attempt in range(1, max_attempts + 1):
         try:
             result = invoke(key)
-            return finish(
-                result,
-                attempt=attempt,
-                verified_after_error=False,
-            )
         except RetryableToolError:
             if verification["mode"] != "none":
                 observed = verify(key)
@@ -103,5 +98,12 @@ def execute_with_contract(
                     )
             if attempt == max_attempts:
                 raise
+            continue
+
+        return finish(
+            result,
+            attempt=attempt,
+            verified_after_error=False,
+        )
 
     raise AssertionError("unreachable")
