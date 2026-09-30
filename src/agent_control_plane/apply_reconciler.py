@@ -10,6 +10,10 @@ from .authority import (
 )
 from .dependency_graph import dependency_order
 from .decision_eval import validate_decision_eval_artifact
+from .factory_acceptance import (
+    factory_acceptance_evidence,
+    validate_factory_acceptance_artifact,
+)
 from .golden_slice_replay import freeze_json_mapping
 from .frozen_evidence import FrozenEvidence, resume_from_frozen_evidence
 from .eval_engine import EvalResult, evaluate_gate
@@ -129,6 +133,7 @@ class ApplyReconciler:
         observed_placement: str | None = None,
         recovery_evidence: Mapping[str, Any] | None = None,
         decision_eval_artifact: Mapping[str, Any] | None = None,
+        factory_acceptance_artifact: Mapping[str, Any] | None = None,
         golden_slice: Mapping[str, Any] | None = None,
         approved_evidence: FrozenEvidence | None = None,
         deployed_authority: Mapping[str, Any] | None = None,
@@ -161,6 +166,7 @@ class ApplyReconciler:
 
         decision_eval_evidence: Mapping[str, Any] | None = None
         decision_eval_metrics: Mapping[str, float] = {}
+        factory_acceptance_binding: Mapping[str, Any] | None = None
         if decision_eval_artifact is not None:
             decision_eval_evidence = freeze_json_mapping(
                 decision_eval_artifact
@@ -181,6 +187,7 @@ class ApplyReconciler:
                     "placement": placement,
                     "recovery": recovery,
                     "decision_eval": decision_eval_evidence,
+                    "factory_acceptance": factory_acceptance_binding,
                     "receipts": [],
                     "rollback_receipts": [],
                     "eval_results": [],
@@ -197,6 +204,57 @@ class ApplyReconciler:
                     error=decision_error,
                 )
             decision_eval_metrics = decision_validation.metrics
+
+        if factory_acceptance_artifact is not None:
+            factory_snapshot = freeze_json_mapping(
+                factory_acceptance_artifact
+            )
+            factory_validation = validate_factory_acceptance_artifact(
+                factory_snapshot
+            )
+            if not factory_validation.valid:
+                state.transition(ReleasePhase.BLOCKED)
+                factory_error = (
+                    "FACTORY_ACCEPTANCE_INVALID:"
+                    + str(factory_validation.reason)
+                )
+                evidence = seal_release_evidence({
+                    "kind": "ReleaseEvidence",
+                    "release": plan.release_name,
+                    "golden_slice": golden_slice_provenance,
+                    "placement": placement,
+                    "recovery": recovery,
+                    "decision_eval": decision_eval_evidence,
+                    "factory_acceptance": {
+                        "artifact": factory_snapshot,
+                        "artifact_digest": (
+                            factory_validation.artifact_digest
+                        ),
+                        "integrity_verified": (
+                            factory_validation.integrity_verified
+                        ),
+                        "trusted": False,
+                        "gate_eligible": False,
+                    },
+                    "receipts": [],
+                    "rollback_receipts": [],
+                    "eval_results": [],
+                    "phase": state.phase.value,
+                    "factory_acceptance_error": factory_error,
+                })
+                return ApplyResult(
+                    release_name=plan.release_name,
+                    phase=state.phase.value,
+                    receipts=(),
+                    rollback_receipts=(),
+                    eval_results=(),
+                    evidence=evidence,
+                    error=factory_error,
+                )
+
+            factory_acceptance_binding = freeze_json_mapping(
+                factory_acceptance_evidence(factory_snapshot)
+            )
 
         authority_decision: AuthorityAdmissionDecision | None = None
         authority_error: str | None = None
@@ -238,6 +296,7 @@ class ApplyReconciler:
                 "placement": placement,
                 "recovery": recovery,
                 "decision_eval": decision_eval_evidence,
+                "factory_acceptance": factory_acceptance_binding,
                 "authority": authority_evidence,
                 "receipts": [],
                 "rollback_receipts": [],
@@ -271,6 +330,7 @@ class ApplyReconciler:
                 "placement": placement,
                 "recovery": recovery,
                 "decision_eval": decision_eval_evidence,
+                "factory_acceptance": factory_acceptance_binding,
                 "authority": authority_evidence,
                 "policy": asdict(
                     policy_decision
@@ -306,6 +366,7 @@ class ApplyReconciler:
                 "placement": placement,
                 "recovery": recovery,
                 "decision_eval": decision_eval_evidence,
+                "factory_acceptance": factory_acceptance_binding,
                 "authority": authority_evidence,
                 "policy": asdict(policy_decision),
                 "conformance": {
@@ -400,6 +461,7 @@ class ApplyReconciler:
                 "placement": placement,
                 "recovery": recovery,
                 "decision_eval": decision_eval_evidence,
+                "factory_acceptance": factory_acceptance_binding,
                 "authority": authority_evidence,
                 "policy": asdict(
                     policy_decision
@@ -508,6 +570,7 @@ class ApplyReconciler:
             "placement": placement,
             "recovery": recovery,
             "decision_eval": decision_eval_evidence,
+            "factory_acceptance": factory_acceptance_binding,
             "authority": authority_evidence,
             "policy": asdict(
                 policy_decision
