@@ -15,7 +15,15 @@ class TemporalApi(Protocol):
     def describe(self, *, workflow_id: str) -> Mapping[str, Any] | None:
         ...
 
-    def start(self, *, workflow_id: str, workflow_type: str, task_queue: str, input: Mapping[str, Any]) -> Mapping[str, Any]:
+    def start(
+        self,
+        *,
+        workflow_id: str,
+        workflow_type: str,
+        task_queue: str,
+        input: Mapping[str, Any],
+        operation_id: str,
+    ) -> Mapping[str, Any]:
         ...
 
     def terminate(self, *, workflow_id: str, reason: str) -> Mapping[str, Any]:
