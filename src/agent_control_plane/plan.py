@@ -10,6 +10,8 @@ class ResolvedReleasePlan:
     bundle_name: str
     version: str | None
     bindings: Mapping[str, dict[str, Any]]
+    authority_ref: str | None = None
+    authority_digest: str | None = None
     policy_refs: tuple[str, ...] = field(default_factory=tuple)
     eval_gates: tuple[str, ...] = field(default_factory=tuple)
     rollout: Mapping[str, Any] = field(default_factory=dict)
