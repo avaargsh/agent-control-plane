@@ -77,7 +77,7 @@ def _decision(*, synthetic=False, measured=True, fallback_count=1):
                 "fallback_rate": fallback_count / 2,
                 "accuracy": 1.0 if fallback_count else None,
                 "p50_latency_ms": 20.0 if fallback_count else None,
-                "p95_latency_ms": 24.0 if fallback_count else None,
+                "p95_latency_ms": 20.0 if fallback_count else None,
                 "mean_tokens_processed": 48.0 if fallback_count else None,
                 "cases": (
                     [{
