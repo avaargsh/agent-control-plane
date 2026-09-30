@@ -44,9 +44,8 @@ The inventory is derived state, not another desired-state CRD. It groups admitte
 
 ```text
 Fleet
-  -> Team
   -> Agent
-      -> deployment / release
+      -> deployment / release (teamRef)
           -> authorityDigest
           -> runtimeRefs
           -> grantCount
