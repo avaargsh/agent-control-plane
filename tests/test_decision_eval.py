@@ -33,7 +33,7 @@ def artifact(*, measured: bool = False):
             "threshold": 0.8,
             "coverage": 0.75,
             "risk": 0.02,
-            "false_automation_rate": 0.01,
+            "false_automation_rate": 0.015,
             "fallback_rate": 0.25,
             "risk_budget": 0.05,
         },
@@ -88,7 +88,7 @@ def test_verified_decision_artifact_exposes_sealed_gate_metrics():
     assert result.valid is True
     assert result.reason is None
     assert result.metrics["accuracy"] == 0.95
-    assert result.metrics["false_automation_rate"] == 0.01
+    assert result.metrics["false_automation_rate"] == 0.015
     assert result.metrics["fallback_rate"] == 0.25
     assert result.metrics["fallback_measured"] == 1.0
     assert result.metrics["dataset_case_count"] == 2.0
@@ -216,3 +216,65 @@ def test_duplicate_dataset_case_ids_fail_closed():
 
     assert result.valid is False
     assert result.reason == "DATASET_CASES_INVALID"
+
+
+
+def test_resealed_high_confidence_fallback_case_fails_closed():
+    value = artifact(measured=True)
+    value["fallback_evaluation"]["cases"][0][
+        "fast_confidence"
+    ] = 0.95
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert (
+        result.reason
+        == "FALLBACK_CONFIDENCE_NOT_BELOW_THRESHOLD"
+    )
+
+
+def test_resealed_operating_coverage_fallback_mismatch_fails_closed():
+    value = artifact(measured=True)
+    value["operating_point"]["fallback_rate"] = 0.10
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "OPERATING_COVERAGE_FALLBACK_MISMATCH"
+
+
+def test_resealed_operating_false_automation_mismatch_fails_closed():
+    value = artifact(measured=True)
+    value["operating_point"]["false_automation_rate"] = 0.20
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "OPERATING_FALSE_AUTOMATION_MISMATCH"
+
+
+def test_resealed_operating_risk_over_budget_fails_closed():
+    value = artifact(measured=True)
+    value["operating_point"]["risk"] = 0.10
+    value["operating_point"]["false_automation_rate"] = 0.075
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "OPERATING_RISK_BUDGET_EXCEEDED"
+
+
+def test_resealed_operating_out_of_range_fails_closed():
+    value = artifact(measured=True)
+    value["operating_point"]["coverage"] = 1.2
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "OPERATING_METRIC_OUT_OF_RANGE:coverage"
