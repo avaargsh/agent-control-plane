@@ -9,6 +9,7 @@ from .authority import (
     authority_digest,
 )
 from .dependency_graph import dependency_order
+from .decision_eval import validate_decision_eval_artifact
 from .golden_slice_replay import freeze_json_mapping
 from .frozen_evidence import FrozenEvidence, resume_from_frozen_evidence
 from .eval_engine import EvalResult, evaluate_gate
@@ -127,6 +128,7 @@ class ApplyReconciler:
         ] | None = None,
         observed_placement: str | None = None,
         recovery_evidence: Mapping[str, Any] | None = None,
+        decision_eval_artifact: Mapping[str, Any] | None = None,
         golden_slice: Mapping[str, Any] | None = None,
         approved_evidence: FrozenEvidence | None = None,
         deployed_authority: Mapping[str, Any] | None = None,
@@ -156,6 +158,45 @@ class ApplyReconciler:
         state.transition(
             ReleasePhase.RESOLVED
         )
+
+        decision_eval_evidence: Mapping[str, Any] | None = None
+        decision_eval_metrics: Mapping[str, float] = {}
+        if decision_eval_artifact is not None:
+            decision_eval_evidence = freeze_json_mapping(
+                decision_eval_artifact
+            )
+            decision_validation = validate_decision_eval_artifact(
+                decision_eval_evidence
+            )
+            if not decision_validation.valid:
+                state.transition(ReleasePhase.BLOCKED)
+                decision_error = (
+                    "DECISION_EVAL_INVALID:"
+                    + str(decision_validation.reason)
+                )
+                evidence = seal_release_evidence({
+                    "kind": "ReleaseEvidence",
+                    "release": plan.release_name,
+                    "golden_slice": golden_slice_provenance,
+                    "placement": placement,
+                    "recovery": recovery,
+                    "decision_eval": decision_eval_evidence,
+                    "receipts": [],
+                    "rollback_receipts": [],
+                    "eval_results": [],
+                    "phase": state.phase.value,
+                    "decision_eval_error": decision_error,
+                })
+                return ApplyResult(
+                    release_name=plan.release_name,
+                    phase=state.phase.value,
+                    receipts=(),
+                    rollback_receipts=(),
+                    eval_results=(),
+                    evidence=evidence,
+                    error=decision_error,
+                )
+            decision_eval_metrics = decision_validation.metrics
 
         authority_decision: AuthorityAdmissionDecision | None = None
         authority_error: str | None = None
@@ -196,6 +237,7 @@ class ApplyReconciler:
                 "golden_slice": golden_slice_provenance,
                 "placement": placement,
                 "recovery": recovery,
+                "decision_eval": decision_eval_evidence,
                 "authority": authority_evidence,
                 "receipts": [],
                 "rollback_receipts": [],
@@ -228,6 +270,7 @@ class ApplyReconciler:
                 "golden_slice": golden_slice_provenance,
                 "placement": placement,
                 "recovery": recovery,
+                "decision_eval": decision_eval_evidence,
                 "authority": authority_evidence,
                 "policy": asdict(
                     policy_decision
@@ -262,6 +305,7 @@ class ApplyReconciler:
                 "golden_slice": golden_slice_provenance,
                 "placement": placement,
                 "recovery": recovery,
+                "decision_eval": decision_eval_evidence,
                 "authority": authority_evidence,
                 "policy": asdict(policy_decision),
                 "conformance": {
@@ -355,6 +399,7 @@ class ApplyReconciler:
                 "golden_slice": golden_slice_provenance,
                 "placement": placement,
                 "recovery": recovery,
+                "decision_eval": decision_eval_evidence,
                 "authority": authority_evidence,
                 "policy": asdict(
                     policy_decision
@@ -399,7 +444,11 @@ class ApplyReconciler:
         eval_results = tuple(
             evaluate_gate(
                 gate,
-                {**(metrics or {}), **recovery_metrics},
+                {
+                    **(metrics or {}),
+                    **decision_eval_metrics,
+                    **recovery_metrics,
+                },
             )
             for gate in eval_gates
         )
@@ -458,6 +507,7 @@ class ApplyReconciler:
             "golden_slice": golden_slice_provenance,
             "placement": placement,
             "recovery": recovery,
+            "decision_eval": decision_eval_evidence,
             "authority": authority_evidence,
             "policy": asdict(
                 policy_decision
