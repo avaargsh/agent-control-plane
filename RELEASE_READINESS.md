@@ -11,6 +11,8 @@ A public v0.1 candidate should satisfy all of the following:
 - [x] explicit Kubernetes/Temporal runtime boundaries
 - [x] opt-in live smoke preflight
 - [x] kubectl and Temporal CLI transports
+- [x] real OPA v1.21.0 policy-enforcement proof
+- [x] cross-repository kind + Temporal + Kubernetes sandbox-replacement provenance proof
 - [x] known limitations documented
 - [x] repository license selected and added (Apache-2.0)
 - [x] CONTRIBUTING.md added
@@ -66,7 +68,7 @@ The final RC audit reconciled stale pre-RC pull requests after preserving the re
 
 - The project is a reference control plane, not a production multi-tenant service.
 - CLI transports prove the integration boundary but are not a substitute for hardened SDK/service clients.
-- Live Kubernetes/Temporal smoke requires a compatible Sandbox CRD and workflow worker; preflight alone is not an end-to-end execution.
+- The standalone `make smoke` profile still requires a compatible Sandbox CRD and workflow worker. Separately, the v3.2 cross-repository Golden Slice does exercise real kind Pods plus Temporal for the binding/provenance contract; that proof is not equivalent to production Sandbox CRD coverage.
 - Secret management, quota/budget enforcement, tenant isolation and HA deployment are intentionally incomplete.
 - Provider prepare/execution contracts are still evolving; backward compatibility is not guaranteed before v1.
 - The project does not own or redefine Temporal continuation semantics, Kubernetes sandbox semantics, MCP semantics or harness behavior.
