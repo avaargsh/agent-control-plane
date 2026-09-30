@@ -1,0 +1,58 @@
+name: v0.1-release-gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/**"
+      - "schemas/**"
+      - "examples/**"
+      - "experiments/**"
+      - "scripts/verify_release.py"
+      - "scripts/fresh_clone_release_smoke.sh"
+      - "pyproject.toml"
+      - "RELEASE_NOTES.md"
+      - "RELEASE_READINESS.md"
+      - ".github/workflows/v01-release-gate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "schemas/**"
+      - "examples/**"
+      - "experiments/**"
+      - "scripts/verify_release.py"
+      - "scripts/fresh_clone_release_smoke.sh"
+      - "pyproject.toml"
+      - "RELEASE_NOTES.md"
+      - "RELEASE_READINESS.md"
+      - ".github/workflows/v01-release-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install release dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Run release verifier
+        run: make verify-release
+      - name: Run fresh-clone smoke
+        run: sh scripts/fresh_clone_release_smoke.sh | tee /tmp/fresh-clone-release.txt
+      - name: Upload release proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v01-release-gate-proof
+          path: |
+            .artifacts/release/
+            /tmp/fresh-clone-release.txt
