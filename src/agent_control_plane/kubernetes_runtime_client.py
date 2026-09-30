@@ -134,7 +134,23 @@ class KubernetesSandboxClient:
 
     def delete_sandbox(self, resource_ref: str) -> Mapping[str, Any]:
         name = resource_ref.rsplit("/", 1)[-1]
-        return self.api.delete(namespace=self.namespace, name=name)
+        try:
+            return self.api.delete(
+                namespace=self.namespace,
+                name=name,
+            )
+        except RuntimeMutationUncertain:
+            observed = self.api.get(
+                namespace=self.namespace,
+                name=name,
+            )
+            if observed is not None:
+                raise
+            return {
+                "deleted": True,
+                "name": name,
+                "verifiedAfterUncertainMutation": True,
+            }
 
     def restore_sandbox(
         self,
@@ -149,14 +165,33 @@ class KubernetesSandboxClient:
             raise ValueError("previous sandbox name is required")
         if namespace != self.namespace:
             raise ValueError("previous sandbox namespace mismatch")
-        resource = self.api.apply(
-            namespace=self.namespace,
-            manifest=previous,
-        )
+        verified_after_uncertain_mutation = False
+        try:
+            resource = self.api.apply(
+                namespace=self.namespace,
+                manifest=previous,
+            )
+        except RuntimeMutationUncertain:
+            observed = self.api.get(
+                namespace=self.namespace,
+                name=name,
+            )
+            if (
+                observed is None
+                or _managed_sandbox_projection(observed)
+                != _managed_sandbox_projection(previous)
+            ):
+                raise
+            resource = observed
+            verified_after_uncertain_mutation = True
+
         restored_metadata = dict(resource.get("metadata", {}))
         return {
             "restored": True,
             "name": name,
             "uid": restored_metadata.get("uid"),
             "resourceVersion": restored_metadata.get("resourceVersion"),
+            "verifiedAfterUncertainMutation": (
+                verified_after_uncertain_mutation
+            ),
         }
