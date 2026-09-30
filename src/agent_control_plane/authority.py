@@ -147,16 +147,29 @@ def diff_authority(
 def admit_authority_change(
     baseline: Mapping[str, Any] | None,
     proposed: Mapping[str, Any],
+    *,
+    allow_initial: bool = False,
 ) -> AuthorityAdmissionDecision:
     """Fail closed on authority expansion or enforcement-boundary drift."""
     proposed_digest = authority_digest(proposed)
     if baseline is None:
+        if not allow_initial:
+            return AuthorityAdmissionDecision(
+                decision="DENY",
+                admitted=False,
+                baseline_digest=None,
+                proposed_digest=proposed_digest,
+                reasons=(
+                    "INITIAL_AUTHORITY_REVIEW_REQUIRED",
+                ),
+                diff=AuthorityDiff(),
+            )
         return AuthorityAdmissionDecision(
             decision="ADMIT",
             admitted=True,
             baseline_digest=None,
             proposed_digest=proposed_digest,
-            reasons=("INITIAL_AUTHORITY",),
+            reasons=("INITIAL_AUTHORITY_APPROVED",),
             diff=AuthorityDiff(),
         )
 
