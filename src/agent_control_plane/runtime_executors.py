@@ -26,13 +26,25 @@ class KubernetesSandboxExecutor:
         )
 
     def rollback(self, *, plan: ResolvedReleasePlan, binding: dict[str, Any], receipt: ExecutionReceipt) -> RollbackReceipt:
+        if not receipt.changed:
+            return RollbackReceipt(
+                binding_name=receipt.binding_name,
+                provider_type=self.provider_type,
+                provider_name=self.provider_name,
+                resource_ref=receipt.resource_ref,
+                rolled_back=False,
+                evidence={
+                    "skipped": True,
+                    "reason": "resource-preexisted",
+                },
+            )
         evidence = self.client.delete_sandbox(receipt.resource_ref)
         return RollbackReceipt(
             binding_name=receipt.binding_name,
             provider_type=self.provider_type,
             provider_name=self.provider_name,
             resource_ref=receipt.resource_ref,
-            rolled_back=receipt.changed,
+            rolled_back=True,
             evidence=dict(evidence),
         )
 
@@ -56,12 +68,24 @@ class TemporalWorkflowExecutor:
         )
 
     def rollback(self, *, plan: ResolvedReleasePlan, binding: dict[str, Any], receipt: ExecutionReceipt) -> RollbackReceipt:
+        if not receipt.changed:
+            return RollbackReceipt(
+                binding_name=receipt.binding_name,
+                provider_type=self.provider_type,
+                provider_name=self.provider_name,
+                resource_ref=receipt.resource_ref,
+                rolled_back=False,
+                evidence={
+                    "skipped": True,
+                    "reason": "resource-preexisted",
+                },
+            )
         evidence = self.client.terminate_workflow(receipt.resource_ref)
         return RollbackReceipt(
             binding_name=receipt.binding_name,
             provider_type=self.provider_type,
             provider_name=self.provider_name,
             resource_ref=receipt.resource_ref,
-            rolled_back=receipt.changed,
+            rolled_back=True,
             evidence=dict(evidence),
         )
