@@ -71,9 +71,9 @@ TemporalWorkflowExecutor
 Configure a local environment:
 
 ```bash
-export ACP_KUBE_CONTEXT=kind-agent-control-plane
-export ACP_KUBE_NAMESPACE=agent-runtime
-export ACP_TEMPORAL_ADDRESS=127.0.0.1:7233
+export KUBE_CONTEXT=kind-agent-control-plane
+export KUBE_NAMESPACE=agent-runtime
+export TEMPORAL_ADDRESS=127.0.0.1:7233
 make preflight
 make smoke
 ```
