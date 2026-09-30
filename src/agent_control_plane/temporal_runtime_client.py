@@ -33,15 +33,26 @@ _TERMINAL_WORKFLOW_STATUSES = {
 }
 
 
-def _workflow_is_terminal(status: Any) -> bool:
+def _normalized_workflow_status(status: Any) -> str:
     if not isinstance(status, str) or not status:
-        return False
+        return ""
     normalized = status.upper()
     if normalized.startswith("WORKFLOW_EXECUTION_STATUS_"):
         normalized = normalized.removeprefix(
             "WORKFLOW_EXECUTION_STATUS_"
         )
-    return normalized in _TERMINAL_WORKFLOW_STATUSES
+    return normalized
+
+
+def _workflow_is_terminal(status: Any) -> bool:
+    return (
+        _normalized_workflow_status(status)
+        in _TERMINAL_WORKFLOW_STATUSES
+    )
+
+
+def _workflow_is_running(status: Any) -> bool:
+    return _normalized_workflow_status(status) == "RUNNING"
 
 
 class TemporalWorkflowClient:
@@ -60,6 +71,11 @@ class TemporalWorkflowClient:
             if _workflow_is_terminal(status):
                 raise TerminalRuntimeConflict(
                     "temporal workflow identity is already terminal: "
+                    f"{workflow_id} status={status}"
+                )
+            if not _workflow_is_running(status):
+                raise TerminalRuntimeConflict(
+                    "temporal workflow status is not safely attachable: "
                     f"{workflow_id} status={status}"
                 )
             return RuntimeApplyResult(
@@ -93,6 +109,12 @@ class TemporalWorkflowClient:
                 raise TerminalRuntimeConflict(
                     "temporal workflow committed but is already terminal "
                     "while recovering an uncertain start: "
+                    f"{workflow_id} status={observed_status}"
+                )
+            if not _workflow_is_running(observed_status):
+                raise TerminalRuntimeConflict(
+                    "temporal workflow status is not safely recoverable "
+                    "after uncertain start: "
                     f"{workflow_id} status={observed_status}"
                 )
             started = observed
