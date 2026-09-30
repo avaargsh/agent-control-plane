@@ -20,6 +20,12 @@ class KubernetesRuntimeClient(Protocol):
     def delete_sandbox(self, resource_ref: str) -> Mapping[str, Any]:
         ...
 
+    def restore_sandbox(
+        self,
+        previous: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        ...
+
 
 class TemporalRuntimeClient(Protocol):
     def ensure_workflow(self, desired: Mapping[str, Any]) -> RuntimeApplyResult:

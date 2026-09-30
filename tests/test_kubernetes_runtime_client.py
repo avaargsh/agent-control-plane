@@ -141,3 +141,33 @@ def test_kubernetes_client_ignores_defaulted_unmanaged_spec_fields():
 
     assert second.changed is False
     assert api.apply_calls == 1
+
+
+
+def test_kubernetes_client_records_create_update_and_restores_previous_state():
+    api = FakeApi()
+    client = KubernetesSandboxClient(api)
+
+    created = client.ensure_sandbox(desired())
+    assert created.evidence["changeType"] == "created"
+
+    name = created.resource_ref.rsplit("/", 1)[-1]
+    existing = api.resources[("agent-runtime", name)]
+    api.resources[("agent-runtime", name)] = {
+        **existing,
+        "spec": {
+            **existing["spec"],
+            "isolation": "none",
+        },
+    }
+
+    updated = client.ensure_sandbox(desired())
+    assert updated.changed is True
+    assert updated.evidence["changeType"] == "updated"
+    previous = updated.evidence["previousManaged"]
+    assert previous["spec"]["isolation"] == "none"
+
+    restored = client.restore_sandbox(previous)
+    assert restored["restored"] is True
+    live = api.resources[("agent-runtime", name)]
+    assert live["spec"]["isolation"] == "none"

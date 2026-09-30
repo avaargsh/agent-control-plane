@@ -38,7 +38,18 @@ class KubernetesSandboxExecutor:
                     "reason": "resource-preexisted",
                 },
             )
-        evidence = self.client.delete_sandbox(receipt.resource_ref)
+
+        change_type = receipt.evidence.get("changeType")
+        if change_type == "updated":
+            previous = receipt.evidence.get("previousManaged")
+            if not isinstance(previous, dict):
+                raise RuntimeError(
+                    "updated sandbox receipt is missing previous managed state"
+                )
+            evidence = self.client.restore_sandbox(previous)
+        else:
+            evidence = self.client.delete_sandbox(receipt.resource_ref)
+
         return RollbackReceipt(
             binding_name=receipt.binding_name,
             provider_type=self.provider_type,

@@ -78,9 +78,14 @@ class KubernetesSandboxClient:
                 "placement": dict(desired.get("placement", {})),
             },
         }
+        previous_managed = (
+            _managed_sandbox_projection(existing)
+            if existing is not None
+            else None
+        )
         changed = (
             existing is None
-            or _managed_sandbox_projection(existing) != manifest
+            or previous_managed != manifest
         )
         resource = (
             self.api.apply(
@@ -91,16 +96,50 @@ class KubernetesSandboxClient:
             else existing
         )
         metadata = dict((resource or {}).get("metadata", {}))
+        change_type = (
+            "created"
+            if existing is None
+            else ("updated" if changed else "unchanged")
+        )
+        evidence: dict[str, Any] = {
+            "uid": metadata.get("uid"),
+            "resourceVersion": metadata.get("resourceVersion"),
+            "kind": "Sandbox",
+            "changeType": change_type,
+        }
+        if change_type == "updated":
+            evidence["previousManaged"] = previous_managed
         return RuntimeApplyResult(
             resource_ref=f"k8s://{self.namespace}/sandbox/{name}",
             changed=changed,
-            evidence={
-                "uid": metadata.get("uid"),
-                "resourceVersion": metadata.get("resourceVersion"),
-                "kind": "Sandbox",
-            },
+            evidence=evidence,
         )
 
     def delete_sandbox(self, resource_ref: str) -> Mapping[str, Any]:
         name = resource_ref.rsplit("/", 1)[-1]
         return self.api.delete(namespace=self.namespace, name=name)
+
+    def restore_sandbox(
+        self,
+        previous: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        metadata = previous.get("metadata")
+        if not isinstance(metadata, Mapping):
+            raise ValueError("previous sandbox metadata is required")
+        name = metadata.get("name")
+        namespace = metadata.get("namespace")
+        if not isinstance(name, str) or not name:
+            raise ValueError("previous sandbox name is required")
+        if namespace != self.namespace:
+            raise ValueError("previous sandbox namespace mismatch")
+        resource = self.api.apply(
+            namespace=self.namespace,
+            manifest=previous,
+        )
+        restored_metadata = dict(resource.get("metadata", {}))
+        return {
+            "restored": True,
+            "name": name,
+            "uid": restored_metadata.get("uid"),
+            "resourceVersion": restored_metadata.get("resourceVersion"),
+        }
