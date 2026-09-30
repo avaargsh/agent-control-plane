@@ -156,6 +156,8 @@ def validate_factory_acceptance_artifact(
             False,
         )
 
+    gate_ids: set[str] = set()
+    gate_statuses: set[str] = set()
     for gate in gates:
         if not isinstance(gate, Mapping):
             return FactoryAcceptanceValidation(
@@ -166,7 +168,8 @@ def validate_factory_acceptance_artifact(
                 False,
                 False,
             )
-        if not isinstance(gate.get("gateId"), str) or not gate.get("gateId"):
+        gate_id = gate.get("gateId")
+        if not isinstance(gate_id, str) or not gate_id:
             return FactoryAcceptanceValidation(
                 False,
                 "GATE_ID_REQUIRED",
@@ -175,7 +178,17 @@ def validate_factory_acceptance_artifact(
                 False,
                 False,
             )
-        if gate.get("status") not in {
+        if gate_id in gate_ids:
+            return FactoryAcceptanceValidation(
+                False,
+                "GATE_ID_DUPLICATE",
+                str(digest),
+                True,
+                False,
+                False,
+            )
+        status = gate.get("status")
+        if status not in {
             "PENDING",
             "PASS",
             "WARN",
@@ -191,6 +204,25 @@ def validate_factory_acceptance_artifact(
                 False,
                 False,
             )
+        gate_ids.add(gate_id)
+        gate_statuses.add(str(status))
+
+    if gate_statuses & {"FAIL", "ERROR", "BLOCKED"}:
+        expected_disposition = "REJECT"
+    elif gate_statuses & {"WARN", "PENDING"}:
+        expected_disposition = "HOLD"
+    else:
+        expected_disposition = "ACCEPT"
+
+    if disposition != expected_disposition:
+        return FactoryAcceptanceValidation(
+            False,
+            "GATE_DISPOSITION_MISMATCH",
+            str(digest),
+            True,
+            False,
+            False,
+        )
 
     return FactoryAcceptanceValidation(
         True,
