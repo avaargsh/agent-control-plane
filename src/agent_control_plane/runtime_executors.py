@@ -91,7 +91,16 @@ class TemporalWorkflowExecutor:
                     "reason": "resource-preexisted",
                 },
             )
-        evidence = self.client.terminate_workflow(receipt.resource_ref)
+        run_id = receipt.evidence.get("runId")
+        if not isinstance(run_id, str) or not run_id:
+            raise RuntimeError(
+                "changed Temporal receipt is missing runId; "
+                "refusing unscoped compensation"
+            )
+        evidence = self.client.terminate_workflow(
+            receipt.resource_ref,
+            expected_run_id=run_id,
+        )
         return RollbackReceipt(
             binding_name=receipt.binding_name,
             provider_type=self.provider_type,
