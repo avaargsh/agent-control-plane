@@ -1,0 +1,35 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://example.invalid/schemas/tool-contract.schema.json",
+  "title":"ToolContract",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["apiVersion","kind","metadata","spec"],
+  "properties":{
+    "apiVersion":{"const":"agentplane.io/v1alpha1"},
+    "kind":{"const":"ToolContract"},
+    "metadata":{"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string","minLength":1}}},
+    "spec":{"type":"object","additionalProperties":false,"required":["tool","operation","effect","idempotency","retry","verification"],"properties":{
+      "tool":{"type":"string","minLength":1},
+      "operation":{"type":"string","minLength":1},
+      "effect":{"enum":["read-only","write","external-side-effect"]},
+      "idempotency":{"type":"object","additionalProperties":false,"required":["mode"],"properties":{
+        "mode":{"enum":["required","supported","none"]},
+        "keyTemplate":{"type":"string","default":"{run_id}:{action_id}"}
+      }},
+      "retry":{"type":"object","additionalProperties":false,"required":["maxAttempts"],"properties":{
+        "maxAttempts":{"type":"integer","minimum":1,"maximum":10},
+        "retryableErrors":{"type":"array","items":{"type":"string"},"uniqueItems":true}
+      }},
+      "verification":{"type":"object","additionalProperties":false,"required":["mode"],"properties":{
+        "mode":{"enum":["none","read-after-write","status-check"]},
+        "tool":{"type":"string"},
+        "operation":{"type":"string"}
+      }},
+      "compensation":{"type":"object","additionalProperties":false,"required":["tool","operation"],"properties":{
+        "tool":{"type":"string","minLength":1},
+        "operation":{"type":"string","minLength":1}
+      }}
+    }}
+  }
+}

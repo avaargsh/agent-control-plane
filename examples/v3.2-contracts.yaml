@@ -1,0 +1,94 @@
+---
+apiVersion: agentplane.io/v1alpha1
+kind: CapabilityIntent
+metadata:
+  name: sre-investigator-capabilities
+spec:
+  defaultDeny: true
+  capabilities:
+    - name: filesystem.read
+      constraints:
+        paths:
+          - /var/log/app.log
+    - name: network.egress
+      constraints:
+        hosts:
+          - api.internal.example
+    - name: kubernetes.mutate
+      constraints:
+        verbs:
+          - patch
+        resources:
+          - deployments
+    - name: tool.observability.query
+  credentialLeases:
+    - ref: secret://observability-reader
+      ttlSeconds: 900
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: SandboxBinding
+metadata:
+  name: run-001-sandbox
+spec:
+  runRef: run-001
+  sessionRef: session-001
+  provider: k8s-agent-sandbox
+  claimRef: sandboxclaim://run-001
+  workspaceStateRef: state://workspace/run-001
+  artifactRefs:
+    - s3://agent-artifacts/run-001/checkpoint-3
+  checkpointPolicy: after-step
+  expireAfterSeconds: 1800
+  recovery:
+    strategy: restore-and-rebind
+    requireCheckpoint: true
+status:
+  phase: Checkpointed
+  sandboxIdentity: sandbox-uid-001
+  checkpointRef: checkpoint://run-001/step-3
+  bindingGeneration: 1
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: ToolContract
+metadata:
+  name: deploy-production
+spec:
+  tool: deploy
+  operation: apply
+  effect: external-side-effect
+  idempotency:
+    mode: required
+    keyTemplate: "{run_id}:{action_id}"
+  retry:
+    maxAttempts: 3
+    retryableErrors:
+      - lost-ack
+      - timeout
+  verification:
+    mode: read-after-write
+    tool: deploy
+    operation: status
+  compensation:
+    tool: deploy
+    operation: rollback
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: EvidenceEvent
+metadata:
+  id: evt-001
+spec:
+  runRef: run-001
+  actionId: action-001
+  eventType: tool.commit
+  occurredAt: "2026-09-30T06:00:00Z"
+  payloadRef: s3://agent-evidence/run-001/evt-001.json
+  payloadDigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  provenance:
+    generated_by: tool-proxy
+    observed_by: sandbox-supervisor
+    authorized_by: opa-policy-engine
+    executed_by: mcp-tool-gateway
+    committed_by: deploy-service

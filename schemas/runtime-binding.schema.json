@@ -1,95 +1,34 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/schemas/runtime-binding.schema.json",
-  "title": "RuntimeBinding",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ],
-  "properties": {
-    "apiVersion": {
-      "const": "agentplane.io/v1alpha1"
-    },
-    "kind": {
-      "const": "RuntimeBinding"
-    },
-    "metadata": {
-      "type": "object",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
-    },
-    "spec": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "type",
-        "provider"
-      ],
-      "properties": {
-        "type": {
-          "enum": [
-            "harness",
-            "workflow",
-            "context",
-            "memory",
-            "sandbox",
-            "tool",
-            "traffic",
-            "model",
-            "decision"
-          ]
-        },
-        "provider": {
-          "type": "string"
-        },
-        "endpointRef": {
-          "type": "string"
-        },
-        "dependsOn": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "config": {
-          "type": "object",
-          "additionalProperties": true
-        },
-        "secretRefs": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "uniqueItems": true
-        },
-        "requires": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "features": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            }
-          }
-        }
-      }
-    }
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://example.invalid/schemas/runtime-binding.schema.json",
+  "title":"RuntimeBinding",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["apiVersion","kind","metadata","spec"],
+  "properties":{
+    "apiVersion":{"const":"agentplane.io/v1alpha1"},
+    "kind":{"const":"RuntimeBinding"},
+    "metadata":{"type":"object","required":["name"],"properties":{"name":{"type":"string"}},"additionalProperties":false},
+    "spec":{"type":"object","additionalProperties":false,"required":["type","provider"],"properties":{
+      "type":{"enum":["harness","workflow","context","memory","sandbox","tool","traffic","model","decision"]},
+      "provider":{"type":"string"},
+      "endpointRef":{"type":"string"},
+      "subject":{"type":"object","additionalProperties":false,"properties":{
+        "runRef":{"type":"string","minLength":1},
+        "sessionRef":{"type":"string","minLength":1},
+        "releaseRef":{"type":"string","minLength":1}
+      },"minProperties":1},
+      "recovery":{"type":"object","additionalProperties":false,"properties":{
+        "strategy":{"enum":["rebind","restart-provider","fail-closed"]},
+        "preserveRunIdentity":{"type":"boolean","default":true},
+        "preserveSessionIdentity":{"type":"boolean","default":true}
+      }},
+      "dependsOn":{"type":"array","items":{"type":"string","minLength":1},"uniqueItems":true},
+      "config":{"type":"object","additionalProperties":true},
+      "secretRefs":{"type":"array","items":{"type":"string"},"uniqueItems":true},
+      "requires":{"type":"object","additionalProperties":false,"properties":{
+        "features":{"type":"array","items":{"type":"string","minLength":1},"uniqueItems":true}
+      }}
+    }}
   }
 }
