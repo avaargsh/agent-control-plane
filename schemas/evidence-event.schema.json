@@ -1,0 +1,28 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://example.invalid/schemas/evidence-event.schema.json",
+  "title":"EvidenceEvent",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["apiVersion","kind","metadata","spec"],
+  "properties":{
+    "apiVersion":{"const":"agentplane.io/v1alpha1"},
+    "kind":{"const":"EvidenceEvent"},
+    "metadata":{"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1}}},
+    "spec":{"type":"object","additionalProperties":false,"required":["runRef","eventType","occurredAt","provenance"],"properties":{
+      "runRef":{"type":"string","minLength":1},
+      "actionId":{"type":"string"},
+      "eventType":{"type":"string","minLength":1},
+      "occurredAt":{"type":"string","format":"date-time"},
+      "payloadRef":{"type":"string"},
+      "payloadDigest":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+      "provenance":{"type":"object","additionalProperties":false,"required":["generated_by","observed_by","authorized_by","executed_by","committed_by"],"properties":{
+        "generated_by":{"type":["string","null"]},
+        "observed_by":{"type":["string","null"]},
+        "authorized_by":{"type":["string","null"]},
+        "executed_by":{"type":["string","null"]},
+        "committed_by":{"type":["string","null"]}
+      }}
+    }}
+  }
+}

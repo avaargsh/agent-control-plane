@@ -22,6 +22,7 @@ class MCPToolAdapter:
             "provider": self.provider_name,
             "release": plan.release_name,
             "endpointRef": spec.get("endpointRef"),
+            "contractRef": spec.get("toolContractRef"),
             "capabilities": list(config.get("capabilities", [])),
             "mode": config.get("mode", "read-only"),
         }

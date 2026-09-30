@@ -1,0 +1,33 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://example.invalid/schemas/sandbox-binding.schema.json",
+  "title":"SandboxBinding",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["apiVersion","kind","metadata","spec"],
+  "properties":{
+    "apiVersion":{"const":"agentplane.io/v1alpha1"},
+    "kind":{"const":"SandboxBinding"},
+    "metadata":{"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string","minLength":1}}},
+    "spec":{"type":"object","additionalProperties":false,"required":["runRef","sessionRef","provider","recovery"],"properties":{
+      "runRef":{"type":"string","minLength":1},
+      "sessionRef":{"type":"string","minLength":1},
+      "provider":{"type":"string","minLength":1},
+      "claimRef":{"type":"string"},
+      "workspaceStateRef":{"type":"string"},
+      "artifactRefs":{"type":"array","items":{"type":"string","minLength":1},"uniqueItems":true},
+      "checkpointPolicy":{"enum":["manual","before-release","after-step","periodic"]},
+      "expireAfterSeconds":{"type":"integer","minimum":1},
+      "recovery":{"type":"object","additionalProperties":false,"required":["strategy"],"properties":{
+        "strategy":{"enum":["restore-and-rebind","fresh-and-rebind","fail-closed"]},
+        "requireCheckpoint":{"type":"boolean","default":true}
+      }}
+    }},
+    "status":{"type":"object","additionalProperties":false,"properties":{
+      "phase":{"enum":["Pending","Allocated","Bound","Checkpointed","Recovering","Released","Expired"]},
+      "sandboxIdentity":{"type":"string"},
+      "checkpointRef":{"type":"string"},
+      "bindingGeneration":{"type":"integer","minimum":0}
+    }}
+  }
+}

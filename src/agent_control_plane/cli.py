@@ -197,6 +197,12 @@ def main() -> None:
     bindings = documents.by_kind(
         "RuntimeBinding"
     )
+    capability_intents = documents.by_kind(
+        "CapabilityIntent"
+    )
+    tool_contracts = documents.by_kind(
+        "ToolContract"
+    )
 
     if len(releases) != 1:
         raise SystemExit(
@@ -208,6 +214,8 @@ def main() -> None:
         release=releases[0],
         bundles=bundles,
         bindings=bindings,
+        capability_intents=capability_intents,
+        tool_contracts=tool_contracts,
     )
     print(
         json.dumps(

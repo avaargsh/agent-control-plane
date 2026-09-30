@@ -56,6 +56,46 @@
         "endpointRef": {
           "type": "string"
         },
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "runRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sessionRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "releaseRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "minProperties": 1
+        },
+        "recovery": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "strategy": {
+              "enum": [
+                "rebind",
+                "restart-provider",
+                "fail-closed"
+              ]
+            },
+            "preserveRunIdentity": {
+              "type": "boolean",
+              "default": true
+            },
+            "preserveSessionIdentity": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        },
         "dependsOn": {
           "type": "array",
           "items": {
@@ -88,6 +128,10 @@
               "uniqueItems": true
             }
           }
+        },
+        "toolContractRef": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }
