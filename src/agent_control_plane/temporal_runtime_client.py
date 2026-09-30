@@ -26,6 +26,8 @@ _TERMINAL_WORKFLOW_STATUSES = {
     "CANCELED",
     "CANCELLED",
     "TERMINATED",
+    "CONTINUED_AS_NEW",
+    "CONTINUEDASNEW",
     "TIMED_OUT",
     "TIMEDOUT",
 }
@@ -86,8 +88,21 @@ class TemporalWorkflowClient:
             observed = self.api.describe(workflow_id=workflow_id)
             if observed is None:
                 raise
+            observed_status = observed.get("status")
+            if _workflow_is_terminal(observed_status):
+                raise TerminalRuntimeConflict(
+                    "temporal workflow committed but is already terminal "
+                    "while recovering an uncertain start: "
+                    f"{workflow_id} status={observed_status}"
+                )
             started = observed
             verified_after_uncertain_mutation = True
+
+        if _workflow_is_terminal(started.get("status")):
+            raise TerminalRuntimeConflict(
+                "temporal workflow start returned terminal execution: "
+                f"{workflow_id} status={started.get('status')}"
+            )
 
         return RuntimeApplyResult(
             resource_ref=f"temporal://workflow/{workflow_id}",
