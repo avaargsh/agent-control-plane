@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Sequence
 
+from .authority import (
+    AuthorityAdmissionDecision,
+    admit_authority_change,
+    authority_digest,
+)
 from .dependency_graph import dependency_order
 from .golden_slice_replay import freeze_json_mapping
 from .frozen_evidence import FrozenEvidence, resume_from_frozen_evidence
@@ -33,6 +38,7 @@ class ApplyResult:
     eval_results: tuple[EvalResult, ...]
     evidence: Mapping[str, Any]
     policy_decision: PolicyDecision | None = None
+    authority_decision: AuthorityAdmissionDecision | None = None
     error: str | None = None
 
 
@@ -123,6 +129,8 @@ class ApplyReconciler:
         recovery_evidence: Mapping[str, Any] | None = None,
         golden_slice: Mapping[str, Any] | None = None,
         approved_evidence: FrozenEvidence | None = None,
+        deployed_authority: Mapping[str, Any] | None = None,
+        proposed_authority: Mapping[str, Any] | None = None,
     ) -> ApplyResult:
         if approved_evidence is not None:
             golden_slice_provenance = resume_from_frozen_evidence(
@@ -148,6 +156,60 @@ class ApplyReconciler:
             ReleasePhase.RESOLVED
         )
 
+        authority_decision: AuthorityAdmissionDecision | None = None
+        authority_error: str | None = None
+        if plan.authority_ref is not None or plan.authority_digest is not None:
+            if proposed_authority is None:
+                authority_error = "AUTHORITY_ENVELOPE_REQUIRED"
+            elif proposed_authority.get("metadata", {}).get("name") != plan.authority_ref:
+                authority_error = "AUTHORITY_REF_MISMATCH"
+            elif proposed_authority.get("spec", {}).get("releaseRef") != plan.release_name:
+                authority_error = "AUTHORITY_RELEASE_MISMATCH"
+            elif authority_digest(proposed_authority) != plan.authority_digest:
+                authority_error = "AUTHORITY_DIGEST_MISMATCH"
+            else:
+                authority_decision = admit_authority_change(
+                    deployed_authority,
+                    proposed_authority,
+                )
+                if not authority_decision.admitted:
+                    authority_error = (
+                        "AUTHORITY_ADMISSION_DENIED: "
+                        + ",".join(authority_decision.reasons)
+                    )
+
+        authority_evidence = (
+            asdict(authority_decision)
+            if authority_decision is not None
+            else None
+        )
+
+        if authority_error is not None:
+            state.transition(ReleasePhase.BLOCKED)
+            evidence = seal_release_evidence({
+                "kind": "ReleaseEvidence",
+                "release": plan.release_name,
+                "golden_slice": golden_slice_provenance,
+                "placement": placement,
+                "recovery": recovery,
+                "authority": authority_evidence,
+                "receipts": [],
+                "rollback_receipts": [],
+                "eval_results": [],
+                "phase": state.phase.value,
+                "authority_error": authority_error,
+            })
+            return ApplyResult(
+                release_name=plan.release_name,
+                phase=state.phase.value,
+                receipts=(),
+                rollback_receipts=(),
+                eval_results=(),
+                evidence=evidence,
+                authority_decision=authority_decision,
+                error=authority_error,
+            )
+
         policy_decision = (
             self._evaluate_policy(plan)
         )
@@ -162,6 +224,7 @@ class ApplyReconciler:
                 "golden_slice": golden_slice_provenance,
                 "placement": placement,
                 "recovery": recovery,
+                "authority": authority_evidence,
                 "policy": asdict(
                     policy_decision
                 ),
@@ -178,6 +241,7 @@ class ApplyReconciler:
                 eval_results=(),
                 evidence=evidence,
                 policy_decision=policy_decision,
+                authority_decision=authority_decision,
             )
 
         conformance = self.providers.conformance(plan)
@@ -194,6 +258,7 @@ class ApplyReconciler:
                 "golden_slice": golden_slice_provenance,
                 "placement": placement,
                 "recovery": recovery,
+                "authority": authority_evidence,
                 "policy": asdict(policy_decision),
                 "conformance": {
                     name: asdict(result)
@@ -285,6 +350,7 @@ class ApplyReconciler:
                 "golden_slice": golden_slice_provenance,
                 "placement": placement,
                 "recovery": recovery,
+                "authority": authority_evidence,
                 "policy": asdict(
                     policy_decision
                 ),
@@ -386,6 +452,7 @@ class ApplyReconciler:
             "golden_slice": golden_slice_provenance,
             "placement": placement,
             "recovery": recovery,
+            "authority": authority_evidence,
             "policy": asdict(
                 policy_decision
             ),
@@ -441,4 +508,5 @@ class ApplyReconciler:
             eval_results=eval_results,
             evidence=evidence,
             policy_decision=policy_decision,
+            authority_decision=authority_decision,
         )
