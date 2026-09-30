@@ -1,0 +1,15 @@
+apiVersion: agentplane.io/v1alpha1
+kind: EvalGate
+metadata:
+  name: trusted-factory-acceptance
+spec:
+  suiteRef: acceptance://ai-factory/controlled-lab
+  conditions:
+    - metric: factory_acceptance_trusted
+      op: eq
+      value: 1
+    - metric: factory_accepted
+      op: eq
+      value: 1
+  evidenceRequired: true
+  onFailure: block

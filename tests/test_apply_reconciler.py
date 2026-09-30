@@ -1,8 +1,12 @@
 import hashlib
+import hmac
 import json
 
 from agent_control_plane.apply_reconciler import ApplyReconciler
 from agent_control_plane.decision_adapter import DecisionGatewayAdapter
+from agent_control_plane.factory_attestation import (
+    HMACFactoryAttestationVerifier,
+)
 from agent_control_plane.executors import (
     ExecutorRegistry,
     InMemoryExecutor,
@@ -650,3 +654,168 @@ def test_tampered_factory_acceptance_blocks_before_provider_mutation() -> None:
     assert result.error == (
         "FACTORY_ACCEPTANCE_INVALID:DIGEST_MISMATCH"
     )
+
+
+
+FACTORY_GATE = {
+    "spec": {
+        "conditions": [
+            {
+                "metric": "factory_acceptance_trusted",
+                "op": "eq",
+                "value": 1.0,
+            },
+            {
+                "metric": "factory_accepted",
+                "op": "eq",
+                "value": 1.0,
+            },
+        ],
+        "onFailure": "block",
+    }
+}
+
+
+def factory_attestation(
+    artifact,
+    *,
+    key_id="commissioning-lab",
+    secret=b"lab-secret",
+):
+    unsigned = {
+        "apiVersion": "aifactory.engineering/v1alpha1",
+        "kind": "AcceptanceAttestation",
+        "artifactDigest": artifact["digest"],
+        "keyId": key_id,
+        "algorithm": "HMAC-SHA256",
+    }
+    message = json.dumps(
+        unsigned,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return {
+        **unsigned,
+        "signature": hmac.new(
+            secret,
+            message,
+            hashlib.sha256,
+        ).hexdigest(),
+    }
+
+
+def test_trusted_factory_acceptance_can_feed_eval_gate() -> None:
+    artifact = factory_acceptance_artifact()
+    attestation = factory_attestation(artifact)
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+        factory_attestation_verifier=HMACFactoryAttestationVerifier({
+            "commissioning-lab": b"lab-secret",
+        }),
+    ).reconcile(
+        build_plan(),
+        eval_gates=[FACTORY_GATE],
+        factory_acceptance_artifact=artifact,
+        factory_acceptance_attestation=attestation,
+    )
+
+    assert result.phase == "promoted"
+    assert result.eval_results[0].passed is True
+    bound = result.evidence["factory_acceptance"]
+    assert bound["trusted"] is True
+    assert bound["gate_eligible"] is True
+    assert bound["attestation_key_id"] == "commissioning-lab"
+    assert "signature" in bound["attestation"]
+
+
+def test_trusted_factory_reject_blocks_accept_gate() -> None:
+    artifact = factory_acceptance_artifact(
+        disposition="REJECT",
+    )
+    attestation = factory_attestation(artifact)
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+        factory_attestation_verifier=HMACFactoryAttestationVerifier({
+            "commissioning-lab": b"lab-secret",
+        }),
+    ).reconcile(
+        build_plan(),
+        eval_gates=[FACTORY_GATE],
+        factory_acceptance_artifact=artifact,
+        factory_acceptance_attestation=attestation,
+    )
+
+    assert result.phase == "blocked"
+    assert result.eval_results[0].passed is False
+    assert result.eval_results[0].violations[0].metric == "factory_accepted"
+    assert result.evidence["factory_acceptance"]["trusted"] is True
+
+
+def test_factory_attestation_from_unknown_key_blocks_before_provider_mutation() -> None:
+    artifact = factory_acceptance_artifact()
+    attestation = factory_attestation(
+        artifact,
+        key_id="unknown-lab",
+        secret=b"unknown-secret",
+    )
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+        factory_attestation_verifier=HMACFactoryAttestationVerifier({
+            "commissioning-lab": b"lab-secret",
+        }),
+    ).reconcile(
+        build_plan(),
+        factory_acceptance_artifact=artifact,
+        factory_acceptance_attestation=attestation,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.error == "FACTORY_ATTESTATION_INVALID:UNTRUSTED_KEY_ID"
+
+
+def test_factory_attestation_tamper_blocks_before_provider_mutation() -> None:
+    artifact = factory_acceptance_artifact()
+    attestation = factory_attestation(artifact)
+    attestation["algorithm"] = "HMAC-SHA512"
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+        factory_attestation_verifier=HMACFactoryAttestationVerifier({
+            "commissioning-lab": b"lab-secret",
+        }),
+    ).reconcile(
+        build_plan(),
+        factory_acceptance_artifact=artifact,
+        factory_acceptance_attestation=attestation,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.error == "FACTORY_ATTESTATION_INVALID:ALGORITHM_UNSUPPORTED"
+
+
+def test_factory_attestation_requires_verifier() -> None:
+    artifact = factory_acceptance_artifact()
+    attestation = factory_attestation(artifact)
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        factory_acceptance_artifact=artifact,
+        factory_acceptance_attestation=attestation,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.error == "FACTORY_ATTESTATION_VERIFIER_REQUIRED"
