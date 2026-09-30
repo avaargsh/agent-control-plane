@@ -26,3 +26,7 @@ testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_control_plane"]
+
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas" = "agent_control_plane/schemas"
