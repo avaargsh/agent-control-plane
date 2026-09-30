@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol
 
-from .runtime_clients import RuntimeApplyResult, RuntimeMutationUncertain
+from .runtime_clients import (
+    RuntimeApplyResult,
+    RuntimeMutationUncertain,
+    TerminalRuntimeConflict,
+)
 
 
 class TemporalApi(Protocol):
@@ -50,13 +54,19 @@ class TemporalWorkflowClient:
         workflow_id = str(desired.get("workflow_id") or f"agent-release/{release}")
         existing = self.api.describe(workflow_id=workflow_id)
         if existing is not None:
+            status = existing.get("status")
+            if _workflow_is_terminal(status):
+                raise TerminalRuntimeConflict(
+                    "temporal workflow identity is already terminal: "
+                    f"{workflow_id} status={status}"
+                )
             return RuntimeApplyResult(
                 resource_ref=f"temporal://workflow/{workflow_id}",
                 changed=False,
                 evidence={
                     "workflowId": workflow_id,
                     "runId": existing.get("runId"),
-                    "status": existing.get("status"),
+                    "status": status,
                 },
             )
 
