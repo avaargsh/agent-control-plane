@@ -13,8 +13,17 @@ class FakeTemporalApi:
         self.starts = 0
         self.terminated = []
 
-    def describe(self, *, workflow_id):
-        return self.workflows.get(workflow_id)
+    def describe(self, *, workflow_id, run_id=None):
+        value = self.workflows.get(workflow_id)
+        if (
+            run_id is not None
+            and (
+                value is None
+                or value.get("runId") != run_id
+            )
+        ):
+            return None
+        return value
 
     def start(self, *, workflow_id, workflow_type, task_queue, input):
         self.starts += 1
@@ -22,9 +31,13 @@ class FakeTemporalApi:
         self.workflows[workflow_id] = value
         return value
 
-    def terminate(self, *, workflow_id, reason):
-        self.terminated.append((workflow_id, reason))
-        return {"terminated": True, "workflowId": workflow_id}
+    def terminate(self, *, workflow_id, run_id, reason):
+        self.terminated.append((workflow_id, run_id, reason))
+        return {
+            "terminated": True,
+            "workflowId": workflow_id,
+            "runId": run_id,
+        }
 
 
 def desired():
@@ -54,10 +67,16 @@ def test_temporal_client_terminates_by_stable_workflow_identity():
     client = TemporalWorkflowClient(api)
     result = client.ensure_workflow(desired())
 
-    terminated = client.terminate_workflow(result.resource_ref)
+    terminated = client.terminate_workflow(
+        result.resource_ref,
+        expected_run_id=result.evidence["runId"],
+    )
 
     assert terminated["terminated"] is True
-    assert api.terminated[0][0] == "agent-release/gpu-xid-remediation-v1"
+    assert api.terminated[0][:2] == (
+        "agent-release/gpu-xid-remediation-v1",
+        "run-001",
+    )
 
 
 class LostAckTemporalApi(FakeTemporalApi):
@@ -97,8 +116,8 @@ def test_temporal_client_propagates_uncertain_error_without_observed_workflow():
 
 
 class LostAckTerminateApi(FakeTemporalApi):
-    def terminate(self, *, workflow_id, reason):
-        self.terminated.append((workflow_id, reason))
+    def terminate(self, *, workflow_id, run_id, reason):
+        self.terminated.append((workflow_id, run_id, reason))
         self.workflows[workflow_id] = {
             **self.workflows[workflow_id],
             "status": "TERMINATED",
@@ -111,7 +130,10 @@ def test_temporal_terminate_recovers_after_lost_ack():
     client = TemporalWorkflowClient(api)
     result = client.ensure_workflow(desired())
 
-    terminated = client.terminate_workflow(result.resource_ref)
+    terminated = client.terminate_workflow(
+        result.resource_ref,
+        expected_run_id=result.evidence["runId"],
+    )
 
     assert terminated["terminated"] is True
     assert terminated["status"] == "TERMINATED"
@@ -119,7 +141,7 @@ def test_temporal_terminate_recovers_after_lost_ack():
 
 
 class UncommittedTerminateApi(FakeTemporalApi):
-    def terminate(self, *, workflow_id, reason):
+    def terminate(self, *, workflow_id, run_id, reason):
         raise RuntimeMutationUncertain("connection refused")
 
 
@@ -129,11 +151,14 @@ def test_temporal_terminate_propagates_when_workflow_is_still_running():
     result = client.ensure_workflow(desired())
 
     with pytest.raises(RuntimeMutationUncertain):
-        client.terminate_workflow(result.resource_ref)
+        client.terminate_workflow(
+            result.resource_ref,
+            expected_run_id=result.evidence["runId"],
+        )
 
 
 class MissingAfterTerminateApi(FakeTemporalApi):
-    def terminate(self, *, workflow_id, reason):
+    def terminate(self, *, workflow_id, run_id, reason):
         self.workflows.pop(workflow_id, None)
         raise RuntimeMutationUncertain("connection reset")
 
@@ -143,7 +168,10 @@ def test_temporal_terminate_accepts_absent_postcondition_after_uncertain_ack():
     client = TemporalWorkflowClient(api)
     result = client.ensure_workflow(desired())
 
-    terminated = client.terminate_workflow(result.resource_ref)
+    terminated = client.terminate_workflow(
+        result.resource_ref,
+        expected_run_id=result.evidence["runId"],
+    )
 
     assert terminated["terminated"] is True
     assert terminated["status"] is None
@@ -241,3 +269,31 @@ def test_temporal_client_rejects_immediate_terminal_start_result():
         client.ensure_workflow(desired())
 
     assert api.starts == 1
+
+
+
+def test_temporal_terminate_uncertain_verify_is_scoped_to_expected_run():
+    class NewRunAppearedApi(FakeTemporalApi):
+        def terminate(self, *, workflow_id, run_id, reason):
+            self.terminated.append((workflow_id, run_id, reason))
+            self.workflows[workflow_id] = {
+                "runId": "run-new",
+                "status": "RUNNING",
+            }
+            raise RuntimeMutationUncertain("connection reset")
+
+    api = NewRunAppearedApi()
+    client = TemporalWorkflowClient(api)
+    result = client.ensure_workflow(desired())
+
+    terminated = client.terminate_workflow(
+        result.resource_ref,
+        expected_run_id="run-001",
+    )
+
+    assert terminated["terminated"] is True
+    assert terminated["runId"] == "run-001"
+    assert terminated["status"] is None
+    assert api.workflows[
+        "agent-release/gpu-xid-remediation-v1"
+    ]["runId"] == "run-new"
