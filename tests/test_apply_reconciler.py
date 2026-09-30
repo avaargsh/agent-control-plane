@@ -425,10 +425,10 @@ def decision_eval_artifact(*, measured: bool = True):
         },
         "operating_point": {
             "threshold": 0.8,
-            "coverage": 0.75,
+            "coverage": 0.5,
             "risk": 0.02,
             "false_automation_rate": 0.01,
-            "fallback_rate": 0.25,
+            "fallback_rate": 0.5,
             "risk_budget": 0.05,
         },
         "fallback_evaluation": (
