@@ -97,6 +97,9 @@ def test_failed_eval_blocks_even_with_valid_evidence():
             "false_automation_rate": 0.0,
         },
         evidence(),
+        expected_authority_digest=(
+            "sha256:" + "a" * 64
+        ),
     )
     assert result.passed is False
     assert result.decision == "BLOCK"
