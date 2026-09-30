@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol
 
-from .runtime_clients import RuntimeApplyResult
+from .runtime_clients import RuntimeApplyResult, RuntimeMutationUncertain
 
 
 class TemporalApi(Protocol):
@@ -38,12 +38,25 @@ class TemporalWorkflowClient:
                 },
             )
 
-        started = self.api.start(
-            workflow_id=workflow_id,
-            workflow_type=str(desired.get("workflow_type", "AgentRunWorkflow")),
-            task_queue=str(desired.get("task_queue", self.task_queue)),
-            input=dict(desired.get("input", {})),
-        )
+        verified_after_uncertain_mutation = False
+        try:
+            started = self.api.start(
+                workflow_id=workflow_id,
+                workflow_type=str(
+                    desired.get("workflow_type", "AgentRunWorkflow")
+                ),
+                task_queue=str(
+                    desired.get("task_queue", self.task_queue)
+                ),
+                input=dict(desired.get("input", {})),
+            )
+        except RuntimeMutationUncertain:
+            observed = self.api.describe(workflow_id=workflow_id)
+            if observed is None:
+                raise
+            started = observed
+            verified_after_uncertain_mutation = True
+
         return RuntimeApplyResult(
             resource_ref=f"temporal://workflow/{workflow_id}",
             changed=True,
@@ -51,6 +64,9 @@ class TemporalWorkflowClient:
                 "workflowId": workflow_id,
                 "runId": started.get("runId"),
                 "status": started.get("status", "RUNNING"),
+                "verifiedAfterUncertainMutation": (
+                    verified_after_uncertain_mutation
+                ),
             },
         )
 

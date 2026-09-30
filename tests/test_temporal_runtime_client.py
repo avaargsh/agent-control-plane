@@ -1,3 +1,6 @@
+import pytest
+
+from agent_control_plane.runtime_clients import RuntimeMutationUncertain
 from agent_control_plane.temporal_runtime_client import TemporalWorkflowClient
 
 
@@ -52,3 +55,39 @@ def test_temporal_client_terminates_by_stable_workflow_identity():
 
     assert terminated["terminated"] is True
     assert api.terminated[0][0] == "agent-release/gpu-xid-remediation-v1"
+
+
+class LostAckTemporalApi(FakeTemporalApi):
+    def start(self, *, workflow_id, workflow_type, task_queue, input):
+        super().start(
+            workflow_id=workflow_id,
+            workflow_type=workflow_type,
+            task_queue=task_queue,
+            input=input,
+        )
+        raise RuntimeMutationUncertain("rpc error: code = Unavailable")
+
+
+def test_temporal_client_recovers_start_receipt_after_lost_ack():
+    api = LostAckTemporalApi()
+    client = TemporalWorkflowClient(api)
+
+    result = client.ensure_workflow(desired())
+
+    assert result.changed is True
+    assert result.evidence["workflowId"] == "agent-release/gpu-xid-remediation-v1"
+    assert result.evidence["runId"] == "run-001"
+    assert result.evidence["verifiedAfterUncertainMutation"] is True
+
+
+class UncommittedTemporalApi(FakeTemporalApi):
+    def start(self, *, workflow_id, workflow_type, task_queue, input):
+        raise RuntimeMutationUncertain("connection refused")
+
+
+def test_temporal_client_propagates_uncertain_error_without_observed_workflow():
+    api = UncommittedTemporalApi()
+    client = TemporalWorkflowClient(api)
+
+    with pytest.raises(RuntimeMutationUncertain):
+        client.ensure_workflow(desired())

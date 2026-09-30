@@ -6,6 +6,10 @@ from typing import Any, Mapping, Protocol
 from urllib import request
 
 
+class RuntimeMutationUncertain(RuntimeError):
+    """A provider mutation may have committed even though its ACK was lost."""
+
+
 @dataclass(frozen=True)
 class RuntimeApplyResult:
     resource_ref: str
