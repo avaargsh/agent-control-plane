@@ -1,7 +1,10 @@
 import pytest
 
 from agent_control_plane.kubernetes_runtime_client import KubernetesSandboxClient
-from agent_control_plane.runtime_clients import RuntimeMutationUncertain
+from agent_control_plane.runtime_clients import (
+    RuntimeMutationOwnershipUncertain,
+    RuntimeMutationUncertain,
+)
 
 
 class FakeApi:
@@ -192,6 +195,35 @@ def test_kubernetes_client_recovers_create_receipt_after_lost_ack():
     assert result.evidence["changeType"] == "created"
     assert result.evidence["verifiedAfterUncertainMutation"] is True
     assert result.resource_ref.endswith("/gpu-xid-remediation-v1-sandbox")
+
+
+class ConcurrentCreatorAfterUncertainApi(FakeApi):
+    def apply(self, *, namespace, manifest):
+        other_manifest = {
+            **manifest,
+            "metadata": {
+                **manifest["metadata"],
+                "annotations": {
+                    "agent-control-plane.openai.com/operation-id": "other-attempt",
+                },
+            },
+        }
+        super().apply(namespace=namespace, manifest=other_manifest)
+        raise RuntimeMutationUncertain("connection reset after ambiguous commit")
+
+
+def test_kubernetes_client_does_not_claim_concurrent_resource_after_lost_ack():
+    api = ConcurrentCreatorAfterUncertainApi()
+    client = KubernetesSandboxClient(api)
+
+    with pytest.raises(RuntimeMutationOwnershipUncertain) as caught:
+        client.ensure_sandbox(desired())
+
+    assert caught.value.observed_operation_id == "other-attempt"
+    assert caught.value.operation_id
+    assert caught.value.resource_ref.endswith(
+        "/gpu-xid-remediation-v1-sandbox"
+    )
 
 
 class LostAckUpdateApi(FakeApi):
