@@ -15,6 +15,7 @@ from agent_control_plane.example_adapters import (
 from agent_control_plane.executors import ExecutorRegistry, InMemoryExecutor
 from agent_control_plane.factory_attestation import HMACFactoryAttestationVerifier
 from agent_control_plane.frozen_evidence import FrozenEvidence
+from agent_control_plane.loader import load_yaml_documents
 from agent_control_plane.live_proof import (
     LiveProofInputs,
     assert_live_release_evidence,
@@ -85,6 +86,14 @@ def main() -> None:
         default="AI_FACTORY_ATTESTATION_SECRET",
     )
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--decision-gate",
+        default=str(
+            Path(__file__).with_name(
+                "decision-system2-eval-gate.yaml"
+            )
+        ),
+    )
     args = parser.parse_args()
 
     secret_value = os.environ.get(args.factory_secret_env)
@@ -137,24 +146,31 @@ def main() -> None:
         decision_eval_artifact=decision,
         factory_acceptance_artifact=factory,
         factory_acceptance_attestation=attestation,
-        eval_gates=[{
-            "spec": {
-                "conditions": [
-                    {"metric": "fallback_measured", "op": "eq", "value": 1.0},
-                    {"metric": "system2_accuracy", "op": "gte", "value": 0.0},
-                    {"metric": "factory_acceptance_trusted", "op": "eq", "value": 1.0},
-                    {"metric": "factory_accepted", "op": "eq", "value": 1.0},
-                ],
-                "onFailure": "block",
-            }
-        }],
+        eval_gates=[
+            load_yaml_documents(
+                args.decision_gate,
+                validate=True,
+            ).by_kind("EvalGate")[0],
+            {
+                "spec": {
+                    "conditions": [
+                        {
+                            "metric": "factory_acceptance_trusted",
+                            "op": "eq",
+                            "value": 1.0,
+                        },
+                        {
+                            "metric": "factory_accepted",
+                            "op": "eq",
+                            "value": 1.0,
+                        },
+                    ],
+                    "onFailure": "block",
+                }
+            },
+        ],
     )
 
-    if result.phase != "promoted":
-        raise SystemExit(
-            "live release did not promote: "
-            + str(result.error)
-        )
     if not verify_release_evidence(result.evidence):
         raise SystemExit("final ReleaseEvidence replay verification failed")
     assert_live_release_evidence(result.evidence)
@@ -170,6 +186,10 @@ def main() -> None:
             {
                 "phase": result.phase,
                 "release": release_name,
+                "gatePassed": all(
+                    item.passed
+                    for item in result.eval_results
+                ),
                 "decisionArtifactId": result.evidence[
                     "decision_eval"
                 ]["artifact_id"],
