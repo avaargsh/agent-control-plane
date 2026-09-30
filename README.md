@@ -259,6 +259,36 @@ control plane.
 
 See `examples/factory-acceptance-gate.yaml`.
 
+## Live proof artifact admission
+
+The synthetic five-repository fixture proves the contracts compose. A separate
+fail-closed command admits artifacts for the **live** proof:
+
+```bash
+export AI_FACTORY_ATTESTATION_SECRET='...'
+
+agent-control-plane live-proof-verify \
+  --decision-artifact decision-eval.json \
+  --factory-artifact acceptance.json \
+  --factory-attestation acceptance.attestation.json \
+  --factory-key-id commissioning-lab
+```
+
+Admission requires all of the following:
+
+- the Decision Lab artifact passes its content-addressed digest/provenance checks;
+- `fallback_evaluation.measured=true`;
+- at least one System-2 fallback case actually executed;
+- no Decision Lab field contains the synthetic contract-fixture markers;
+- the AI Factory artifact passes its content digest check;
+- no AI Factory evidence reference is synthetic;
+- the AcceptanceAttestation verifies against the explicitly trusted key id.
+
+This command intentionally distinguishes a **live-shaped contract test** from a
+real live proof. Passing it with locally fabricated data does not establish that
+Qwen or hardware actually ran. The retained GitHub Actions/model artifact and
+controlled-lab commissioning provenance remain the evidence of execution.
+
 ## Current status
 
 v0.1 release candidate.
