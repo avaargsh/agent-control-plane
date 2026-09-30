@@ -36,7 +36,24 @@ def _managed_sandbox_projection(
                 else None
             ),
         },
-        "spec": dict(spec) if isinstance(spec, Mapping) else {},
+        "spec": {
+            "isolation": (
+                spec.get("isolation")
+                if isinstance(spec, Mapping)
+                else None
+            ),
+            "warmPool": (
+                spec.get("warmPool")
+                if isinstance(spec, Mapping)
+                else None
+            ),
+            "placement": (
+                dict(spec.get("placement", {}))
+                if isinstance(spec, Mapping)
+                and isinstance(spec.get("placement", {}), Mapping)
+                else {}
+            ),
+        },
     }
 
 
