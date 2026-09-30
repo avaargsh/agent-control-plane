@@ -20,7 +20,7 @@ A public v0.1 candidate should satisfy all of the following:
 - [x] public README internal links checked against repository tree
 - [x] current-tree secret/token pattern scan clean
 - [x] current-tree private/customer identifier spot-check clean
-- [ ] full git-history secret/private-data scan complete
+- [x] full git-history secret scan complete (Gitleaks v8.30.1, full checkout)
 - [x] direct dependency/license review complete
 - [ ] live kind/minikube + Temporal smoke exercised and documented
 - [x] GitHub Actions runner issue documented
@@ -62,11 +62,11 @@ Current default-branch code search returned no matches for representative creden
 
 Spot checks also returned no matches for generic customer markers or known prior-employer naming. Repository-tree review confirmed README-linked `DEVELOPMENT.md` and `RELEASE_READINESS.md` exist.
 
-Recent commit metadata was reviewed for suspicious credential/private-data wording with no obvious finding. This does **not** inspect every historical blob: `make audit-history` from a real clone remains required before repository visibility changes.
+Recent commit metadata was reviewed for suspicious credential/private-data wording with no obvious finding. The v0.1 release gate now performs `make audit-history` against a `fetch-depth: 0` checkout using pinned Gitleaks v8.30.1; the scanner completed successfully on the repository history.
 
 The final RC audit reconciled stale pre-RC pull requests after preserving the release-acceptance contract and Golden Slice trajectory replay proof on main.
 
-The executable v0.1 release gate now verifies the full test suite, deterministic Golden Incident, MCP Execution Contract proof, release wheel build, isolated wheel installation with declared dependencies, packaged schemas/CLI behavior, and a clean local fresh-clone smoke. The full git-history credential audit remains a separate unresolved gate.
+The executable v0.1 release gate now verifies the full test suite, deterministic Golden Incident, MCP Execution Contract proof, release wheel build, isolated wheel installation with declared dependencies, packaged schemas/CLI behavior, a clean local fresh-clone smoke, and a full-history Gitleaks scan.
 
 ## Known limitations
 
