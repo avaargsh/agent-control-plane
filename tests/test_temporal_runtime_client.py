@@ -91,3 +91,57 @@ def test_temporal_client_propagates_uncertain_error_without_observed_workflow():
 
     with pytest.raises(RuntimeMutationUncertain):
         client.ensure_workflow(desired())
+
+
+class LostAckTerminateApi(FakeTemporalApi):
+    def terminate(self, *, workflow_id, reason):
+        self.terminated.append((workflow_id, reason))
+        self.workflows[workflow_id] = {
+            **self.workflows[workflow_id],
+            "status": "TERMINATED",
+        }
+        raise RuntimeMutationUncertain("rpc error: code = Unavailable")
+
+
+def test_temporal_terminate_recovers_after_lost_ack():
+    api = LostAckTerminateApi()
+    client = TemporalWorkflowClient(api)
+    result = client.ensure_workflow(desired())
+
+    terminated = client.terminate_workflow(result.resource_ref)
+
+    assert terminated["terminated"] is True
+    assert terminated["status"] == "TERMINATED"
+    assert terminated["verifiedAfterUncertainMutation"] is True
+
+
+class UncommittedTerminateApi(FakeTemporalApi):
+    def terminate(self, *, workflow_id, reason):
+        raise RuntimeMutationUncertain("connection refused")
+
+
+def test_temporal_terminate_propagates_when_workflow_is_still_running():
+    api = UncommittedTerminateApi()
+    client = TemporalWorkflowClient(api)
+    result = client.ensure_workflow(desired())
+
+    with pytest.raises(RuntimeMutationUncertain):
+        client.terminate_workflow(result.resource_ref)
+
+
+class MissingAfterTerminateApi(FakeTemporalApi):
+    def terminate(self, *, workflow_id, reason):
+        self.workflows.pop(workflow_id, None)
+        raise RuntimeMutationUncertain("connection reset")
+
+
+def test_temporal_terminate_accepts_absent_postcondition_after_uncertain_ack():
+    api = MissingAfterTerminateApi()
+    client = TemporalWorkflowClient(api)
+    result = client.ensure_workflow(desired())
+
+    terminated = client.terminate_workflow(result.resource_ref)
+
+    assert terminated["terminated"] is True
+    assert terminated["status"] is None
+    assert terminated["verifiedAfterUncertainMutation"] is True
