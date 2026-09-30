@@ -36,6 +36,54 @@ def _is_finite_number(value: object) -> bool:
     )
 
 
+def _base_metrics_semantics_reason(
+    metrics: Mapping[str, Any],
+) -> str | None:
+    bounded = (
+        "accuracy",
+        "macro_f1",
+        "brier",
+        "ece",
+    )
+    for name in bounded:
+        value = metrics.get(name)
+        if not _is_finite_number(value):
+            return f"METRIC_INVALID:{name}"
+        if not 0.0 <= float(value) <= 1.0:
+            return f"METRIC_OUT_OF_RANGE:{name}"
+
+    for name in (
+        "nll",
+        "mean_latency_ms",
+        "p50_latency_ms",
+        "p95_latency_ms",
+    ):
+        value = metrics.get(name)
+        if not _is_finite_number(value):
+            return f"METRIC_INVALID:{name}"
+        if float(value) < 0.0:
+            return f"METRIC_NEGATIVE:{name}"
+
+    tokens = metrics.get(
+        "mean_tokens_processed_per_decision"
+    )
+    if tokens is not None and (
+        not _is_finite_number(tokens)
+        or float(tokens) < 0.0
+    ):
+        return (
+            "METRIC_INVALID:"
+            "mean_tokens_processed_per_decision"
+        )
+
+    if float(metrics["p50_latency_ms"]) > float(
+        metrics["p95_latency_ms"]
+    ):
+        return "METRIC_LATENCY_PERCENTILES_INVALID"
+
+    return None
+
+
 def _percentile(values: list[float], quantile: float) -> float:
     ordered = sorted(values)
     if len(ordered) == 1:
@@ -350,6 +398,40 @@ def validate_decision_eval_artifact(
             content_digest=str(content_digest),
         )
 
+    decision_type = artifact.get("decision_type")
+    adapter = artifact.get("adapter")
+    model_ref = artifact.get("model_ref")
+    calibration_sha256 = artifact.get("calibration_sha256")
+    if not isinstance(decision_type, str) or not decision_type:
+        return DecisionEvalValidation(
+            valid=False,
+            reason="DECISION_TYPE_REQUIRED",
+            metrics={},
+        )
+    if not isinstance(adapter, str) or not adapter:
+        return DecisionEvalValidation(
+            valid=False,
+            reason="ADAPTER_REQUIRED",
+            metrics={},
+        )
+    if model_ref is not None and (
+        not isinstance(model_ref, str) or not model_ref
+    ):
+        return DecisionEvalValidation(
+            valid=False,
+            reason="MODEL_REF_INVALID",
+            metrics={},
+        )
+    if (
+        calibration_sha256 is not None
+        and not _is_sha256(calibration_sha256)
+    ):
+        return DecisionEvalValidation(
+            valid=False,
+            reason="CALIBRATION_DIGEST_INVALID",
+            metrics={},
+        )
+
     dataset = artifact.get("dataset")
     if not isinstance(dataset, Mapping):
         return DecisionEvalValidation(
@@ -384,6 +466,16 @@ def validate_decision_eval_artifact(
         return DecisionEvalValidation(
             valid=False,
             reason="METRICS_REQUIRED",
+            metrics={},
+        )
+
+    metric_reason = _base_metrics_semantics_reason(
+        raw_metrics
+    )
+    if metric_reason is not None:
+        return DecisionEvalValidation(
+            valid=False,
+            reason=metric_reason,
             metrics={},
         )
 
