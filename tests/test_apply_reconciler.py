@@ -1069,7 +1069,7 @@ def test_ambiguous_apply_ownership_is_recorded_without_claiming_receipt() -> Non
         executors=executors,
     ).reconcile(build_plan())
 
-    assert result.phase == "rolled-back"
+    assert result.phase == "rolled_back"
     assert [item.binding_name for item in result.receipts] == [
         "sandbox",
         "tools",
