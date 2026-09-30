@@ -1,0 +1,59 @@
+name: opa-v32-enforcement
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/agent_control_plane/opa_provider.py"
+      - "experiments/v3_2/opa_real_enforcement.py"
+      - ".github/workflows/opa-v32-enforcement.yml"
+  pull_request:
+    paths:
+      - "src/agent_control_plane/opa_provider.py"
+      - "experiments/v3_2/opa_real_enforcement.py"
+      - ".github/workflows/opa-v32-enforcement.yml"
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install control plane
+        run: pip install -e .
+      - name: Install OPA v1.21.0
+        uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1
+        with:
+          version: 1.21.0
+      - name: Compile CapabilityIntent
+        run: |
+          python experiments/v3_2/opa_real_enforcement.py             --output /tmp/agentos-v32-opa             | tee /tmp/agentos-v32-opa-proof.txt
+          grep '^policy_digest=sha256:' /tmp/agentos-v32-opa-proof.txt
+      - name: Validate generated Rego v1
+        run: opa check /tmp/agentos-v32-opa/policy.rego
+      - name: Assert allowed request
+        run: |
+          result="$(
+            opa eval               --format raw               --data /tmp/agentos-v32-opa/policy.rego               --input /tmp/agentos-v32-opa/allow-filesystem.json               'data.agentos.policy.allow'
+          )"
+          echo "allow_filesystem=$result" | tee -a /tmp/agentos-v32-opa-proof.txt
+          test "$result" = "true"
+      - name: Assert denied requests
+        run: |
+          for fixture in             deny-aws-credentials.json             deny-evil-egress.json             deny-kubernetes-delete.json
+          do
+            result="$(
+              opa eval                 --format raw                 --data /tmp/agentos-v32-opa/policy.rego                 --input "/tmp/agentos-v32-opa/$fixture"                 'data.agentos.policy.allow'
+            )"
+            echo "$fixture=$result" | tee -a /tmp/agentos-v32-opa-proof.txt
+            test "$result" = "false"
+          done
+      - name: Upload enforcement proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentos-v32-opa-proof
+          path: /tmp/agentos-v32-opa-proof.txt
