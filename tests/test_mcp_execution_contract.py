@@ -70,6 +70,25 @@ def test_lost_ack_recovers_by_read_after_write_without_duplicate_effect(tmp_path
     assert persisted["operations"][result.idempotency_key]["commit_count"] == 1
 
 
+def test_duplicate_retry_reuses_same_key_without_second_commit(tmp_path):
+    path = tmp_path / "duplicate-retry.json"
+    adapter = MCPSubprocessToolAdapter(state_path=path, timeout_seconds=1.0)
+
+    result = execute(
+        adapter,
+        action_id="duplicate-retry",
+        fault_mode="lost_ack_stale_verify_once",
+    )
+
+    persisted = state(path)
+    operation = persisted["operations"][result.idempotency_key]
+    assert result.attempts == 2
+    assert result.result["duplicate"] is True
+    assert operation["apply_invocations"] == 2
+    assert operation["commit_count"] == 1
+    assert persisted["side_effect_count"] == 1
+
+
 def test_timeout_before_commit_retries_same_key_and_commits_once(tmp_path):
     path = tmp_path / "timeout.json"
     adapter = MCPSubprocessToolAdapter(
