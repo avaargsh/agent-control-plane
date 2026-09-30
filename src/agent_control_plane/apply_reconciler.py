@@ -77,28 +77,49 @@ class ApplyReconciler:
                 ExecutionReceipt,
             ]
         ],
-    ) -> list[RollbackReceipt]:
-        rollback_receipts: list[
-            RollbackReceipt
-        ] = []
+    ) -> tuple[list[RollbackReceipt], list[dict[str, str]]]:
+        rollback_receipts: list[RollbackReceipt] = []
+        rollback_errors: list[dict[str, str]] = []
 
-        for binding, receipt in reversed(
-            applied
-        ):
+        for binding, receipt in reversed(applied):
             spec = binding["spec"]
             executor = self.executors.get(
                 spec["type"],
                 spec["provider"],
             )
-            rollback_receipts.append(
-                executor.rollback(
-                    plan=plan,
-                    binding=binding,
-                    receipt=receipt,
+            try:
+                rollback_receipts.append(
+                    executor.rollback(
+                        plan=plan,
+                        binding=binding,
+                        receipt=receipt,
+                    )
                 )
-            )
+            except Exception as exc:
+                rollback_errors.append({
+                    "binding": receipt.binding_name,
+                    "provider_type": receipt.provider_type,
+                    "provider_name": receipt.provider_name,
+                    "resource_ref": receipt.resource_ref,
+                    "error": str(exc),
+                })
+                rollback_receipts.append(
+                    RollbackReceipt(
+                        binding_name=receipt.binding_name,
+                        provider_type=receipt.provider_type,
+                        provider_name=receipt.provider_name,
+                        resource_ref=receipt.resource_ref,
+                        rolled_back=False,
+                        evidence={
+                            "release": plan.release_name,
+                            "reason": "rollback-error",
+                            "previously_changed": receipt.changed,
+                            "error": str(exc),
+                        },
+                    )
+                )
 
-        return rollback_receipts
+        return rollback_receipts, rollback_errors
 
     def _evaluate_policy(
         self,
@@ -572,14 +593,14 @@ class ApplyReconciler:
                     )
                 )
         except Exception as exc:
-            rollback_receipts = (
-                self._rollback(
-                    plan=plan,
-                    applied=applied,
-                )
+            rollback_receipts, rollback_errors = self._rollback(
+                plan=plan,
+                applied=applied,
             )
             state.transition(
-                ReleasePhase.ROLLED_BACK
+                ReleasePhase.BLOCKED
+                if rollback_errors
+                else ReleasePhase.ROLLED_BACK
             )
 
             evidence = seal_release_evidence({
@@ -602,10 +623,9 @@ class ApplyReconciler:
                 ],
                 "rollback_receipts": [
                     asdict(receipt)
-                    for receipt in (
-                        rollback_receipts
-                    )
+                    for receipt in rollback_receipts
                 ],
+                "rollback_errors": rollback_errors,
                 "eval_results": [],
                 "phase": state.phase.value,
                 "apply_error": str(exc),
@@ -657,9 +677,8 @@ class ApplyReconciler:
             if not result.passed
         ]
 
-        rollback_receipts: list[
-            RollbackReceipt
-        ] = []
+        rollback_receipts: list[RollbackReceipt] = []
+        rollback_errors: list[dict[str, str]] = []
 
         if not failed:
             state.transition(
@@ -678,14 +697,14 @@ class ApplyReconciler:
             }
 
             if "rollback" in actions:
-                rollback_receipts = (
-                    self._rollback(
-                        plan=plan,
-                        applied=applied,
-                    )
+                rollback_receipts, rollback_errors = self._rollback(
+                    plan=plan,
+                    applied=applied,
                 )
                 state.transition(
-                    ReleasePhase.ROLLED_BACK
+                    ReleasePhase.BLOCKED
+                    if rollback_errors
+                    else ReleasePhase.ROLLED_BACK
                 )
             else:
                 state.transition(
@@ -712,10 +731,9 @@ class ApplyReconciler:
             ],
             "rollback_receipts": [
                 asdict(receipt)
-                for receipt in (
-                    rollback_receipts
-                )
+                for receipt in rollback_receipts
             ],
+            "rollback_errors": rollback_errors,
             "eval_results": [
                 {
                     "passed": result.passed,
@@ -757,4 +775,9 @@ class ApplyReconciler:
             evidence=evidence,
             policy_decision=policy_decision,
             authority_decision=authority_decision,
+            error=(
+                "ROLLBACK_INCOMPLETE"
+                if rollback_errors
+                else None
+            ),
         )
