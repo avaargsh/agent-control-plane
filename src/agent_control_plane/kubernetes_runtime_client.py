@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from typing import Any, Mapping, Protocol
+from uuid import uuid4
 
-from .runtime_clients import RuntimeApplyResult, RuntimeMutationUncertain
+from .runtime_clients import (
+    RuntimeApplyResult,
+    RuntimeMutationOwnershipUncertain,
+    RuntimeMutationUncertain,
+)
+
+_OPERATION_ID_ANNOTATION = "agent-control-plane.openai.com/operation-id"
 
 
 class KubernetesApi(Protocol):
@@ -88,13 +95,24 @@ class KubernetesSandboxClient:
             or previous_managed != manifest
         )
         verified_after_uncertain_mutation = False
+        operation_id: str | None = None
         if changed:
+            operation_id = uuid4().hex
+            apply_manifest = {
+                **manifest,
+                "metadata": {
+                    **manifest["metadata"],
+                    "annotations": {
+                        _OPERATION_ID_ANNOTATION: operation_id,
+                    },
+                },
+            }
             try:
                 resource = self.api.apply(
                     namespace=self.namespace,
-                    manifest=manifest,
+                    manifest=apply_manifest,
                 )
-            except RuntimeMutationUncertain:
+            except RuntimeMutationUncertain as exc:
                 observed = self.api.get(
                     namespace=self.namespace,
                     name=name,
@@ -104,6 +122,31 @@ class KubernetesSandboxClient:
                     or _managed_sandbox_projection(observed) != manifest
                 ):
                     raise
+                observed_metadata = observed.get("metadata")
+                observed_annotations = (
+                    observed_metadata.get("annotations", {})
+                    if isinstance(observed_metadata, Mapping)
+                    else {}
+                )
+                observed_operation_id = (
+                    observed_annotations.get(_OPERATION_ID_ANNOTATION)
+                    if isinstance(observed_annotations, Mapping)
+                    else None
+                )
+                if observed_operation_id != operation_id:
+                    raise RuntimeMutationOwnershipUncertain(
+                        "sandbox postcondition exists after uncertain mutation "
+                        "but operation ownership is not proven",
+                        resource_ref=(
+                            f"k8s://{self.namespace}/sandbox/{name}"
+                        ),
+                        operation_id=operation_id,
+                        observed_operation_id=(
+                            str(observed_operation_id)
+                            if observed_operation_id is not None
+                            else None
+                        ),
+                    ) from exc
                 resource = observed
                 verified_after_uncertain_mutation = True
         else:
@@ -124,6 +167,8 @@ class KubernetesSandboxClient:
                 verified_after_uncertain_mutation
             ),
         }
+        if operation_id is not None:
+            evidence["operationId"] = operation_id
         if change_type == "updated":
             evidence["previousManaged"] = previous_managed
         return RuntimeApplyResult(
@@ -166,12 +211,27 @@ class KubernetesSandboxClient:
         if namespace != self.namespace:
             raise ValueError("previous sandbox namespace mismatch")
         verified_after_uncertain_mutation = False
+        operation_id = uuid4().hex
+        restore_manifest = {
+            **dict(previous),
+            "metadata": {
+                **dict(metadata),
+                "annotations": {
+                    **(
+                        dict(metadata.get("annotations", {}))
+                        if isinstance(metadata.get("annotations", {}), Mapping)
+                        else {}
+                    ),
+                    _OPERATION_ID_ANNOTATION: operation_id,
+                },
+            },
+        }
         try:
             resource = self.api.apply(
                 namespace=self.namespace,
-                manifest=previous,
+                manifest=restore_manifest,
             )
-        except RuntimeMutationUncertain:
+        except RuntimeMutationUncertain as exc:
             observed = self.api.get(
                 namespace=self.namespace,
                 name=name,
@@ -182,6 +242,31 @@ class KubernetesSandboxClient:
                 != _managed_sandbox_projection(previous)
             ):
                 raise
+            observed_metadata = observed.get("metadata")
+            observed_annotations = (
+                observed_metadata.get("annotations", {})
+                if isinstance(observed_metadata, Mapping)
+                else {}
+            )
+            observed_operation_id = (
+                observed_annotations.get(_OPERATION_ID_ANNOTATION)
+                if isinstance(observed_annotations, Mapping)
+                else None
+            )
+            if observed_operation_id != operation_id:
+                raise RuntimeMutationOwnershipUncertain(
+                    "sandbox restore postcondition exists after uncertain mutation "
+                    "but operation ownership is not proven",
+                    resource_ref=(
+                        f"k8s://{self.namespace}/sandbox/{name}"
+                    ),
+                    operation_id=operation_id,
+                    observed_operation_id=(
+                        str(observed_operation_id)
+                        if observed_operation_id is not None
+                        else None
+                    ),
+                ) from exc
             resource = observed
             verified_after_uncertain_mutation = True
 
@@ -191,6 +276,7 @@ class KubernetesSandboxClient:
             "name": name,
             "uid": restored_metadata.get("uid"),
             "resourceVersion": restored_metadata.get("resourceVersion"),
+            "operationId": operation_id,
             "verifiedAfterUncertainMutation": (
                 verified_after_uncertain_mutation
             ),
