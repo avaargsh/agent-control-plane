@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Mapping
 
 from .decision_eval import validate_decision_eval_artifact
@@ -13,6 +14,27 @@ class LiveProofInputs:
     decision_artifact: Mapping[str, Any]
     factory_artifact: Mapping[str, Any]
     factory_attestation: Mapping[str, Any]
+
+
+_SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _contains_placeholder(value: Any) -> bool:
+    if isinstance(value, str):
+        upper = value.upper()
+        return (
+            "REPLACE_ME" in upper
+            or "REPLACE_WITH" in upper
+            or upper in {"TODO", "TBD"}
+        )
+    if isinstance(value, Mapping):
+        return any(
+            _contains_placeholder(item)
+            for item in value.values()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_placeholder(item) for item in value)
+    return False
 
 
 def _contains_synthetic(value: Any) -> bool:
@@ -106,6 +128,8 @@ def assert_live_release_evidence(
         raise ValueError("LIVE_GOLDEN_SLICE_EVIDENCE_REQUIRED")
     if _contains_synthetic(golden_slice):
         raise ValueError("LIVE_GOLDEN_SLICE_SYNTHETIC")
+    if _contains_placeholder(golden_slice):
+        raise ValueError("LIVE_GOLDEN_SLICE_PLACEHOLDER")
 
     identity = golden_slice.get("identity")
     if not isinstance(identity, Mapping):
@@ -130,6 +154,33 @@ def assert_live_release_evidence(
             + ",".join(missing)
         )
 
+    sandbox = identity.get("sandbox")
+    if not isinstance(sandbox, Mapping):
+        raise ValueError("LIVE_SANDBOX_IDENTITY_REQUIRED")
+    for key in ("provider", "currentId"):
+        if not sandbox.get(key):
+            raise ValueError(
+                "LIVE_SANDBOX_IDENTITY_INCOMPLETE:" + key
+            )
+    lineage = sandbox.get("replacementLineage")
+    if not isinstance(lineage, list):
+        raise ValueError("LIVE_SANDBOX_LINEAGE_REQUIRED")
+
+    compute = identity.get("computeWorkload")
+    if not isinstance(compute, Mapping):
+        raise ValueError("LIVE_COMPUTE_IDENTITY_REQUIRED")
+    if not compute.get("id"):
+        raise ValueError("LIVE_COMPUTE_IDENTITY_INCOMPLETE:id")
+    generation = compute.get("generation")
+    if (
+        isinstance(generation, bool)
+        or not isinstance(generation, int)
+        or generation <= 0
+    ):
+        raise ValueError(
+            "LIVE_COMPUTE_IDENTITY_INCOMPLETE:generation"
+        )
+
     refs = golden_slice.get("refs")
     if not isinstance(refs, Mapping):
         raise ValueError("LIVE_RECEIPTS_REQUIRED")
@@ -143,3 +194,10 @@ def assert_live_release_evidence(
             raise ValueError(
                 "LIVE_RECEIPT_MISSING:" + key
             )
+
+    policy_digest = refs["policyDigest"]
+    if (
+        not isinstance(policy_digest, str)
+        or not _SHA256.fullmatch(policy_digest)
+    ):
+        raise ValueError("LIVE_POLICY_DIGEST_INVALID")

@@ -9,6 +9,7 @@ from agent_control_plane.factory_attestation import (
 )
 from agent_control_plane.live_proof import (
     LiveProofInputs,
+    assert_live_release_evidence,
     validate_live_proof_inputs,
 )
 
@@ -205,4 +206,94 @@ def test_live_proof_requires_fallback_to_execute():
         _verify(
             _decision(fallback_count=0),
             _factory(),
+        )
+
+
+
+def _golden_slice():
+    return {
+        "fixtureMode": "live",
+        "incidentId": "inc-live-001",
+        "alert": "NVIDIA XID 79",
+        "node": "gpu-worker-01",
+        "severity": "critical",
+        "decision": {
+            "decisionId": "decision-live-001",
+            "action": "diagnose",
+            "requiresApproval": True,
+        },
+        "identity": {
+            "agentReleaseId": "gpu-xid-live-v1",
+            "sessionId": "session-live-001",
+            "runId": "run-live-001",
+            "temporalWorkflowId": "workflow-live-001",
+            "temporalRunId": "workflow-run-live-001",
+            "sandbox": {
+                "provider": "k8s-agent-sandbox",
+                "currentId": "sandbox-live-001",
+                "replacementLineage": [],
+            },
+            "computeWorkload": {
+                "id": "workload-live-001",
+                "generation": 1,
+            },
+        },
+        "refs": {
+            "alertEvidence": "evidence://alerts/live-001",
+            "approvalReceipt": "evidence://approval/live-001",
+            "policyDigest": "sha256:" + "c" * 64,
+            "mcpDiagnosticReceipt": "evidence://mcp/live-001",
+        },
+    }
+
+
+def test_live_release_evidence_rejects_template_placeholders():
+    value = _golden_slice()
+    value["identity"]["runId"] = "REPLACE_ME"
+
+    with pytest.raises(
+        ValueError,
+        match="LIVE_GOLDEN_SLICE_PLACEHOLDER",
+    ):
+        assert_live_release_evidence(
+            {"golden_slice": value}
+        )
+
+
+def test_live_release_evidence_rejects_incomplete_nested_identity():
+    value = _golden_slice()
+    value["identity"]["sandbox"]["currentId"] = ""
+
+    with pytest.raises(
+        ValueError,
+        match="LIVE_SANDBOX_IDENTITY_INCOMPLETE:currentId",
+    ):
+        assert_live_release_evidence(
+            {"golden_slice": value}
+        )
+
+
+def test_live_release_evidence_requires_positive_compute_generation():
+    value = _golden_slice()
+    value["identity"]["computeWorkload"]["generation"] = 0
+
+    with pytest.raises(
+        ValueError,
+        match="LIVE_COMPUTE_IDENTITY_INCOMPLETE:generation",
+    ):
+        assert_live_release_evidence(
+            {"golden_slice": value}
+        )
+
+
+def test_live_release_evidence_validates_policy_digest():
+    value = _golden_slice()
+    value["refs"]["policyDigest"] = "sha256:not-a-real-digest"
+
+    with pytest.raises(
+        ValueError,
+        match="LIVE_POLICY_DIGEST_INVALID",
+    ):
+        assert_live_release_evidence(
+            {"golden_slice": value}
         )
