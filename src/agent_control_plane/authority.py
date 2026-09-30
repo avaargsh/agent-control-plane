@@ -73,6 +73,7 @@ def authority_digest(envelope: Mapping[str, Any]) -> str:
     spec = envelope.get("spec", {})
     authority_view = {
         "fleetRef": spec.get("fleetRef"),
+        "teamRef": spec.get("teamRef"),
         "agentRef": spec.get("agentRef"),
         "runtimeRefs": sorted(spec.get("runtimeRefs", ())),
         "grants": sorted(
@@ -167,6 +168,7 @@ def admit_authority_change(
 
     for identity_field, reason in (
         ("fleetRef", "FLEET_IDENTITY_CHANGED"),
+        ("teamRef", "TEAM_OWNERSHIP_CHANGED"),
         ("agentRef", "AGENT_IDENTITY_CHANGED"),
     ):
         if before_spec.get(identity_field) != after_spec.get(identity_field):
@@ -236,6 +238,7 @@ def build_authority_inventory(
         fleet_map.setdefault(fleet_ref, {}).setdefault(agent_ref, []).append(
             {
                 "releaseRef": spec.get("releaseRef"),
+                "teamRef": spec.get("teamRef"),
                 "envelopeRef": metadata.get("name"),
                 "authorityDigest": authority_digest(envelope),
                 "runtimeRefs": sorted(spec.get("runtimeRefs", ())),
