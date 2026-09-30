@@ -1,0 +1,34 @@
+{
+  "fixtureMode": "live",
+  "incidentId": "REPLACE_ME",
+  "alert": "NVIDIA XID",
+  "node": "REPLACE_ME",
+  "severity": "critical",
+  "decision": {
+    "decisionId": "REPLACE_ME",
+    "action": "diagnose",
+    "requiresApproval": true
+  },
+  "identity": {
+    "agentReleaseId": "gpu-xid-remediation-live-v1",
+    "sessionId": "REPLACE_ME",
+    "runId": "REPLACE_ME",
+    "temporalWorkflowId": "REPLACE_ME",
+    "temporalRunId": "REPLACE_ME",
+    "sandbox": {
+      "provider": "k8s-agent-sandbox",
+      "currentId": "REPLACE_ME",
+      "replacementLineage": []
+    },
+    "computeWorkload": {
+      "id": "REPLACE_ME",
+      "generation": 1
+    }
+  },
+  "refs": {
+    "alertEvidence": "evidence://REPLACE_ME",
+    "approvalReceipt": "evidence://REPLACE_ME",
+    "policyDigest": "sha256:REPLACE_WITH_64_HEX",
+    "mcpDiagnosticReceipt": "evidence://REPLACE_ME"
+  }
+}
