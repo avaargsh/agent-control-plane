@@ -67,7 +67,12 @@ class KubectlApi:
         return json.loads(completed.stdout)
 
     def delete(self, *, namespace: str, name: str) -> Mapping[str, Any]:
-        subprocess.run(["kubectl", "--context", self.context, "-n", namespace, "delete", self.resource, name, "--ignore-not-found=true"], check=True, capture_output=True, text=True)
+        completed = subprocess.run(
+            ["kubectl", "--context", self.context, "-n", namespace, "delete", self.resource, name, "--ignore-not-found=true"],
+            check=False, capture_output=True, text=True,
+        )
+        if completed.returncode != 0:
+            _raise_mutation_failure(completed)
         return {"deleted": True, "name": name}
 
 
@@ -96,5 +101,10 @@ class TemporalCliApi:
         return {"runId": doc.get("runId"), "status": "RUNNING"}
 
     def terminate(self, *, workflow_id: str, reason: str) -> Mapping[str, Any]:
-        subprocess.run(["temporal", "workflow", "terminate", "--address", self.address, "--workflow-id", workflow_id, "--reason", reason], check=True, capture_output=True, text=True)
+        completed = subprocess.run(
+            ["temporal", "workflow", "terminate", "--address", self.address, "--workflow-id", workflow_id, "--reason", reason],
+            check=False, capture_output=True, text=True,
+        )
+        if completed.returncode != 0:
+            _raise_mutation_failure(completed)
         return {"terminated": True, "workflowId": workflow_id}
