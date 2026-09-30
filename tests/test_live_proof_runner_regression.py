@@ -67,6 +67,9 @@ def _factory(secret):
 
 
 def _golden_slice():
+    decision_id = json.loads(
+        QWEN.read_text(encoding="utf-8")
+    )["artifact_id"]
     return {
         "fixtureMode": "live",
         "incidentId": "inc-live-regression-001",
@@ -74,7 +77,7 @@ def _golden_slice():
         "node": "gpu-worker-01",
         "severity": "critical",
         "decision": {
-            "decisionId": "decision-live-001",
+            "decisionId": decision_id,
             "action": "diagnose",
             "requiresApproval": True,
         },
