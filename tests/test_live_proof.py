@@ -297,3 +297,33 @@ def test_live_release_evidence_validates_policy_digest():
         assert_live_release_evidence(
             {"golden_slice": value}
         )
+
+
+
+def test_live_release_evidence_requires_explicit_live_mode():
+    value = _golden_slice()
+    value["fixtureMode"] = "external-artifact-integration"
+
+    with pytest.raises(
+        ValueError,
+        match="LIVE_GOLDEN_SLICE_MODE_REQUIRED",
+    ):
+        assert_live_release_evidence(
+            {"golden_slice": value}
+        )
+
+
+def test_live_release_evidence_binds_decision_artifact_identity():
+    value = _golden_slice()
+    value["decision"]["decisionId"] = "decision-eval:sha256:" + "d" * 64
+
+    with pytest.raises(
+        ValueError,
+        match="LIVE_DECISION_ARTIFACT_ID_MISMATCH",
+    ):
+        assert_live_release_evidence(
+            {"golden_slice": value},
+            expected_decision_artifact_id=(
+                "decision-eval:sha256:" + "e" * 64
+            ),
+        )
