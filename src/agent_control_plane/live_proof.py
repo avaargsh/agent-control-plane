@@ -95,3 +95,51 @@ def validate_live_proof_inputs(
             inputs.factory_artifact.get("accepted") is True
         ),
     }
+
+
+
+def assert_live_release_evidence(
+    evidence: Mapping[str, Any],
+) -> None:
+    golden_slice = evidence.get("golden_slice")
+    if not isinstance(golden_slice, Mapping):
+        raise ValueError("LIVE_GOLDEN_SLICE_EVIDENCE_REQUIRED")
+    if _contains_synthetic(golden_slice):
+        raise ValueError("LIVE_GOLDEN_SLICE_SYNTHETIC")
+
+    identity = golden_slice.get("identity")
+    if not isinstance(identity, Mapping):
+        raise ValueError("LIVE_IDENTITY_REQUIRED")
+    required_identity = (
+        "agentReleaseId",
+        "sessionId",
+        "runId",
+        "temporalWorkflowId",
+        "temporalRunId",
+        "sandbox",
+        "computeWorkload",
+    )
+    missing = [
+        key
+        for key in required_identity
+        if not identity.get(key)
+    ]
+    if missing:
+        raise ValueError(
+            "LIVE_IDENTITY_INCOMPLETE:"
+            + ",".join(missing)
+        )
+
+    refs = golden_slice.get("refs")
+    if not isinstance(refs, Mapping):
+        raise ValueError("LIVE_RECEIPTS_REQUIRED")
+    for key in (
+        "alertEvidence",
+        "approvalReceipt",
+        "policyDigest",
+        "mcpDiagnosticReceipt",
+    ):
+        if not refs.get(key):
+            raise ValueError(
+                "LIVE_RECEIPT_MISSING:" + key
+            )
