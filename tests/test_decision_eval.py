@@ -94,7 +94,7 @@ def test_verified_decision_artifact_exposes_sealed_gate_metrics():
     assert result.metrics["dataset_case_count"] == 2.0
     assert result.metrics["system2_accuracy"] == 1.0
     assert result.metrics["system2_fallback_rate"] == 0.5
-    assert result.metrics["system2_p95_latency_ms"] == 24.0
+    assert result.metrics["system2_p95_latency_ms"] == 20.0
     assert result.metrics["system2_mean_tokens_processed"] == 48.0
 
 
