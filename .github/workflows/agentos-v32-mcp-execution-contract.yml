@@ -42,6 +42,7 @@ jobs:
           python experiments/v3_2/mcp_execution_contract.py | tee /tmp/mcp-execution-contract.txt
           grep -qx 'PASS' /tmp/mcp-execution-contract.txt
           grep -q '"scenario": "lost_ack"' /tmp/mcp-execution-contract.txt
+          grep -q '"scenario": "duplicate_retry"' /tmp/mcp-execution-contract.txt
           grep -q '"scenario": "timeout"' /tmp/mcp-execution-contract.txt
           grep -q '"scenario": "partial_commit"' /tmp/mcp-execution-contract.txt
           grep -q '"scenario": "compensation"' /tmp/mcp-execution-contract.txt
