@@ -57,6 +57,13 @@ def _fallback_semantics_reason(
     *,
     dataset_case_ids: list[str],
 ) -> str | None:
+    threshold = fallback.get("threshold")
+    if (
+        not _is_finite_number(threshold)
+        or not 0.0 <= float(threshold) <= 1.0
+    ):
+        return "FALLBACK_THRESHOLD_INVALID"
+
     eligible = fallback.get("eligible_case_count")
     if (
         isinstance(eligible, bool)
@@ -423,7 +430,7 @@ def validate_decision_eval_artifact(
                 "mean_tokens_processed",
             }:
                 continue
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
+            if not _is_finite_number(value):
                 return DecisionEvalValidation(
                     valid=False,
                     reason=f"FALLBACK_METRIC_INVALID:{source}",
