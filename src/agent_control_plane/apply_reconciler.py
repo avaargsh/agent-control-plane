@@ -35,6 +35,7 @@ from .policy_engine import (
 from .registry import ProviderRegistry
 from .recovery import normalize_recovery_evidence
 from .release_evidence import seal_release_evidence
+from .runtime_clients import RuntimeMutationOwnershipUncertain
 from .state_machine import ReleasePhase, ReleaseState
 
 
@@ -240,6 +241,16 @@ class ApplyReconciler:
         ):
             state.transition(ReleasePhase.BLOCKED)
             factory_error = "FACTORY_ACCEPTANCE_ARTIFACT_REQUIRED"
+            ambiguous_apply = None
+            if isinstance(exc, RuntimeMutationOwnershipUncertain):
+                ambiguous_apply = {
+                    "binding": active_binding_name,
+                    "resource_ref": exc.resource_ref,
+                    "operation_id": exc.operation_id,
+                    "observed_operation_id": exc.observed_operation_id,
+                    "ownership_proven": False,
+                }
+
             evidence = seal_release_evidence({
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
@@ -564,8 +575,10 @@ class ApplyReconciler:
             ]
         ] = []
 
+        active_binding_name: str | None = None
         try:
             for binding_name in order:
+                active_binding_name = binding_name
                 binding = plan.bindings[
                     binding_name
                 ]
@@ -626,6 +639,7 @@ class ApplyReconciler:
                     for receipt in rollback_receipts
                 ],
                 "rollback_errors": rollback_errors,
+                "ambiguous_apply": ambiguous_apply,
                 "eval_results": [],
                 "phase": state.phase.value,
                 "apply_error": str(exc),
