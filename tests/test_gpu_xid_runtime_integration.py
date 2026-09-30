@@ -25,8 +25,12 @@ class K8sApi:
 class TemporalApi:
     def __init__(self): self.workflows = {}
     def describe(self, *, workflow_id): return self.workflows.get(workflow_id)
-    def start(self, *, workflow_id, workflow_type, task_queue, input):
-        value = {"runId": "temporal-run-xid", "status": "RUNNING"}
+    def start(self, *, workflow_id, workflow_type, task_queue, input, operation_id):
+        value = {
+            "runId": "temporal-run-xid",
+            "status": "RUNNING",
+            "operationId": operation_id,
+        }
         self.workflows[workflow_id] = value
         return value
     def terminate(self, *, workflow_id, reason): return {"terminated": True}

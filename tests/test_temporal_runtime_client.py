@@ -1,6 +1,7 @@
 import pytest
 
 from agent_control_plane.runtime_clients import (
+    RuntimeMutationOwnershipUncertain,
     RuntimeMutationUncertain,
     TerminalRuntimeConflict,
 )
@@ -16,9 +17,13 @@ class FakeTemporalApi:
     def describe(self, *, workflow_id):
         return self.workflows.get(workflow_id)
 
-    def start(self, *, workflow_id, workflow_type, task_queue, input):
+    def start(self, *, workflow_id, workflow_type, task_queue, input, operation_id):
         self.starts += 1
-        value = {"runId": "run-001", "status": "RUNNING"}
+        value = {
+            "runId": "run-001",
+            "status": "RUNNING",
+            "operationId": operation_id,
+        }
         self.workflows[workflow_id] = value
         return value
 
@@ -61,12 +66,13 @@ def test_temporal_client_terminates_by_stable_workflow_identity():
 
 
 class LostAckTemporalApi(FakeTemporalApi):
-    def start(self, *, workflow_id, workflow_type, task_queue, input):
+    def start(self, *, workflow_id, workflow_type, task_queue, input, operation_id):
         super().start(
             workflow_id=workflow_id,
             workflow_type=workflow_type,
             task_queue=task_queue,
             input=input,
+            operation_id=operation_id,
         )
         raise RuntimeMutationUncertain("rpc error: code = Unavailable")
 
@@ -83,8 +89,31 @@ def test_temporal_client_recovers_start_receipt_after_lost_ack():
     assert result.evidence["verifiedAfterUncertainMutation"] is True
 
 
+class ConcurrentCreatorTemporalApi(FakeTemporalApi):
+    def start(self, *, workflow_id, workflow_type, task_queue, input, operation_id):
+        self.starts += 1
+        self.workflows[workflow_id] = {
+            "runId": "run-other-attempt",
+            "status": "RUNNING",
+            "operationId": "other-attempt",
+        }
+        raise RuntimeMutationUncertain("rpc error: code = Unavailable")
+
+
+def test_temporal_client_does_not_claim_concurrent_workflow_after_lost_ack():
+    api = ConcurrentCreatorTemporalApi()
+    client = TemporalWorkflowClient(api)
+
+    with pytest.raises(RuntimeMutationOwnershipUncertain) as caught:
+        client.ensure_workflow(desired())
+
+    assert caught.value.observed_operation_id == "other-attempt"
+    assert caught.value.operation_id
+    assert api.starts == 1
+
+
 class UncommittedTemporalApi(FakeTemporalApi):
-    def start(self, *, workflow_id, workflow_type, task_queue, input):
+    def start(self, *, workflow_id, workflow_type, task_queue, input, operation_id):
         raise RuntimeMutationUncertain("connection refused")
 
 
@@ -197,11 +226,12 @@ def test_temporal_client_allows_nonterminal_existing_workflow():
 
 
 class LostAckTerminalTemporalApi(FakeTemporalApi):
-    def start(self, *, workflow_id, workflow_type, task_queue, input):
+    def start(self, *, workflow_id, workflow_type, task_queue, input, operation_id):
         self.starts += 1
         self.workflows[workflow_id] = {
             "runId": "run-terminal-lost-ack",
             "status": "FAILED",
+            "operationId": operation_id,
         }
         raise RuntimeMutationUncertain("rpc error: code = Unavailable")
 
@@ -220,11 +250,12 @@ def test_temporal_client_rejects_terminal_recovery_after_lost_ack():
 
 
 class ImmediateTerminalTemporalApi(FakeTemporalApi):
-    def start(self, *, workflow_id, workflow_type, task_queue, input):
+    def start(self, *, workflow_id, workflow_type, task_queue, input, operation_id):
         self.starts += 1
         value = {
             "runId": "run-immediate-terminal",
             "status": "COMPLETED",
+            "operationId": operation_id,
         }
         self.workflows[workflow_id] = value
         return value
@@ -264,11 +295,12 @@ def test_temporal_client_rejects_unverifiable_existing_status(status):
 
 
 class LostAckUnknownStatusTemporalApi(FakeTemporalApi):
-    def start(self, *, workflow_id, workflow_type, task_queue, input):
+    def start(self, *, workflow_id, workflow_type, task_queue, input, operation_id):
         self.starts += 1
         self.workflows[workflow_id] = {
             "runId": "run-unknown-lost-ack",
             "status": "UNKNOWN",
+            "operationId": operation_id,
         }
         raise RuntimeMutationUncertain("rpc error: code = Unavailable")
 
