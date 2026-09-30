@@ -196,6 +196,34 @@ future trusted attestation verifier
 This distinction is deliberate: a content digest proves that bytes did not
 change; it does not prove which trusted system produced them.
 
+## Decision eval CLI handoff
+
+A measured Decision Lab artifact can be verified and gated without importing the
+Decision Lab package:
+
+```bash
+agent-control-plane decision-eval-verify decision-eval.json
+
+agent-control-plane decision-eval-gate \
+  examples/decision-system2-eval-gate.yaml \
+  --artifact decision-eval.json
+```
+
+The consumer validates the content digest and dataset provenance before exposing
+metrics to the gate. When `fallback_evaluation.measured=true`, the artifact must
+also carry the measured System-2 adapter, threshold, case counts, fallback rate,
+accuracy, p50/p95 latency, token usage, and per-case results.
+
+Projected gate metrics use the `system2_` prefix, for example:
+
+- `system2_accuracy`
+- `system2_fallback_rate`
+- `system2_p95_latency_ms`
+- `system2_mean_tokens_processed`
+
+This keeps the fast-path operating-point `fallback_rate` distinct from the
+measured System-2 execution metrics.
+
 ## Current status
 
 v0.1 release candidate.
