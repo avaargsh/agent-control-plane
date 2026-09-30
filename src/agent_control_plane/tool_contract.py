@@ -89,7 +89,13 @@ def execute_with_contract(
             result = invoke(key)
         except RetryableToolError:
             if verification["mode"] != "none":
-                observed = verify(key)
+                try:
+                    observed = verify(key)
+                except RetryableToolError:
+                    # A read-after-write transport failure is inconclusive,
+                    # not proof that the original side effect did not commit.
+                    # Retry the operation with the same idempotency key.
+                    observed = None
                 if observed is not None:
                     return finish(
                         observed,
