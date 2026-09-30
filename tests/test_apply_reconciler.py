@@ -18,6 +18,7 @@ from agent_control_plane.example_adapters import (
 )
 from agent_control_plane.plan import ResolvedReleasePlan
 from agent_control_plane.registry import ProviderRegistry
+from agent_control_plane.runtime_clients import RuntimeMutationOwnershipUncertain
 from agent_control_plane.tool_adapter import MCPToolAdapter
 
 
@@ -1039,3 +1040,47 @@ def test_eval_rollback_failure_is_blocked_but_keeps_all_compensation_evidence() 
         result.evidence["rollback_errors"][0]["error"]
         == "temporal rollback unavailable"
     )
+
+def test_ambiguous_apply_ownership_is_recorded_without_claiming_receipt() -> None:
+    class AmbiguousWorkflowExecutor(InMemoryExecutor):
+        def apply(self, **kwargs):
+            raise RuntimeMutationOwnershipUncertain(
+                "temporal ownership ambiguous after lost ACK",
+                resource_ref="temporal://workflow/sre-v1",
+                operation_id="attempt-a",
+                observed_operation_id="attempt-b",
+            )
+
+    executors = ExecutorRegistry()
+    executors.register(
+        InMemoryExecutor("sandbox", "k8s-agent-sandbox")
+    )
+    executors.register(InMemoryExecutor("tool", "mcp"))
+    executors.register(InMemoryExecutor("harness", "codex"))
+    executors.register(
+        AmbiguousWorkflowExecutor("workflow", "temporal")
+    )
+    executors.register(
+        InMemoryExecutor("decision", "decision-gateway")
+    )
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executors,
+    ).reconcile(build_plan())
+
+    assert result.phase == "rolled-back"
+    assert [item.binding_name for item in result.receipts] == [
+        "sandbox",
+        "tools",
+        "harness",
+    ]
+    assert result.evidence["ambiguous_apply"] == {
+        "binding": "workflow",
+        "resource_ref": "temporal://workflow/sre-v1",
+        "operation_id": "attempt-a",
+        "observed_operation_id": "attempt-b",
+        "ownership_proven": False,
+    }
+    assert result.error == "temporal ownership ambiguous after lost ACK"
+
