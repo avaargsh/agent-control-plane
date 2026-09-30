@@ -72,6 +72,27 @@ def test_digest_is_release_independent() -> None:
     assert authority_digest(first) == authority_digest(second)
 
 
+def test_initial_authority_requires_explicit_review() -> None:
+    denied = admit_authority_change(
+        None,
+        envelope(),
+    )
+    admitted = admit_authority_change(
+        None,
+        envelope(),
+        allow_initial=True,
+    )
+
+    assert denied.decision == "DENY"
+    assert denied.reasons == (
+        "INITIAL_AUTHORITY_REVIEW_REQUIRED",
+    )
+    assert admitted.decision == "ADMIT"
+    assert admitted.reasons == (
+        "INITIAL_AUTHORITY_APPROVED",
+    )
+
+
 def test_added_grant_is_denied() -> None:
     before = envelope()
     after = envelope(
