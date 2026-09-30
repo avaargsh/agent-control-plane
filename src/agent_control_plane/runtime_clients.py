@@ -10,6 +10,10 @@ class RuntimeMutationUncertain(RuntimeError):
     """A provider mutation may have committed even though its ACK was lost."""
 
 
+class TerminalRuntimeConflict(RuntimeError):
+    """Desired runtime identity resolves to an already-terminal execution."""
+
+
 @dataclass(frozen=True)
 class RuntimeApplyResult:
     resource_ref: str
