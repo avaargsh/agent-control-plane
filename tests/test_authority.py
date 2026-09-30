@@ -42,6 +42,7 @@ def envelope(
         "metadata": {"name": name},
         "spec": {
             "fleetRef": "prod-sre",
+            "teamRef": "team://sre-platform",
             "agentRef": agent_ref,
             "releaseRef": release_ref,
             "runtimeRefs": runtimes or [
@@ -122,6 +123,16 @@ def test_tightening_is_admitted() -> None:
     assert result.decision == "ADMIT"
     assert result.diff.removed_grants
     assert result.reasons == ("NO_AUTHORITY_EXPANSION",)
+
+
+def test_team_ownership_change_is_denied() -> None:
+    before = envelope()
+    after = envelope()
+    after["spec"]["teamRef"] = "team://application"
+
+    result = admit_authority_change(before, after)
+
+    assert "TEAM_OWNERSHIP_CHANGED" in result.reasons
 
 
 def test_runtime_boundary_change_is_denied() -> None:
