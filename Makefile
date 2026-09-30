@@ -1,7 +1,7 @@
 PYTHON ?= python3
 ARTIFACTS ?= .artifacts
 
-.PHONY: setup test demo preflight smoke verify-release audit-history clean
+.PHONY: setup test demo mcp-contract-proof preflight smoke verify-release audit-history clean
 
 setup:
 	$(PYTHON) -m pip install -e '.[dev]'
@@ -12,6 +12,9 @@ test:
 demo:
 	mkdir -p $(ARTIFACTS)/demo
 	$(PYTHON) examples/gpu_xid_golden_incident.py | tee $(ARTIFACTS)/demo/release-evidence-summary.json
+
+mcp-contract-proof:
+	$(PYTHON) experiments/v3_2/mcp_execution_contract.py
 
 preflight:
 	$(PYTHON) scripts/live_smoke_preflight.py
