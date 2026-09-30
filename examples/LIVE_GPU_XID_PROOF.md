@@ -41,9 +41,15 @@ python examples/run_live_gpu_xid_proof.py \
 
 The runner fails closed when the model artifact is synthetic, the System-2 path
 did not actually execute, the factory evidence is synthetic, the attestation is
-not trusted, required live identities/receipts are missing, the release does not
-promote, or replay verification fails.
+not trusted, required live identities/receipts are missing, or replay
+verification fails.
 
-A successful command is the integration proof. Keep the original workflow and
-commissioning provenance beside the resulting `release-evidence.live.json`;
-the JSON contract alone cannot prove that external execution actually occurred.
+The decision artifact is evaluated against the same production-oriented
+System-2 gate used elsewhere. A valid live proof may therefore end in either
+`promoted` or `blocked`. A blocked, replay-valid ReleaseEvidence is the
+correct result when measured quality or latency misses the declared gate; the
+runner must not weaken thresholds merely to produce a green integration demo.
+
+Keep the original workflow and commissioning provenance beside the resulting
+`release-evidence.live.json`; the JSON contract alone cannot prove that
+external execution actually occurred.
