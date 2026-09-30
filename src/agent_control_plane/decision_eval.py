@@ -563,6 +563,17 @@ def validate_decision_eval_artifact(
             metrics={},
         )
 
+    semantic_reason = _fallback_semantics_reason(
+        fallback,
+        dataset_case_ids=case_ids,
+    )
+    if semantic_reason is not None:
+        return DecisionEvalValidation(
+            valid=False,
+            reason=semantic_reason,
+            metrics={},
+        )
+
     metrics["fallback_measured"] = 1.0 if measured else 0.0
     metrics["dataset_case_count"] = float(case_count)
 
@@ -609,17 +620,6 @@ def validate_decision_eval_artifact(
                 reason="FALLBACK_CASES_REQUIRED",
                 metrics={},
             )
-        semantic_reason = _fallback_semantics_reason(
-            fallback,
-            dataset_case_ids=case_ids,
-        )
-        if semantic_reason is not None:
-            return DecisionEvalValidation(
-                valid=False,
-                reason=semantic_reason,
-                metrics={},
-            )
-
     return DecisionEvalValidation(
         valid=True,
         reason=None,
