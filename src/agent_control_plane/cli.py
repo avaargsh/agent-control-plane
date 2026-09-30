@@ -80,6 +80,10 @@ def main() -> None:
         "--baseline",
         required=False,
     )
+    authority_admit.add_argument(
+        "--allow-initial",
+        action="store_true",
+    )
 
     args = parser.parse_args()
 
@@ -134,6 +138,7 @@ def main() -> None:
         result = admit_authority_change(
             baseline,
             proposed[0],
+            allow_initial=args.allow_initial,
         )
         print(
             json.dumps(
