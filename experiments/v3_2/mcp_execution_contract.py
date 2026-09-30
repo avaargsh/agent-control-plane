@@ -111,6 +111,12 @@ def main() -> None:
         root = Path(tmp)
         cases = [
             ("lost_ack", "lost_ack_once", "ok", 1.0),
+            (
+                "duplicate_retry",
+                "lost_ack_stale_verify_once",
+                "ok",
+                1.0,
+            ),
             ("timeout", "timeout_before_commit_once", "ok", 0.3),
             ("partial_commit", "partial_commit_once", "ok", 1.0),
             ("compensation", "none", "failed", 1.0),
