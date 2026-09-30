@@ -11,6 +11,7 @@ def main() -> int:
     print(json.dumps({
         "kubectl": state.kubectl,
         "kubeContext": state.kube_context,
+        "kubeNamespace": state.kube_namespace,
         "temporalAddress": state.temporal_address,
         "temporalReachable": state.temporal_reachable,
         "ready": state.ready,
