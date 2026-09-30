@@ -10,13 +10,24 @@ from .runtime_clients import (
 
 
 class TemporalApi(Protocol):
-    def describe(self, *, workflow_id: str) -> Mapping[str, Any] | None:
+    def describe(
+        self,
+        *,
+        workflow_id: str,
+        run_id: str | None = None,
+    ) -> Mapping[str, Any] | None:
         ...
 
     def start(self, *, workflow_id: str, workflow_type: str, task_queue: str, input: Mapping[str, Any]) -> Mapping[str, Any]:
         ...
 
-    def terminate(self, *, workflow_id: str, reason: str) -> Mapping[str, Any]:
+    def terminate(
+        self,
+        *,
+        workflow_id: str,
+        run_id: str,
+        reason: str,
+    ) -> Mapping[str, Any]:
         ...
 
 
@@ -117,15 +128,26 @@ class TemporalWorkflowClient:
             },
         )
 
-    def terminate_workflow(self, resource_ref: str) -> Mapping[str, Any]:
+    def terminate_workflow(
+        self,
+        resource_ref: str,
+        *,
+        expected_run_id: str,
+    ) -> Mapping[str, Any]:
+        if not expected_run_id:
+            raise ValueError("expected Temporal run id is required")
         workflow_id = resource_ref.removeprefix("temporal://workflow/")
         try:
             return self.api.terminate(
                 workflow_id=workflow_id,
+                run_id=expected_run_id,
                 reason="agent control plane compensation",
             )
         except RuntimeMutationUncertain:
-            observed = self.api.describe(workflow_id=workflow_id)
+            observed = self.api.describe(
+                workflow_id=workflow_id,
+                run_id=expected_run_id,
+            )
             if observed is not None and not _workflow_is_terminal(
                 observed.get("status")
             ):
@@ -133,6 +155,7 @@ class TemporalWorkflowClient:
             return {
                 "terminated": True,
                 "workflowId": workflow_id,
+                "runId": expected_run_id,
                 "status": (
                     observed.get("status")
                     if observed is not None
