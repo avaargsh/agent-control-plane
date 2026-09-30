@@ -80,8 +80,29 @@ class TemporalCliApi:
     def __init__(self, *, address: str) -> None:
         self.address = address
 
-    def describe(self, *, workflow_id: str) -> Mapping[str, Any] | None:
-        completed = subprocess.run(["temporal", "workflow", "describe", "--address", self.address, "--workflow-id", workflow_id, "--output", "json"], capture_output=True, text=True)
+    def describe(
+        self,
+        *,
+        workflow_id: str,
+        run_id: str | None = None,
+    ) -> Mapping[str, Any] | None:
+        command = [
+            "temporal",
+            "workflow",
+            "describe",
+            "--address",
+            self.address,
+            "--workflow-id",
+            workflow_id,
+        ]
+        if run_id is not None:
+            command.extend(["--run-id", run_id])
+        command.extend(["--output", "json"])
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+        )
         if completed.returncode != 0:
             if "not found" in completed.stderr.lower():
                 return None
@@ -100,11 +121,35 @@ class TemporalCliApi:
         doc = json.loads(completed.stdout)
         return {"runId": doc.get("runId"), "status": "RUNNING"}
 
-    def terminate(self, *, workflow_id: str, reason: str) -> Mapping[str, Any]:
+    def terminate(
+        self,
+        *,
+        workflow_id: str,
+        run_id: str,
+        reason: str,
+    ) -> Mapping[str, Any]:
         completed = subprocess.run(
-            ["temporal", "workflow", "terminate", "--address", self.address, "--workflow-id", workflow_id, "--reason", reason],
-            check=False, capture_output=True, text=True,
+            [
+                "temporal",
+                "workflow",
+                "terminate",
+                "--address",
+                self.address,
+                "--workflow-id",
+                workflow_id,
+                "--run-id",
+                run_id,
+                "--reason",
+                reason,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
         )
         if completed.returncode != 0:
             _raise_mutation_failure(completed)
-        return {"terminated": True, "workflowId": workflow_id}
+        return {
+            "terminated": True,
+            "workflowId": workflow_id,
+            "runId": run_id,
+        }
