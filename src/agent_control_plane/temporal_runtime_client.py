@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from typing import Any, Mapping, Protocol
+from uuid import uuid4
 
 from .runtime_clients import (
     RuntimeApplyResult,
+    RuntimeMutationOwnershipUncertain,
     RuntimeMutationUncertain,
     TerminalRuntimeConflict,
 )
@@ -89,6 +91,7 @@ class TemporalWorkflowClient:
             )
 
         verified_after_uncertain_mutation = False
+        operation_id = uuid4().hex
         try:
             started = self.api.start(
                 workflow_id=workflow_id,
@@ -99,8 +102,9 @@ class TemporalWorkflowClient:
                     desired.get("task_queue", self.task_queue)
                 ),
                 input=dict(desired.get("input", {})),
+                operation_id=operation_id,
             )
-        except RuntimeMutationUncertain:
+        except RuntimeMutationUncertain as exc:
             observed = self.api.describe(workflow_id=workflow_id)
             if observed is None:
                 raise
@@ -117,6 +121,19 @@ class TemporalWorkflowClient:
                     "after uncertain start: "
                     f"{workflow_id} status={observed_status}"
                 )
+            observed_operation_id = observed.get("operationId")
+            if observed_operation_id != operation_id:
+                raise RuntimeMutationOwnershipUncertain(
+                    "temporal workflow exists after uncertain start "
+                    "but operation ownership is not proven",
+                    resource_ref=f"temporal://workflow/{workflow_id}",
+                    operation_id=operation_id,
+                    observed_operation_id=(
+                        str(observed_operation_id)
+                        if observed_operation_id is not None
+                        else None
+                    ),
+                ) from exc
             started = observed
             verified_after_uncertain_mutation = True
 
@@ -133,6 +150,7 @@ class TemporalWorkflowClient:
                 "workflowId": workflow_id,
                 "runId": started.get("runId"),
                 "status": started.get("status", "RUNNING"),
+                "operationId": operation_id,
                 "verifiedAfterUncertainMutation": (
                     verified_after_uncertain_mutation
                 ),
