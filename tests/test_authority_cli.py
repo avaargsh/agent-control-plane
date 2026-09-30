@@ -108,7 +108,7 @@ def test_authority_admit_cli_denies_expansion(
     assert "AUTHORITY_EXPANSION" in payload["reasons"]
 
 
-def test_authority_admit_cli_allows_initial_authority(
+def test_authority_admit_cli_requires_initial_review(
     tmp_path,
     monkeypatch,
     capsys,
@@ -121,6 +121,35 @@ def test_authority_admit_cli_allows_initial_authority(
             "agent-control-plane",
             "authority-admit",
             str(proposed),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 3
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["decision"] == "DENY"
+    assert (
+        "INITIAL_AUTHORITY_REVIEW_REQUIRED"
+        in payload["reasons"]
+    )
+
+
+def test_authority_admit_cli_allows_explicit_initial_authority(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    proposed = tmp_path / "proposed.yaml"
+    proposed.write_text(BASELINE, encoding="utf-8")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "agent-control-plane",
+            "authority-admit",
+            str(proposed),
+            "--allow-initial",
         ],
     )
 
