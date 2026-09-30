@@ -10,6 +10,23 @@ class RuntimeMutationUncertain(RuntimeError):
     """A provider mutation may have committed even though its ACK was lost."""
 
 
+class RuntimeMutationOwnershipUncertain(RuntimeMutationUncertain):
+    """The desired postcondition exists, but this attempt cannot prove ownership."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        resource_ref: str | None = None,
+        operation_id: str | None = None,
+        observed_operation_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.resource_ref = resource_ref
+        self.operation_id = operation_id
+        self.observed_operation_id = observed_operation_id
+
+
 class TerminalRuntimeConflict(RuntimeError):
     """Desired runtime identity resolves to an already-terminal execution."""
 
