@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/agent-authority-envelope.schema.json",
+  "title": "AgentAuthorityEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "agentplane.io/v1alpha1"},
+    "kind": {"const": "AgentAuthorityEnvelope"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {"type": "string"}
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fleetRef",
+        "agentRef",
+        "releaseRef",
+        "runtimeRefs",
+        "grants",
+        "constraints"
+      ],
+      "properties": {
+        "fleetRef": {"type": "string", "minLength": 1},
+        "agentRef": {"type": "string", "minLength": 1},
+        "releaseRef": {"type": "string", "minLength": 1},
+        "runtimeRefs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "grants": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["effect", "capability", "resource", "verbs"],
+            "properties": {
+              "effect": {"enum": ["read", "write"]},
+              "capability": {"type": "string", "minLength": 1},
+              "resource": {"type": "string", "minLength": 1},
+              "verbs": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        },
+        "constraints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "approvalMode",
+            "evidenceRequired",
+            "maxOperationsPerRun"
+          ],
+          "properties": {
+            "approvalMode": {
+              "enum": ["none", "policy", "human-exact"]
+            },
+            "evidenceRequired": {"type": "boolean"},
+            "maxOperationsPerRun": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}
