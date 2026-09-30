@@ -1,0 +1,25 @@
+---
+apiVersion: agentplane.io/v1alpha1
+kind: AgentAuthorityEnvelope
+metadata:
+  name: checkout-remediator-prod
+spec:
+  fleetRef: sre-prod
+  agentRef: checkout-remediator
+  releaseRef: checkout-remediator-v1
+  runtimeRefs:
+    - temporal://prod/checkout-remediator
+    - sandbox://prod/checkout-remediator
+  grants:
+    - effect: read
+      capability: kubernetes.read
+      resource: kubernetes://prod/checkout/*
+      verbs: [get, list]
+    - effect: write
+      capability: kubernetes.scale
+      resource: kubernetes://prod/checkout/deployment/checkout-api
+      verbs: [scale]
+  constraints:
+    approvalMode: human-exact
+    evidenceRequired: true
+    maxOperationsPerRun: 1
