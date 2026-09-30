@@ -5,6 +5,11 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
+from .authority import (
+    admit_authority_change,
+    build_authority_inventory,
+    decision_asdict,
+)
 from .compiler import compile_release_plan
 from .eval_engine import evaluate_gate
 from .loader import load_yaml_documents
@@ -58,6 +63,20 @@ def main() -> None:
         required=False,
     )
 
+    inventory = subparsers.add_parser(
+        "authority-inventory"
+    )
+    inventory.add_argument("path")
+
+    authority_admit = subparsers.add_parser(
+        "authority-admit"
+    )
+    authority_admit.add_argument("path")
+    authority_admit.add_argument(
+        "--baseline",
+        required=False,
+    )
+
     args = parser.parse_args()
 
     documents = load_yaml_documents(
@@ -72,6 +91,55 @@ def main() -> None:
             "document(s)"
         )
         return
+
+    if args.command == "authority-inventory":
+        envelopes = documents.by_kind(
+            "AgentAuthorityEnvelope"
+        )
+        print(
+            json.dumps(
+                build_authority_inventory(envelopes),
+                indent=2,
+            )
+        )
+        return
+
+    if args.command == "authority-admit":
+        proposed = documents.by_kind(
+            "AgentAuthorityEnvelope"
+        )
+        if len(proposed) != 1:
+            raise SystemExit(
+                "authority-admit requires exactly one "
+                "AgentAuthorityEnvelope document"
+            )
+
+        baseline = None
+        if args.baseline:
+            baseline_docs = load_yaml_documents(
+                args.baseline,
+                validate=True,
+            ).by_kind("AgentAuthorityEnvelope")
+            if len(baseline_docs) != 1:
+                raise SystemExit(
+                    "--baseline requires exactly one "
+                    "AgentAuthorityEnvelope document"
+                )
+            baseline = baseline_docs[0]
+
+        result = admit_authority_change(
+            baseline,
+            proposed[0],
+        )
+        print(
+            json.dumps(
+                decision_asdict(result),
+                indent=2,
+            )
+        )
+        raise SystemExit(
+            0 if result.admitted else 3
+        )
 
     if args.command == "gate":
         gates = documents.by_kind(
