@@ -1,20 +1,125 @@
+import pytest
+
 from agent_control_plane.providers.opa import compile_opa_bundle
+from agent_control_plane.providers.opa.compiler import OPACompileError
 
 
-def test_capability_intent_compiles_to_deny_by_default_opa_policy() -> None:
+def test_capabilities_compile_to_independent_or_rules() -> None:
     bundle = compile_opa_bundle(
         {
             "spec": {
+                "defaultDeny": True,
                 "capabilities": [
                     {
                         "name": "filesystem.read",
-                        "effect": "allow",
-                    }
-                ]
+                        "constraints": {
+                            "paths": ["/var/log/app.log"],
+                        },
+                    },
+                    {
+                        "name": "network.egress",
+                        "constraints": {
+                            "hosts": ["api.internal.example"],
+                        },
+                    },
+                    {
+                        "name": "tool.observability.query",
+                    },
+                ],
             }
         }
     )
 
-    assert "policy.rego" in bundle
-    assert "default allow := false" in bundle["policy.rego"]
-    assert "filesystem.read" in bundle["policy.rego"]
+    policy = bundle["policy.rego"]
+    assert "import rego.v1" in policy
+    assert "default allow := false" in policy
+    assert policy.count("allow if {") == 3
+    assert 'input.capability == "filesystem.read"' in policy
+    assert 'input.resource in ["/var/log/app.log"]' in policy
+    assert 'input.capability == "network.egress"' in policy
+    assert 'input.resource in ["api.internal.example"]' in policy
+    assert 'input.capability == "tool.observability.query"' in policy
+
+
+def test_kubernetes_constraints_compile_to_verb_and_resource() -> None:
+    policy = compile_opa_bundle(
+        {
+            "spec": {
+                "capabilities": [
+                    {
+                        "name": "kubernetes.mutate",
+                        "constraints": {
+                            "verbs": ["patch"],
+                            "resources": ["deployments"],
+                        },
+                    }
+                ]
+            }
+        }
+    )["policy.rego"]
+
+    assert 'input.operation in ["patch"]' in policy
+    assert 'input.resource in ["deployments"]' in policy
+
+
+def test_explicit_deny_removes_same_name_allow_rule() -> None:
+    policy = compile_opa_bundle(
+        {
+            "spec": {
+                "capabilities": [
+                    {
+                        "name": "network.egress",
+                        "effect": "allow",
+                        "constraints": {
+                            "hosts": ["evil.example"],
+                        },
+                    },
+                    {
+                        "name": "network.egress",
+                        "effect": "deny",
+                    },
+                ]
+            }
+        }
+    )["policy.rego"]
+
+    assert 'input.capability == "network.egress"' not in policy
+    assert "default allow := false" in policy
+
+
+def test_unknown_constraint_shape_fails_closed() -> None:
+    with pytest.raises(
+        OPACompileError,
+        match="unsupported constraints",
+    ):
+        compile_opa_bundle(
+            {
+                "spec": {
+                    "capabilities": [
+                        {
+                            "name": "custom.capability",
+                            "constraints": {
+                                "tenant": "prod",
+                            },
+                        }
+                    ]
+                }
+            }
+        )
+
+
+def test_opa_provider_rejects_default_allow_intent() -> None:
+    with pytest.raises(
+        OPACompileError,
+        match="defaultDeny=true",
+    ):
+        compile_opa_bundle(
+            {
+                "spec": {
+                    "defaultDeny": False,
+                    "capabilities": [
+                        {"name": "tool.query"},
+                    ],
+                }
+            }
+        )
