@@ -169,6 +169,33 @@ Deterministic Policy / Approval
 A gate may explicitly require `fallback_measured == 1` so an unmeasured
 placeholder System-2 fallback cannot satisfy a release criterion.
 
+## AI Factory acceptance evidence boundary
+
+The control plane can bind an AI Factory
+`aifactory.engineering/v1alpha1 AcceptanceArtifact` into
+`ReleaseEvidence`.
+
+The consumer verifies the artifact's canonical SHA-256 digest before any provider
+mutation, but **does not** treat `accepted=true`, `disposition=ACCEPT`, or
+per-gate PASS values as release authorization.
+
+```text
+AI Factory
+  -> AcceptanceArtifact + digest
+  -> Agent Control Plane integrity verification
+  -> ReleaseEvidence binding
+       integrity_verified = true
+       trusted = false
+       gate_eligible = false
+
+future trusted attestation verifier
+  -> may establish producer authenticity
+  -> only then may acceptance become gate-eligible
+```
+
+This distinction is deliberate: a content digest proves that bytes did not
+change; it does not prove which trusted system produced them.
+
 ## Current status
 
 v0.1 release candidate.
