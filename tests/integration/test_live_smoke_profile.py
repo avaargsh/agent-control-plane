@@ -2,9 +2,15 @@ import os
 
 import pytest
 
+from agent_control_plane.live_smoke import inspect_live_smoke_environment
+
 
 pytestmark = pytest.mark.skipif(
-    os.getenv("ACP_LIVE_SMOKE") != "1",
+    (
+        os.getenv("AGENT_STACK_LIVE_SMOKE")
+        or os.getenv("ACP_LIVE_SMOKE")
+    )
+    != "1",
     reason="live Kubernetes/Temporal smoke test is opt-in",
 )
 
@@ -12,10 +18,10 @@ pytestmark = pytest.mark.skipif(
 def test_live_runtime_environment_is_explicitly_configured():
     """Guardrail for the live profile.
 
-    Transport-specific clients are deliberately not fabricated here. When
-    ACP_LIVE_SMOKE=1 this test fails fast unless the operator supplied the
-    external-system addresses required by integration/LIVE_SMOKE.md.
+    AGENT_STACK_LIVE_SMOKE=1 fails fast unless the operator supplied
+    the stack-wide external-system addresses required by the smoke test.
     """
-    assert os.environ["ACP_KUBE_CONTEXT"]
-    assert os.environ["ACP_KUBE_NAMESPACE"]
-    assert os.environ["ACP_TEMPORAL_ADDRESS"]
+    state = inspect_live_smoke_environment()
+    assert state.kube_context
+    assert state.kube_namespace
+    assert state.temporal_address

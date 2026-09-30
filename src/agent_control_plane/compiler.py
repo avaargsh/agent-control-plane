@@ -41,6 +41,8 @@ def compile_release_plan(
         bundle_name=bundle_ref,
         version=spec.get("version"),
         bindings=resolved,
+        authority_ref=spec.get("authorityRef"),
+        authority_digest=spec.get("authorityDigest"),
         policy_refs=tuple(spec.get("policyRefs", [])),
         eval_gates=tuple(spec.get("evalGates", [])),
         rollout=dict(spec.get("rollout", {})),

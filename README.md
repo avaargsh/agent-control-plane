@@ -71,9 +71,9 @@ TemporalWorkflowExecutor
 Configure a local environment:
 
 ```bash
-export ACP_KUBE_CONTEXT=kind-agent-control-plane
-export ACP_KUBE_NAMESPACE=agent-runtime
-export ACP_TEMPORAL_ADDRESS=127.0.0.1:7233
+export KUBE_CONTEXT=kind-agent-control-plane
+export KUBE_NAMESPACE=agent-runtime
+export TEMPORAL_ADDRESS=127.0.0.1:7233
 make preflight
 make smoke
 ```
@@ -129,6 +129,8 @@ Normal unit CI does not imply that a live Kubernetes cluster or Temporal server 
 - Eval Gates
 - ReleaseEvidence
 - deterministic replay digest
+- AgentAuthorityEnvelope + Fleet/Agent authority inventory
+- deployment-time authority drift admission
 
 ## Current status
 
@@ -140,6 +142,7 @@ Implemented:
 - provider registry and executor boundary
 - apply + compensation semantics
 - FrozenEvidence approval/resume path
+- Fleet/Agent AuthorityEnvelope inventory and fail-closed drift admission
 - replay-verifiable ReleaseEvidence
 - Kubernetes sandbox runtime client
 - Temporal workflow runtime client

@@ -18,7 +18,7 @@ preflight:
 
 smoke: preflight
 	@echo "Live prerequisites are reachable."
-	@echo "Run the opt-in integration profile with: ACP_LIVE_SMOKE=1 $(PYTHON) -m pytest -q tests/integration"
+	@echo "Run the opt-in integration profile with: AGENT_STACK_LIVE_SMOKE=1 $(PYTHON) -m pytest -q tests/integration"
 
 verify-release:
 	$(PYTHON) scripts/verify_release.py
