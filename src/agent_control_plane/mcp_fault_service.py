@@ -60,6 +60,7 @@ class FaultInjectedDeployService:
                 "apply_invocations": 0,
                 "commit_count": 0,
                 "rollback_count": 0,
+                "hidden_status_reads": 0,
             },
         )
         operation["apply_invocations"] += 1
@@ -87,7 +88,13 @@ class FaultInjectedDeployService:
             state["side_effect_count"] += 1
         _save(self.state_path, state)
 
-        if fault == "lost_ack_once" and invocation == 1:
+        if (
+            fault in {"lost_ack_once", "lost_ack_stale_verify_once"}
+            and invocation == 1
+        ):
+            if fault == "lost_ack_stale_verify_once":
+                operation["hidden_status_reads"] = 1
+                _save(self.state_path, state)
             os._exit(70)
 
         receipt = self._receipt(key, operation)
@@ -102,6 +109,14 @@ class FaultInjectedDeployService:
             return {
                 "idempotency_key": key,
                 "status": "missing",
+                "committed": False,
+            }
+        if operation.get("hidden_status_reads", 0) > 0:
+            operation["hidden_status_reads"] -= 1
+            _save(self.state_path, state)
+            return {
+                "idempotency_key": key,
+                "status": "temporarily_unobservable",
                 "committed": False,
             }
         receipt = self._receipt(key, operation)
