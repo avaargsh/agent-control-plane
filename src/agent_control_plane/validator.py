@@ -14,6 +14,7 @@ class ManifestValidationError(ValueError):
 _KIND_TO_SCHEMA = {
     "AgentBundle": "agent-bundle.schema.json",
     "AgentRelease": "agent-release.schema.json",
+    "AgentAuthorityEnvelope": "agent-authority-envelope.schema.json",
     "RuntimeBinding": "runtime-binding.schema.json",
     "Session": "session.schema.json",
     "Run": "run.schema.json",
