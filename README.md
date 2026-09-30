@@ -148,6 +148,9 @@ Implemented:
 - Temporal workflow runtime client
 - kubectl and Temporal CLI transports
 - deterministic GPU XID Golden Incident
+- AgentOS v3.2 Binding / Policy Projection / Evidence Provenance / ToolContract schemas
+- CapabilityIntent → Rego v1 compilation with real OPA allow/deny enforcement
+- cross-repository policy-digest provenance proof through Temporal, Kubernetes sandbox replacement and Evidence replay
 - opt-in live smoke preflight
 - `make demo` / `make smoke` developer workflow
 
