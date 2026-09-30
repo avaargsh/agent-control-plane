@@ -58,3 +58,26 @@ def test_resume_detects_tampered_frozen_snapshot():
             frozen,
             continuation=lambda evidence: evidence,
         )
+
+
+
+def test_resume_continuation_cannot_mutate_frozen_snapshot():
+    frozen = FrozenEvidence.capture({
+        "alert": "gpu-xid",
+        "refs": {"bundle": "evidence://approved/001"},
+    })
+
+    def mutate(evidence):
+        evidence["alert"] = "changed"
+        evidence["refs"]["bundle"] = "evidence://mutated"
+        return evidence
+
+    resumed = resume_from_frozen_evidence(
+        frozen,
+        continuation=mutate,
+    )
+
+    assert resumed["alert"] == "changed"
+    assert frozen.snapshot["alert"] == "gpu-xid"
+    assert frozen.snapshot["refs"]["bundle"] == "evidence://approved/001"
+    frozen.verify()
