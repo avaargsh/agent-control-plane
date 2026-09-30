@@ -1,7 +1,7 @@
 import json
 
 from agent_control_plane.mcp_subprocess import MCPSubprocessToolAdapter
-from agent_control_plane.tool_contract import execute_with_contract
+from agent_control_plane.tool_contract import RetryableToolError, execute_with_contract
 
 
 def contract(max_attempts=3):
@@ -147,3 +147,41 @@ def test_failed_post_condition_executes_declared_compensation(tmp_path):
     assert persisted["side_effect_count"] == 1
     assert persisted["rollback_count"] == 1
     assert operation["rollback_count"] == 1
+
+
+
+def test_retryable_verification_failure_keeps_idempotent_retry_budget():
+    invocations = 0
+    verifications = 0
+
+    def invoke(key):
+        nonlocal invocations
+        invocations += 1
+        if invocations == 1:
+            raise RetryableToolError("apply acknowledgement lost")
+        return {
+            "idempotency_key": key,
+            "status": "committed",
+            "health": "ok",
+            "duplicate": True,
+        }
+
+    def verify(_key):
+        nonlocal verifications
+        verifications += 1
+        raise RetryableToolError("status transport unavailable")
+
+    result = execute_with_contract(
+        run_id="run-mcp-proof",
+        action_id="verify-transport-retry",
+        contract=contract(max_attempts=2),
+        invoke=invoke,
+        verify=verify,
+        validate_result=lambda value: value.get("health") == "ok",
+    )
+
+    assert invocations == 2
+    assert verifications == 1
+    assert result.attempts == 2
+    assert result.verified_after_error is False
+    assert result.result["duplicate"] is True
