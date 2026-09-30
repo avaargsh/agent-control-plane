@@ -4,6 +4,39 @@ import json
 import subprocess
 from typing import Any, Mapping
 
+from .runtime_clients import RuntimeMutationUncertain
+
+
+_UNCERTAIN_MUTATION_MARKERS = (
+    "context deadline exceeded",
+    "deadline exceeded",
+    "connection reset",
+    "connection refused",
+    "unexpected eof",
+    " eof",
+    "i/o timeout",
+    "server closed",
+    "transport is closing",
+    "rpc error: code = unavailable",
+    "connection lost",
+)
+
+
+def _mutation_failure_is_uncertain(stderr: str) -> bool:
+    message = stderr.lower()
+    return any(
+        marker in message
+        for marker in _UNCERTAIN_MUTATION_MARKERS
+    )
+
+
+def _raise_mutation_failure(completed: subprocess.CompletedProcess[str]) -> None:
+    if _mutation_failure_is_uncertain(completed.stderr):
+        raise RuntimeMutationUncertain(
+            completed.stderr.strip() or "runtime mutation acknowledgement uncertain"
+        )
+    completed.check_returncode()
+
 
 def _run_json(command: list[str]) -> Mapping[str, Any]:
     completed = subprocess.run(command, check=True, capture_output=True, text=True)
@@ -27,8 +60,10 @@ class KubectlApi:
     def apply(self, *, namespace: str, manifest: Mapping[str, Any]) -> Mapping[str, Any]:
         completed = subprocess.run(
             ["kubectl", "--context", self.context, "-n", namespace, "apply", "-f", "-", "-o", "json"],
-            input=json.dumps(manifest), check=True, capture_output=True, text=True,
+            input=json.dumps(manifest), check=False, capture_output=True, text=True,
         )
+        if completed.returncode != 0:
+            _raise_mutation_failure(completed)
         return json.loads(completed.stdout)
 
     def delete(self, *, namespace: str, name: str) -> Mapping[str, Any]:
@@ -53,8 +88,10 @@ class TemporalCliApi:
     def start(self, *, workflow_id: str, workflow_type: str, task_queue: str, input: Mapping[str, Any]) -> Mapping[str, Any]:
         completed = subprocess.run(
             ["temporal", "workflow", "start", "--address", self.address, "--workflow-id", workflow_id, "--type", workflow_type, "--task-queue", task_queue, "--input", json.dumps(input), "--output", "json"],
-            check=True, capture_output=True, text=True,
+            check=False, capture_output=True, text=True,
         )
+        if completed.returncode != 0:
+            _raise_mutation_failure(completed)
         doc = json.loads(completed.stdout)
         return {"runId": doc.get("runId"), "status": "RUNNING"}
 
