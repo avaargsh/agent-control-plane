@@ -216,3 +216,61 @@ def test_duplicate_dataset_case_ids_fail_closed():
 
     assert result.valid is False
     assert result.reason == "DATASET_CASES_INVALID"
+
+
+
+def test_resealed_malformed_calibration_digest_fails_closed():
+    value = artifact()
+    value["calibration_sha256"] = "sha256:not-a-digest"
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "CALIBRATION_DIGEST_INVALID"
+
+
+def test_resealed_negative_latency_fails_closed():
+    value = artifact()
+    value["metrics"]["p95_latency_ms"] = -1.0
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "METRIC_RANGE_INVALID:p95_latency_ms"
+
+
+def test_resealed_operating_rate_out_of_range_fails_closed():
+    value = artifact()
+    value["operating_point"]["coverage"] = 1.5
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == (
+        "OPERATING_METRIC_RANGE_INVALID:coverage"
+    )
+
+
+def test_resealed_unknown_top_level_field_fails_closed():
+    value = artifact()
+    value["unexpected"] = "value"
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "ARTIFACT_FIELDS_INVALID"
+
+
+def test_resealed_unknown_unmeasured_fallback_field_fails_closed():
+    value = artifact(measured=False)
+    value["fallback_evaluation"]["unexpected"] = "value"
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "FALLBACK_FIELDS_INVALID"
