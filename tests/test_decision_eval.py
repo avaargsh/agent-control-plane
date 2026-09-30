@@ -142,3 +142,77 @@ def test_measured_fallback_without_measurements_fails_closed():
 
     assert result.valid is False
     assert result.reason == "FALLBACK_ADAPTER_REQUIRED"
+
+
+
+def _reseal(value):
+    payload = {
+        key: item
+        for key, item in value.items()
+        if key not in {"artifact_id", "content_digest"}
+    }
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
+    value["content_digest"] = digest
+    value["artifact_id"] = "decision-eval:" + digest
+    return value
+
+
+def test_resealed_fallback_rate_mismatch_fails_closed():
+    value = artifact(measured=True)
+    value["fallback_evaluation"]["fallback_rate"] = 0.9
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "FALLBACK_RATE_MISMATCH"
+
+
+def test_resealed_unknown_fallback_case_fails_closed():
+    value = artifact(measured=True)
+    value["fallback_evaluation"]["cases"][0]["case_id"] = "unknown"
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "FALLBACK_CASE_ID_INVALID"
+
+
+def test_resealed_accuracy_mismatch_fails_closed():
+    value = artifact(measured=True)
+    value["fallback_evaluation"]["accuracy"] = 0.0
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "FALLBACK_ACCURACY_MISMATCH"
+
+
+def test_resealed_latency_percentile_mismatch_fails_closed():
+    value = artifact(measured=True)
+    value["fallback_evaluation"]["p95_latency_ms"] = 999.0
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "FALLBACK_P95_MISMATCH"
+
+
+def test_duplicate_dataset_case_ids_fail_closed():
+    value = artifact(measured=True)
+    value["dataset"]["case_ids"] = ["a", "a"]
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "DATASET_CASES_INVALID"
