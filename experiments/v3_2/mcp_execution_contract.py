@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from hashlib import sha256
 import json
 from pathlib import Path
 import tempfile
@@ -41,6 +42,12 @@ CONTRACT = {
 
 
 def evidence_event(event_id: str, scenario: str, payload: dict):
+    payload_bytes = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    payload_digest = "sha256:" + sha256(payload_bytes).hexdigest()
     return {
         "apiVersion": "agentplane.io/v1alpha1",
         "kind": "EvidenceEvent",
@@ -50,7 +57,8 @@ def evidence_event(event_id: str, scenario: str, payload: dict):
             "actionId": scenario,
             "eventType": "tool.execution.receipt",
             "occurredAt": "2026-09-30T09:00:00Z",
-            "payload": payload,
+            "payloadRef": f"evidence://mcp-execution-contract/{event_id}",
+            "payloadDigest": payload_digest,
             "provenance": {
                 "generated_by": "mcp-side-effect-provider",
                 "observed_by": "execution-contract-proof",
