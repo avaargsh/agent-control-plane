@@ -540,6 +540,20 @@ def factory_acceptance_artifact(
     disposition: str = "ACCEPT",
 ):
     accepted = disposition == "ACCEPT"
+    compute_status = (
+        "FAIL"
+        if disposition == "REJECT"
+        else "WARN"
+        if disposition == "HOLD"
+        else "PASS"
+    )
+    compute_reasons = (
+        ["controlled acceptance failure"]
+        if disposition == "REJECT"
+        else ["controlled acceptance warning"]
+        if disposition == "HOLD"
+        else []
+    )
     payload = {
         "apiVersion": "aifactory.engineering/v1alpha1",
         "kind": "AcceptanceArtifact",
@@ -550,8 +564,8 @@ def factory_acceptance_artifact(
         "gates": [
             {
                 "gateId": "compute",
-                "status": "PASS",
-                "reasons": [],
+                "status": compute_status,
+                "reasons": compute_reasons,
             },
             {
                 "gateId": "runtime",
@@ -559,7 +573,7 @@ def factory_acceptance_artifact(
                 "reasons": [],
             },
         ],
-        "reasons": [],
+        "reasons": compute_reasons,
         "evidenceRefs": {
             "compute": "evidence://gpu/dcgm-001",
             "runtime": "evidence://runtime/slo-001",
@@ -819,3 +833,46 @@ def test_factory_attestation_requires_verifier() -> None:
     assert result.phase == "blocked"
     assert result.receipts == ()
     assert result.error == "FACTORY_ATTESTATION_VERIFIER_REQUIRED"
+
+
+
+def test_resealed_failed_gate_cannot_claim_trusted_acceptance() -> None:
+    artifact = factory_acceptance_artifact()
+    artifact["gates"][0]["status"] = "FAIL"
+    artifact["gates"][0]["reasons"] = ["xid failure"]
+
+    payload = {
+        key: value
+        for key, value in artifact.items()
+        if key != "digest"
+    }
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    artifact["digest"] = (
+        "sha256:" + hashlib.sha256(canonical).hexdigest()
+    )
+    attestation = factory_attestation(artifact)
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+        factory_attestation_verifier=HMACFactoryAttestationVerifier({
+            "commissioning-lab": b"lab-secret",
+        }),
+    ).reconcile(
+        build_plan(),
+        eval_gates=[FACTORY_GATE],
+        factory_acceptance_artifact=artifact,
+        factory_acceptance_attestation=attestation,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.error == (
+        "FACTORY_ACCEPTANCE_INVALID:"
+        "GATE_DISPOSITION_MISMATCH"
+    )
