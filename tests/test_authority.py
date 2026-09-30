@@ -4,7 +4,13 @@ from agent_control_plane.authority import (
     authority_digest,
     build_authority_inventory,
 )
+from agent_control_plane.apply_reconciler import ApplyReconciler
 from agent_control_plane.compiler import compile_release_plan
+from test_apply_reconciler import (
+    build_plan,
+    executor_registry,
+    provider_registry,
+)
 
 
 def envelope(
@@ -211,3 +217,98 @@ def test_release_plan_freezes_authority_reference_and_digest() -> None:
 
     assert plan.authority_ref == "checkout-prod"
     assert plan.authority_digest == digest
+
+
+def plan_with_authority(authority):
+    plan = build_plan()
+    return plan.__class__(
+        **{
+            **plan.__dict__,
+            "release_name": authority["spec"]["releaseRef"],
+            "authority_ref": authority["metadata"]["name"],
+            "authority_digest": authority_digest(authority),
+        }
+    )
+
+
+def test_reconciler_blocks_authority_expansion_before_mutation() -> None:
+    deployed = envelope(
+        release_ref="checkout-remediator-v1",
+    )
+    proposed = envelope(
+        release_ref="checkout-remediator-v2",
+        grants=[
+            *deployed["spec"]["grants"],
+            {
+                "effect": "write",
+                "capability": "kubernetes.delete",
+                "resource": "kubernetes://prod/checkout/pod/*",
+                "verbs": ["delete"],
+            },
+        ],
+    )
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        plan_with_authority(proposed),
+        deployed_authority=deployed,
+        proposed_authority=proposed,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.authority_decision is not None
+    assert "AUTHORITY_EXPANSION" in result.authority_decision.reasons
+    assert result.error.startswith("AUTHORITY_ADMISSION_DENIED")
+
+
+def test_reconciler_admits_tightening_and_records_authority() -> None:
+    deployed = envelope(
+        release_ref="checkout-remediator-v1",
+        max_ops=3,
+    )
+    proposed = envelope(
+        release_ref="checkout-remediator-v2",
+        max_ops=1,
+    )
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        plan_with_authority(proposed),
+        deployed_authority=deployed,
+        proposed_authority=proposed,
+    )
+
+    assert result.phase == "promoted"
+    assert result.authority_decision is not None
+    assert result.authority_decision.admitted is True
+    assert result.evidence["authority"]["decision"] == "ADMIT"
+
+
+def test_reconciler_blocks_authority_digest_mismatch() -> None:
+    proposed = envelope(
+        release_ref="checkout-remediator-v2",
+    )
+    plan = plan_with_authority(proposed)
+    plan = plan.__class__(
+        **{
+            **plan.__dict__,
+            "authority_digest": "sha256:" + "0" * 64,
+        }
+    )
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        plan,
+        proposed_authority=proposed,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.error == "AUTHORITY_DIGEST_MISMATCH"
