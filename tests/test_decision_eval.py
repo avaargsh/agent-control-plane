@@ -278,3 +278,98 @@ def test_resealed_operating_out_of_range_fails_closed():
 
     assert result.valid is False
     assert result.reason == "OPERATING_METRIC_OUT_OF_RANGE:coverage"
+
+
+
+def test_resealed_invalid_calibration_digest_fails_closed():
+    value = artifact(measured=True)
+    value["calibration_sha256"] = "sha256:short"
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "CALIBRATION_DIGEST_INVALID"
+
+
+def test_resealed_empty_adapter_fails_closed():
+    value = artifact(measured=True)
+    value["adapter"] = ""
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "ADAPTER_REQUIRED"
+
+
+def test_resealed_empty_decision_type_fails_closed():
+    value = artifact(measured=True)
+    value["decision_type"] = ""
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "DECISION_TYPE_REQUIRED"
+
+
+def test_resealed_missing_required_metric_fails_closed():
+    value = artifact(measured=True)
+    del value["metrics"]["accuracy"]
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "METRIC_INVALID:accuracy"
+
+
+def test_resealed_out_of_range_base_metric_fails_closed():
+    value = artifact(measured=True)
+    value["metrics"]["accuracy"] = 1.1
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "METRIC_OUT_OF_RANGE:accuracy"
+
+
+def test_resealed_negative_latency_fails_closed():
+    value = artifact(measured=True)
+    value["metrics"]["mean_latency_ms"] = -1.0
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "METRIC_NEGATIVE:mean_latency_ms"
+
+
+def test_resealed_inverted_latency_percentiles_fail_closed():
+    value = artifact(measured=True)
+    value["metrics"]["p50_latency_ms"] = 100.0
+    value["metrics"]["p95_latency_ms"] = 10.0
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert result.reason == "METRIC_LATENCY_PERCENTILES_INVALID"
+
+
+def test_resealed_negative_token_metric_fails_closed():
+    value = artifact(measured=True)
+    value["metrics"][
+        "mean_tokens_processed_per_decision"
+    ] = -1.0
+    _reseal(value)
+
+    result = validate_decision_eval_artifact(value)
+
+    assert result.valid is False
+    assert (
+        result.reason
+        == "METRIC_INVALID:mean_tokens_processed_per_decision"
+    )
