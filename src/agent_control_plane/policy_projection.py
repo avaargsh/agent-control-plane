@@ -29,9 +29,17 @@ def compile_capability_intent(intent: Mapping[str, Any]) -> PolicyProjection:
     kubernetes_verbs: list[str] = []
     kubernetes_resources: list[str] = []
     mcp_capabilities: list[str] = []
+    denied_names = {
+        capability["name"]
+        for capability in spec.get("capabilities", [])
+        if capability.get("effect", "allow") == "deny"
+    }
 
     for capability in spec.get("capabilities", []):
-        if capability.get("effect", "allow") != "allow":
+        if (
+            capability.get("effect", "allow") != "allow"
+            or capability["name"] in denied_names
+        ):
             continue
         name = capability["name"]
         constraints = capability.get("constraints", {})

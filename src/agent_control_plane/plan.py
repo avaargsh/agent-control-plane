@@ -13,6 +13,8 @@ class ResolvedReleasePlan:
     authority_ref: str | None = None
     authority_digest: str | None = None
     policy_refs: tuple[str, ...] = field(default_factory=tuple)
+    capability_intent_refs: tuple[str, ...] = field(default_factory=tuple)
+    evidence_requirements: Mapping[str, Any] = field(default_factory=dict)
     eval_gates: tuple[str, ...] = field(default_factory=tuple)
     rollout: Mapping[str, Any] = field(default_factory=dict)
     placement: Mapping[str, Any] = field(default_factory=dict)
