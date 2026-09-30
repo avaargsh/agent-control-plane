@@ -1,4 +1,7 @@
+import pytest
+
 from agent_control_plane.kubernetes_runtime_client import KubernetesSandboxClient
+from agent_control_plane.runtime_clients import RuntimeMutationUncertain
 
 
 class FakeApi:
@@ -171,3 +174,68 @@ def test_kubernetes_client_records_create_update_and_restores_previous_state():
     assert restored["restored"] is True
     live = api.resources[("agent-runtime", name)]
     assert live["spec"]["isolation"] == "none"
+
+
+class LostAckCreateApi(FakeApi):
+    def apply(self, *, namespace, manifest):
+        value = super().apply(namespace=namespace, manifest=manifest)
+        raise RuntimeMutationUncertain("connection reset after commit")
+
+
+def test_kubernetes_client_recovers_create_receipt_after_lost_ack():
+    api = LostAckCreateApi()
+    client = KubernetesSandboxClient(api)
+
+    result = client.ensure_sandbox(desired())
+
+    assert result.changed is True
+    assert result.evidence["changeType"] == "created"
+    assert result.evidence["verifiedAfterUncertainMutation"] is True
+    assert result.resource_ref.endswith("/gpu-xid-remediation-v1-sandbox")
+
+
+class LostAckUpdateApi(FakeApi):
+    def __init__(self):
+        super().__init__()
+        self.raise_after_apply = False
+
+    def apply(self, *, namespace, manifest):
+        value = super().apply(namespace=namespace, manifest=manifest)
+        if self.raise_after_apply:
+            raise RuntimeMutationUncertain("unexpected EOF after update")
+        return value
+
+
+def test_kubernetes_client_recovers_update_receipt_and_previous_state_after_lost_ack():
+    api = LostAckUpdateApi()
+    client = KubernetesSandboxClient(api)
+    created = client.ensure_sandbox(desired())
+    name = created.resource_ref.rsplit("/", 1)[-1]
+    api.resources[("agent-runtime", name)] = {
+        **api.resources[("agent-runtime", name)],
+        "spec": {
+            **api.resources[("agent-runtime", name)]["spec"],
+            "isolation": "none",
+        },
+    }
+    api.raise_after_apply = True
+
+    result = client.ensure_sandbox(desired())
+
+    assert result.changed is True
+    assert result.evidence["changeType"] == "updated"
+    assert result.evidence["previousManaged"]["spec"]["isolation"] == "none"
+    assert result.evidence["verifiedAfterUncertainMutation"] is True
+
+
+class UncommittedUncertainApi(FakeApi):
+    def apply(self, *, namespace, manifest):
+        raise RuntimeMutationUncertain("connection refused before verification")
+
+
+def test_kubernetes_client_propagates_uncertain_error_when_postcondition_is_absent():
+    api = UncommittedUncertainApi()
+    client = KubernetesSandboxClient(api)
+
+    with pytest.raises(RuntimeMutationUncertain):
+        client.ensure_sandbox(desired())
