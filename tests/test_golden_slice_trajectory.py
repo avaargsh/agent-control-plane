@@ -14,7 +14,7 @@ def test_golden_slice_trajectory_is_schema_valid_and_replayable():
     validator = Draft202012Validator(SCHEMA)
     for envelope in TRAJECTORY:
         validator.validate(envelope)
-    for before, after in zip(TRAJECTORY, TRAJECTORY[1:], strict=True):
+    for before, after in zip(TRAJECTORY[:-1], TRAJECTORY[1:], strict=True):
         validate_golden_slice_transition(before, after)
 
 

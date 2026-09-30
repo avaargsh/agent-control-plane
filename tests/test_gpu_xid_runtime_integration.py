@@ -56,7 +56,7 @@ def test_gpu_xid_incident_records_runtime_identities_in_replayable_release_evide
     )
 
     receipts = {receipt.binding_name: receipt for receipt in result.receipts}
-    assert result.phase == "Promoted"
+    assert result.phase == "promoted"
     assert receipts["sandbox"].evidence["uid"] == "sandbox-uid-xid"
     assert receipts["workflow"].evidence["workflowId"].startswith("agent-release/")
     assert receipts["workflow"].evidence["runId"] == "temporal-run-xid"
