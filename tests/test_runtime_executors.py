@@ -76,3 +76,65 @@ def test_temporal_executor_preserves_idempotent_unchanged_result():
     assert receipt.resource_ref == "temporal://workflow/run-001"
     assert receipt.changed is False
     assert receipt.evidence["workflowId"] == "run-001"
+
+
+
+class ExistingKubernetesClient(FakeKubernetesClient):
+    def ensure_sandbox(self, desired):
+        return RuntimeApplyResult(
+            resource_ref="k8s://sandbox/existing",
+            changed=False,
+            evidence={"uid": "existing-sandbox"},
+        )
+
+
+def test_kubernetes_rollback_does_not_delete_preexisting_sandbox():
+    client = ExistingKubernetesClient()
+    executor = KubernetesSandboxExecutor(client)
+    plan = build_plan()
+    binding = plan.bindings["sandbox"]
+
+    receipt = executor.apply(
+        plan=plan,
+        binding=binding,
+        prepared={"kind": "SandboxPlan"},
+    )
+    rollback = executor.rollback(
+        plan=plan,
+        binding=binding,
+        receipt=receipt,
+    )
+
+    assert receipt.changed is False
+    assert rollback.rolled_back is False
+    assert rollback.evidence == {
+        "skipped": True,
+        "reason": "resource-preexisted",
+    }
+    assert client.deleted == []
+
+
+def test_temporal_rollback_does_not_terminate_preexisting_workflow():
+    client = FakeTemporalClient()
+    executor = TemporalWorkflowExecutor(client)
+    plan = build_plan()
+    binding = plan.bindings["workflow"]
+
+    receipt = executor.apply(
+        plan=plan,
+        binding=binding,
+        prepared={"kind": "WorkflowPlan"},
+    )
+    rollback = executor.rollback(
+        plan=plan,
+        binding=binding,
+        receipt=receipt,
+    )
+
+    assert receipt.changed is False
+    assert rollback.rolled_back is False
+    assert rollback.evidence == {
+        "skipped": True,
+        "reason": "resource-preexisted",
+    }
+    assert client.terminated == []
