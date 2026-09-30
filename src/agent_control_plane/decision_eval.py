@@ -52,11 +52,41 @@ def _percentile(values: list[float], quantile: float) -> float:
     )
 
 
+_FALLBACK_FIELDS = {
+    "measured",
+    "adapter",
+    "threshold",
+    "eligible_case_count",
+    "fallback_case_count",
+    "fallback_rate",
+    "accuracy",
+    "p50_latency_ms",
+    "p95_latency_ms",
+    "mean_tokens_processed",
+    "parse_valid_rate",
+    "cases",
+}
+_FALLBACK_CASE_FIELDS = {
+    "case_id",
+    "fast_confidence",
+    "fast_predicted",
+    "fallback_predicted",
+    "gold",
+    "correct",
+    "latency_ms",
+    "tokens_processed",
+    "parse_valid",
+}
+
+
 def _fallback_semantics_reason(
     fallback: Mapping[str, Any],
     *,
     dataset_case_ids: list[str],
 ) -> str | None:
+    if not set(fallback).issubset(_FALLBACK_FIELDS):
+        return "FALLBACK_FIELDS_INVALID"
+
     threshold = fallback.get("threshold")
     if (
         not _is_finite_number(threshold)
@@ -112,6 +142,8 @@ def _fallback_semantics_reason(
     for case in cases:
         if not isinstance(case, Mapping):
             return "FALLBACK_CASE_INVALID"
+        if not set(case).issubset(_FALLBACK_CASE_FIELDS):
+            return "FALLBACK_CASE_FIELDS_INVALID"
         case_id = case.get("case_id")
         if (
             not isinstance(case_id, str)
@@ -263,6 +295,42 @@ def _is_sha256(value: object) -> bool:
     )
 
 
+_REQUIRED_TOP_LEVEL_FIELDS = {
+    "schema_version",
+    "artifact_id",
+    "content_digest",
+    "decision_type",
+    "adapter",
+    "dataset",
+    "metrics",
+    "fallback_evaluation",
+}
+_ALLOWED_TOP_LEVEL_FIELDS = _REQUIRED_TOP_LEVEL_FIELDS | {
+    "model_ref",
+    "calibration_sha256",
+    "operating_point",
+}
+_METRIC_FIELDS = {
+    "accuracy",
+    "macro_f1",
+    "nll",
+    "brier",
+    "ece",
+    "mean_latency_ms",
+    "p50_latency_ms",
+    "p95_latency_ms",
+    "mean_tokens_processed_per_decision",
+}
+_OPERATING_FIELDS = {
+    "threshold",
+    "coverage",
+    "risk",
+    "false_automation_rate",
+    "fallback_rate",
+    "risk_budget",
+}
+
+
 def validate_decision_eval_artifact(
     artifact: Mapping[str, Any],
 ) -> DecisionEvalValidation:
@@ -271,6 +339,42 @@ def validate_decision_eval_artifact(
         return DecisionEvalValidation(
             valid=False,
             reason="SCHEMA_VERSION_MISMATCH",
+            metrics={},
+        )
+
+    artifact_fields = set(artifact)
+    if (
+        not _REQUIRED_TOP_LEVEL_FIELDS.issubset(artifact_fields)
+        or not artifact_fields.issubset(_ALLOWED_TOP_LEVEL_FIELDS)
+    ):
+        return DecisionEvalValidation(
+            valid=False,
+            reason="ARTIFACT_FIELDS_INVALID",
+            metrics={},
+        )
+
+    for field in ("decision_type", "adapter"):
+        value = artifact.get(field)
+        if not isinstance(value, str) or not value:
+            return DecisionEvalValidation(
+                valid=False,
+                reason=f"{field.upper()}_INVALID",
+                metrics={},
+            )
+
+    model_ref = artifact.get("model_ref")
+    if model_ref is not None and not isinstance(model_ref, str):
+        return DecisionEvalValidation(
+            valid=False,
+            reason="MODEL_REF_INVALID",
+            metrics={},
+        )
+
+    calibration = artifact.get("calibration_sha256")
+    if calibration is not None and not _is_sha256(calibration):
+        return DecisionEvalValidation(
+            valid=False,
+            reason="CALIBRATION_DIGEST_INVALID",
             metrics={},
         )
 
@@ -307,7 +411,11 @@ def validate_decision_eval_artifact(
         )
 
     dataset = artifact.get("dataset")
-    if not isinstance(dataset, Mapping):
+    if not isinstance(dataset, Mapping) or set(dataset) != {
+        "sha256",
+        "case_count",
+        "case_ids",
+    }:
         return DecisionEvalValidation(
             valid=False,
             reason="DATASET_PROVENANCE_REQUIRED",
@@ -325,6 +433,7 @@ def validate_decision_eval_artifact(
         not isinstance(case_ids, list)
         or not case_ids
         or not all(isinstance(item, str) and item for item in case_ids)
+        or isinstance(case_count, bool)
         or not isinstance(case_count, int)
         or case_count != len(case_ids)
         or len(set(case_ids)) != len(case_ids)
@@ -336,28 +445,72 @@ def validate_decision_eval_artifact(
         )
 
     raw_metrics = artifact.get("metrics")
-    if not isinstance(raw_metrics, Mapping):
+    if (
+        not isinstance(raw_metrics, Mapping)
+        or set(raw_metrics) != _METRIC_FIELDS
+    ):
         return DecisionEvalValidation(
             valid=False,
-            reason="METRICS_REQUIRED",
+            reason="METRICS_FIELDS_INVALID",
             metrics={},
         )
 
     metrics: dict[str, float] = {}
-    for name, value in raw_metrics.items():
-        if value is None:
-            continue
-        if not _is_finite_number(value):
+    for name in ("accuracy", "macro_f1", "ece"):
+        value = raw_metrics.get(name)
+        if (
+            not _is_finite_number(value)
+            or not 0.0 <= float(value) <= 1.0
+        ):
             return DecisionEvalValidation(
                 valid=False,
-                reason=f"METRIC_INVALID:{name}",
+                reason=f"METRIC_RANGE_INVALID:{name}",
                 metrics={},
             )
-        metrics[str(name)] = float(value)
+        metrics[name] = float(value)
+
+    for name in (
+        "nll",
+        "brier",
+        "mean_latency_ms",
+        "p50_latency_ms",
+        "p95_latency_ms",
+    ):
+        value = raw_metrics.get(name)
+        if not _is_finite_number(value) or float(value) < 0:
+            return DecisionEvalValidation(
+                valid=False,
+                reason=f"METRIC_RANGE_INVALID:{name}",
+                metrics={},
+            )
+        metrics[name] = float(value)
+
+    token_mean = raw_metrics.get(
+        "mean_tokens_processed_per_decision"
+    )
+    if token_mean is not None:
+        if (
+            not _is_finite_number(token_mean)
+            or float(token_mean) < 0
+        ):
+            return DecisionEvalValidation(
+                valid=False,
+                reason=(
+                    "METRIC_RANGE_INVALID:"
+                    "mean_tokens_processed_per_decision"
+                ),
+                metrics={},
+            )
+        metrics["mean_tokens_processed_per_decision"] = float(
+            token_mean
+        )
 
     operating = artifact.get("operating_point")
     if operating is not None:
-        if not isinstance(operating, Mapping):
+        if (
+            not isinstance(operating, Mapping)
+            or set(operating) != _OPERATING_FIELDS
+        ):
             return DecisionEvalValidation(
                 valid=False,
                 reason="OPERATING_POINT_INVALID",
@@ -369,18 +522,31 @@ def validate_decision_eval_artifact(
             "risk",
             "false_automation_rate",
             "fallback_rate",
-            "risk_budget",
         ):
             value = operating.get(name)
-            if value is None:
-                continue
-            if not _is_finite_number(value):
+            if (
+                not _is_finite_number(value)
+                or not 0.0 <= float(value) <= 1.0
+            ):
                 return DecisionEvalValidation(
                     valid=False,
-                    reason=f"OPERATING_METRIC_INVALID:{name}",
+                    reason=f"OPERATING_METRIC_RANGE_INVALID:{name}",
                     metrics={},
                 )
             metrics[name] = float(value)
+
+        risk_budget = operating.get("risk_budget")
+        if risk_budget is not None:
+            if (
+                not _is_finite_number(risk_budget)
+                or not 0.0 <= float(risk_budget) <= 1.0
+            ):
+                return DecisionEvalValidation(
+                    valid=False,
+                    reason="OPERATING_METRIC_RANGE_INVALID:risk_budget",
+                    metrics={},
+                )
+            metrics["risk_budget"] = float(risk_budget)
 
     fallback = artifact.get("fallback_evaluation")
     if not isinstance(fallback, Mapping):
