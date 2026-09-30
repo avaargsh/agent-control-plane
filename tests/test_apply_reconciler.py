@@ -427,9 +427,34 @@ def decision_eval_artifact(*, measured: bool = True):
             "fallback_rate": 0.25,
             "risk_budget": 0.05,
         },
-        "fallback_evaluation": {
-            "measured": measured,
-        },
+        "fallback_evaluation": (
+            {
+                "measured": True,
+                "adapter": "transformers-structured-output",
+                "threshold": 0.8,
+                "eligible_case_count": 2,
+                "fallback_case_count": 1,
+                "fallback_rate": 0.5,
+                "accuracy": 1.0,
+                "p50_latency_ms": 20.0,
+                "p95_latency_ms": 24.0,
+                "mean_tokens_processed": 48.0,
+                "cases": [
+                    {
+                        "case_id": "case-b",
+                        "fast_confidence": 0.55,
+                        "fast_predicted": "prometheus.query",
+                        "fallback_predicted": "logs.search",
+                        "gold": "logs.search",
+                        "correct": True,
+                        "latency_ms": 20.0,
+                        "tokens_processed": 48,
+                    }
+                ],
+            }
+            if measured
+            else {"measured": False}
+        ),
     }
     canonical = json.dumps(
         payload,
