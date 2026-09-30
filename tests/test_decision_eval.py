@@ -47,7 +47,7 @@ def artifact(*, measured: bool = False):
                 "fallback_rate": 0.5,
                 "accuracy": 1.0,
                 "p50_latency_ms": 20.0,
-                "p95_latency_ms": 24.0,
+                "p95_latency_ms": 20.0,
                 "mean_tokens_processed": 48.0,
                 "cases": [
                     {
