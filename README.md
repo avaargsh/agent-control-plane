@@ -129,6 +129,8 @@ Normal unit CI does not imply that a live Kubernetes cluster or Temporal server 
 - Eval Gates
 - ReleaseEvidence
 - deterministic replay digest
+- AgentAuthorityEnvelope + Fleet/Agent authority inventory
+- deployment-time authority drift admission
 
 ## Current status
 
@@ -140,6 +142,7 @@ Implemented:
 - provider registry and executor boundary
 - apply + compensation semantics
 - FrozenEvidence approval/resume path
+- Fleet/Agent AuthorityEnvelope inventory and fail-closed drift admission
 - replay-verifiable ReleaseEvidence
 - Kubernetes sandbox runtime client
 - Temporal workflow runtime client
