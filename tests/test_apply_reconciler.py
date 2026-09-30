@@ -832,3 +832,102 @@ def test_factory_attestation_requires_verifier() -> None:
     assert result.phase == "blocked"
     assert result.receipts == ()
     assert result.error == "FACTORY_ATTESTATION_VERIFIER_REQUIRED"
+
+
+
+def _reseal_factory_artifact(artifact):
+    payload = {
+        key: value
+        for key, value in artifact.items()
+        if key != "digest"
+    }
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    artifact["digest"] = (
+        "sha256:" + hashlib.sha256(canonical).hexdigest()
+    )
+    return artifact
+
+
+def test_factory_artifact_rejects_empty_issued_at_after_reseal() -> None:
+    artifact = factory_acceptance_artifact()
+    artifact["issuedAt"] = ""
+    _reseal_factory_artifact(artifact)
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        factory_acceptance_artifact=artifact,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.error == (
+        "FACTORY_ACCEPTANCE_INVALID:ISSUED_AT_REQUIRED"
+    )
+
+
+def test_factory_artifact_rejects_invalid_gate_reasons_after_reseal() -> None:
+    artifact = factory_acceptance_artifact()
+    artifact["gates"][0]["reasons"] = "not-a-list"
+    _reseal_factory_artifact(artifact)
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        factory_acceptance_artifact=artifact,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.error == (
+        "FACTORY_ACCEPTANCE_INVALID:GATE_REASONS_INVALID"
+    )
+
+
+def test_factory_artifact_rejects_invalid_top_reasons_after_reseal() -> None:
+    artifact = factory_acceptance_artifact()
+    artifact["reasons"] = [123]
+    _reseal_factory_artifact(artifact)
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        factory_acceptance_artifact=artifact,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.error == (
+        "FACTORY_ACCEPTANCE_INVALID:REASONS_INVALID"
+    )
+
+
+def test_factory_artifact_rejects_empty_evidence_ref_after_reseal() -> None:
+    artifact = factory_acceptance_artifact()
+    artifact["evidenceRefs"]["compute"] = ""
+    _reseal_factory_artifact(artifact)
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        factory_acceptance_artifact=artifact,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.error == (
+        "FACTORY_ACCEPTANCE_INVALID:EVIDENCE_REFS_INVALID"
+    )
