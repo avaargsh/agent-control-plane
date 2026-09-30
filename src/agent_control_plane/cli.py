@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from .authority import (
 from .compiler import compile_release_plan
 from .decision_eval import validate_decision_eval_artifact
 from .eval_engine import evaluate_gate
+from .factory_attestation import HMACFactoryAttestationVerifier
+from .live_proof import LiveProofInputs, validate_live_proof_inputs
 from .loader import load_yaml_documents
 from .release_gate import evaluate_release_gate
 
@@ -100,7 +103,91 @@ def main() -> None:
         required=True,
     )
 
+    live_proof = subparsers.add_parser(
+        "live-proof-verify"
+    )
+    live_proof.add_argument(
+        "--decision-artifact",
+        required=True,
+    )
+    live_proof.add_argument(
+        "--factory-artifact",
+        required=True,
+    )
+    live_proof.add_argument(
+        "--factory-attestation",
+        required=True,
+    )
+    live_proof.add_argument(
+        "--factory-key-id",
+        required=True,
+    )
+    live_proof.add_argument(
+        "--factory-secret-env",
+        default="AI_FACTORY_ATTESTATION_SECRET",
+    )
+
     args = parser.parse_args()
+
+    if args.command == "live-proof-verify":
+        secret_value = os.environ.get(
+            args.factory_secret_env
+        )
+        if not secret_value:
+            raise SystemExit(
+                "required factory attestation secret "
+                f"environment variable is not set: "
+                f"{args.factory_secret_env}"
+            )
+        inputs = LiveProofInputs(
+            decision_artifact=json.loads(
+                Path(args.decision_artifact).read_text(
+                    encoding="utf-8"
+                )
+            ),
+            factory_artifact=json.loads(
+                Path(args.factory_artifact).read_text(
+                    encoding="utf-8"
+                )
+            ),
+            factory_attestation=json.loads(
+                Path(args.factory_attestation).read_text(
+                    encoding="utf-8"
+                )
+            ),
+        )
+        try:
+            summary = validate_live_proof_inputs(
+                inputs,
+                factory_verifier=(
+                    HMACFactoryAttestationVerifier({
+                        args.factory_key_id: (
+                            secret_value.encode("utf-8")
+                        ),
+                    })
+                ),
+            )
+        except ValueError as exc:
+            print(
+                json.dumps(
+                    {
+                        "valid": False,
+                        "reason": str(exc),
+                    },
+                    indent=2,
+                )
+            )
+            raise SystemExit(3)
+        print(
+            json.dumps(
+                {
+                    "valid": True,
+                    **summary,
+                },
+                indent=2,
+            )
+        )
+        return
 
     if args.command in {
         "decision-eval-verify",
