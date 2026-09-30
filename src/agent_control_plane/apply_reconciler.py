@@ -131,6 +131,7 @@ class ApplyReconciler:
         approved_evidence: FrozenEvidence | None = None,
         deployed_authority: Mapping[str, Any] | None = None,
         proposed_authority: Mapping[str, Any] | None = None,
+        initial_authority_approved: bool = False,
     ) -> ApplyResult:
         if approved_evidence is not None:
             golden_slice_provenance = resume_from_frozen_evidence(
@@ -171,6 +172,9 @@ class ApplyReconciler:
                 authority_decision = admit_authority_change(
                     deployed_authority,
                     proposed_authority,
+                    allow_initial=(
+                        initial_authority_approved
+                    ),
                 )
                 if not authority_decision.admitted:
                     authority_error = (
