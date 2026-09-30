@@ -15,6 +15,10 @@ The evidence JSON must contain the actual AgentRelease, Session/Run, Temporal,
 Sandbox, Compute Workload and MCP receipt identities. Do not copy the synthetic
 fixture identifiers.
 
+`fixtureMode` must be exactly `live`. The `decision.decisionId` field must be
+`the exact `artifact_id` from the supplied `decision-eval.json`; the runner rejects
+`a live envelope that names a different decision than the artifact it seals.
+
 ## Preflight
 
 ```bash

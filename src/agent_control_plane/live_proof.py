@@ -122,6 +122,8 @@ def validate_live_proof_inputs(
 
 def assert_live_release_evidence(
     evidence: Mapping[str, Any],
+    *,
+    expected_decision_artifact_id: str | None = None,
 ) -> None:
     golden_slice = evidence.get("golden_slice")
     if not isinstance(golden_slice, Mapping):
@@ -130,6 +132,20 @@ def assert_live_release_evidence(
         raise ValueError("LIVE_GOLDEN_SLICE_SYNTHETIC")
     if _contains_placeholder(golden_slice):
         raise ValueError("LIVE_GOLDEN_SLICE_PLACEHOLDER")
+    if golden_slice.get("fixtureMode") != "live":
+        raise ValueError("LIVE_GOLDEN_SLICE_MODE_REQUIRED")
+
+    decision = golden_slice.get("decision")
+    if not isinstance(decision, Mapping):
+        raise ValueError("LIVE_DECISION_IDENTITY_REQUIRED")
+    decision_id = decision.get("decisionId")
+    if not isinstance(decision_id, str) or not decision_id:
+        raise ValueError("LIVE_DECISION_IDENTITY_INCOMPLETE:decisionId")
+    if (
+        expected_decision_artifact_id is not None
+        and decision_id != expected_decision_artifact_id
+    ):
+        raise ValueError("LIVE_DECISION_ARTIFACT_ID_MISMATCH")
 
     identity = golden_slice.get("identity")
     if not isinstance(identity, Mapping):
