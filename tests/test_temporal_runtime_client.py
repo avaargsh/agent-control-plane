@@ -241,3 +241,46 @@ def test_temporal_client_rejects_immediate_terminal_start_result():
         client.ensure_workflow(desired())
 
     assert api.starts == 1
+
+
+
+@pytest.mark.parametrize("status", [None, "", "UNKNOWN"])
+def test_temporal_client_rejects_unverifiable_existing_status(status):
+    api = FakeTemporalApi()
+    workflow_id = "agent-release/gpu-xid-remediation-v1"
+    api.workflows[workflow_id] = {
+        "runId": "run-unknown-001",
+        "status": status,
+    }
+    client = TemporalWorkflowClient(api)
+
+    with pytest.raises(
+        TerminalRuntimeConflict,
+        match="not safely attachable",
+    ):
+        client.ensure_workflow(desired())
+
+    assert api.starts == 0
+
+
+class LostAckUnknownStatusTemporalApi(FakeTemporalApi):
+    def start(self, *, workflow_id, workflow_type, task_queue, input):
+        self.starts += 1
+        self.workflows[workflow_id] = {
+            "runId": "run-unknown-lost-ack",
+            "status": "UNKNOWN",
+        }
+        raise RuntimeMutationUncertain("rpc error: code = Unavailable")
+
+
+def test_temporal_client_rejects_unverifiable_recovery_status():
+    api = LostAckUnknownStatusTemporalApi()
+    client = TemporalWorkflowClient(api)
+
+    with pytest.raises(
+        TerminalRuntimeConflict,
+        match="not safely recoverable",
+    ):
+        client.ensure_workflow(desired())
+
+    assert api.starts == 1
