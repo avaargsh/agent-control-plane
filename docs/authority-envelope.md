@@ -57,6 +57,7 @@ This keeps Kubernetes-style desired state small while still making Fleet-wide au
 
 The reference admission function is intentionally conservative:
 
+- a first-time authority envelope is `DENY / INITIAL_AUTHORITY_REVIEW_REQUIRED` unless bootstrap approval is explicit
 - adding a grant is `DENY / AUTHORITY_EXPANSION`
 - changing team ownership is `DENY / TEAM_OWNERSHIP_CHANGED`
 - changing runtime refs is `DENY / RUNTIME_BOUNDARY_CHANGED`
