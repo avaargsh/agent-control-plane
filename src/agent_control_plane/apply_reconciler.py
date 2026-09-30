@@ -241,16 +241,6 @@ class ApplyReconciler:
         ):
             state.transition(ReleasePhase.BLOCKED)
             factory_error = "FACTORY_ACCEPTANCE_ARTIFACT_REQUIRED"
-            ambiguous_apply = None
-            if isinstance(exc, RuntimeMutationOwnershipUncertain):
-                ambiguous_apply = {
-                    "binding": active_binding_name,
-                    "resource_ref": exc.resource_ref,
-                    "operation_id": exc.operation_id,
-                    "observed_operation_id": exc.observed_operation_id,
-                    "ownership_proven": False,
-                }
-
             evidence = seal_release_evidence({
                 "kind": "ReleaseEvidence",
                 "release": plan.release_name,
@@ -615,6 +605,16 @@ class ApplyReconciler:
                 if rollback_errors
                 else ReleasePhase.ROLLED_BACK
             )
+
+            ambiguous_apply = None
+            if isinstance(exc, RuntimeMutationOwnershipUncertain):
+                ambiguous_apply = {
+                    "binding": active_binding_name,
+                    "resource_ref": exc.resource_ref,
+                    "operation_id": exc.operation_id,
+                    "observed_operation_id": exc.observed_operation_id,
+                    "ownership_proven": False,
+                }
 
             evidence = seal_release_evidence({
                 "kind": "ReleaseEvidence",
