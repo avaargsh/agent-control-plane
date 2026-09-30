@@ -129,6 +129,8 @@ def _fallback_semantics_reason(
             or not 0.0 <= float(confidence) <= 1.0
         ):
             return "FALLBACK_CONFIDENCE_INVALID"
+        if float(confidence) >= float(threshold):
+            return "FALLBACK_CONFIDENCE_NOT_BELOW_THRESHOLD"
 
         for field in (
             "fast_predicted",
@@ -253,6 +255,48 @@ def _fallback_semantics_reason(
     return None
 
 
+def _operating_point_semantics_reason(
+    operating: Mapping[str, Any],
+) -> str | None:
+    values: dict[str, float] = {}
+    for name in (
+        "threshold",
+        "coverage",
+        "risk",
+        "false_automation_rate",
+        "fallback_rate",
+        "risk_budget",
+    ):
+        value = operating.get(name)
+        if not _is_finite_number(value):
+            return f"OPERATING_METRIC_INVALID:{name}"
+        number = float(value)
+        if not 0.0 <= number <= 1.0:
+            return f"OPERATING_METRIC_OUT_OF_RANGE:{name}"
+        values[name] = number
+
+    if values["coverage"] <= 0.0:
+        return "OPERATING_COVERAGE_ZERO"
+    if not math.isclose(
+        values["coverage"] + values["fallback_rate"],
+        1.0,
+        rel_tol=1e-9,
+        abs_tol=1e-9,
+    ):
+        return "OPERATING_COVERAGE_FALLBACK_MISMATCH"
+    if not math.isclose(
+        values["false_automation_rate"],
+        values["risk"] * values["coverage"],
+        rel_tol=1e-9,
+        abs_tol=1e-9,
+    ):
+        return "OPERATING_FALSE_AUTOMATION_MISMATCH"
+    if values["risk"] > values["risk_budget"] + 1e-12:
+        return "OPERATING_RISK_BUDGET_EXCEEDED"
+
+    return None
+
+
 def _is_sha256(value: object) -> bool:
     if not isinstance(value, str) or not value.startswith("sha256:"):
         return False
@@ -363,6 +407,15 @@ def validate_decision_eval_artifact(
                 reason="OPERATING_POINT_INVALID",
                 metrics={},
             )
+        operating_reason = _operating_point_semantics_reason(
+            operating
+        )
+        if operating_reason is not None:
+            return DecisionEvalValidation(
+                valid=False,
+                reason=operating_reason,
+                metrics={},
+            )
         for name in (
             "threshold",
             "coverage",
@@ -371,16 +424,7 @@ def validate_decision_eval_artifact(
             "fallback_rate",
             "risk_budget",
         ):
-            value = operating.get(name)
-            if value is None:
-                continue
-            if not _is_finite_number(value):
-                return DecisionEvalValidation(
-                    valid=False,
-                    reason=f"OPERATING_METRIC_INVALID:{name}",
-                    metrics={},
-                )
-            metrics[name] = float(value)
+            metrics[name] = float(operating[name])
 
     fallback = artifact.get("fallback_evaluation")
     if not isinstance(fallback, Mapping):
