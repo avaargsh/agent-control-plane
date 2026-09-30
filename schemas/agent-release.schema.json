@@ -71,7 +71,23 @@
         "rollout": {
           "type": "object",
           "additionalProperties": true
+        },
+        "authorityRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorityDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
         }
+      },
+      "dependentRequired": {
+        "authorityRef": [
+          "authorityDigest"
+        ],
+        "authorityDigest": [
+          "authorityRef"
+        ]
       }
     }
   }
