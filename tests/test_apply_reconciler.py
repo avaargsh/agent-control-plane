@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 from agent_control_plane.apply_reconciler import ApplyReconciler
 from agent_control_plane.decision_adapter import DecisionGatewayAdapter
 from agent_control_plane.executors import (
@@ -374,3 +377,129 @@ def test_bindings_without_provider_feature_requirements_remain_compatible() -> N
     ).reconcile(plan)
 
     assert result.phase == "promoted"
+
+
+
+DECISION_ARTIFACT_GATE = {
+    "spec": {
+        "conditions": [
+            {"metric": "accuracy", "op": "gte", "value": 0.9},
+            {
+                "metric": "false_automation_rate",
+                "op": "lte",
+                "value": 0.01,
+            },
+            {"metric": "fallback_measured", "op": "eq", "value": 1.0},
+        ],
+        "onFailure": "block",
+    }
+}
+
+
+def decision_eval_artifact(*, measured: bool = True):
+    payload = {
+        "schema_version": "decision-eval/v1",
+        "decision_type": "mcp_tool_router",
+        "adapter": "candidate-logits",
+        "model_ref": "qwen/test",
+        "dataset": {
+            "sha256": "sha256:" + "a" * 64,
+            "case_count": 2,
+            "case_ids": ["case-a", "case-b"],
+        },
+        "calibration_sha256": "sha256:" + "b" * 64,
+        "metrics": {
+            "accuracy": 0.95,
+            "macro_f1": 0.94,
+            "nll": 0.2,
+            "brier": 0.08,
+            "ece": 0.03,
+            "mean_latency_ms": 12.0,
+            "p50_latency_ms": 10.0,
+            "p95_latency_ms": 18.0,
+            "mean_tokens_processed_per_decision": 32.0,
+        },
+        "operating_point": {
+            "threshold": 0.8,
+            "coverage": 0.75,
+            "risk": 0.02,
+            "false_automation_rate": 0.01,
+            "fallback_rate": 0.25,
+            "risk_budget": 0.05,
+        },
+        "fallback_evaluation": {
+            "measured": measured,
+        },
+    }
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
+    return {
+        **payload,
+        "artifact_id": "decision-eval:" + digest,
+        "content_digest": digest,
+    }
+
+
+def test_verified_decision_eval_artifact_feeds_release_gate() -> None:
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        eval_gates=[DECISION_ARTIFACT_GATE],
+        decision_eval_artifact=decision_eval_artifact(
+            measured=True
+        ),
+    )
+
+    assert result.phase == "promoted"
+    assert result.eval_results[0].passed is True
+    assert (
+        result.evidence["decision_eval"]["schema_version"]
+        == "decision-eval/v1"
+    )
+
+
+def test_unmeasured_system2_fallback_blocks_gate() -> None:
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        eval_gates=[DECISION_ARTIFACT_GATE],
+        decision_eval_artifact=decision_eval_artifact(
+            measured=False
+        ),
+    )
+
+    assert result.phase == "blocked"
+    assert result.eval_results[0].passed is False
+    assert (
+        result.eval_results[0].violations[0].metric
+        == "fallback_measured"
+    )
+
+
+def test_tampered_decision_eval_blocks_before_provider_mutation() -> None:
+    artifact = decision_eval_artifact()
+    artifact["metrics"]["accuracy"] = 0.10
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        eval_gates=[DECISION_ARTIFACT_GATE],
+        decision_eval_artifact=artifact,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert result.error == (
+        "DECISION_EVAL_INVALID:CONTENT_DIGEST_MISMATCH"
+    )
