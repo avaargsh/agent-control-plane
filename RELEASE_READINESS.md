@@ -13,6 +13,7 @@ A public v0.1 candidate should satisfy all of the following:
 - [x] kubectl and Temporal CLI transports
 - [x] real OPA v1.21.0 policy-enforcement proof
 - [x] cross-repository kind + Temporal + Kubernetes sandbox-replacement provenance proof
+- [x] MCP Execution Contract fault proof (lost ACK / duplicate retry / timeout / partial commit / compensation)
 - [x] known limitations documented
 - [x] repository license selected and added (Apache-2.0)
 - [x] CONTRIBUTING.md added
@@ -23,7 +24,7 @@ A public v0.1 candidate should satisfy all of the following:
 - [x] direct dependency/license review complete
 - [ ] live kind/minikube + Temporal smoke exercised and documented
 - [x] GitHub Actions runner issue documented
-- [ ] fresh-clone demo verification complete
+- [x] fresh-clone demo / MCP proof / wheel build verification complete
 - [x] v0.1.0 release notes prepared
 - [x] stale pre-RC pull requests reconciled; no open pull requests remain at final RC audit
 - [ ] v0.1.0 tag/release created
@@ -51,7 +52,8 @@ Before changing repository visibility:
 4. Review provider names and integration examples for trademark/license concerns.
 5. Run `make verify-release` from a fresh clone.
 6. Run the live smoke profile in a controlled local environment and capture the outcome outside git.
-7. Confirm README claims are limited to behavior actually exercised.
+7. Run the executable v0.1 release gate, including isolated wheel installation and fresh-clone smoke.
+8. Confirm README claims are limited to behavior actually exercised.
 
 ### Audit performed
 
@@ -63,6 +65,8 @@ Spot checks also returned no matches for generic customer markers or known prior
 Recent commit metadata was reviewed for suspicious credential/private-data wording with no obvious finding. This does **not** inspect every historical blob: `make audit-history` from a real clone remains required before repository visibility changes.
 
 The final RC audit reconciled stale pre-RC pull requests after preserving the release-acceptance contract and Golden Slice trajectory replay proof on main.
+
+The executable v0.1 release gate now verifies the full test suite, deterministic Golden Incident, MCP Execution Contract proof, release wheel build, isolated wheel installation with declared dependencies, packaged schemas/CLI behavior, and a clean local fresh-clone smoke. The full git-history credential audit remains a separate unresolved gate.
 
 ## Known limitations
 
