@@ -11,6 +11,7 @@ from .authority import (
     decision_asdict,
 )
 from .compiler import compile_release_plan
+from .decision_eval import validate_decision_eval_artifact
 from .eval_engine import evaluate_gate
 from .loader import load_yaml_documents
 from .release_gate import evaluate_release_gate
@@ -85,7 +86,87 @@ def main() -> None:
         action="store_true",
     )
 
+    decision_verify = subparsers.add_parser(
+        "decision-eval-verify"
+    )
+    decision_verify.add_argument("artifact")
+
+    decision_gate = subparsers.add_parser(
+        "decision-eval-gate"
+    )
+    decision_gate.add_argument("path")
+    decision_gate.add_argument(
+        "--artifact",
+        required=True,
+    )
+
     args = parser.parse_args()
+
+    if args.command in {
+        "decision-eval-verify",
+        "decision-eval-gate",
+    }:
+        artifact = json.loads(
+            Path(args.artifact).read_text(
+                encoding="utf-8"
+            )
+        )
+        validation = validate_decision_eval_artifact(
+            artifact
+        )
+        if not validation.valid:
+            print(
+                json.dumps(
+                    {
+                        "valid": False,
+                        "reason": validation.reason,
+                    },
+                    indent=2,
+                )
+            )
+            raise SystemExit(3)
+
+        if args.command == "decision-eval-verify":
+            print(
+                json.dumps(
+                    {
+                        "valid": True,
+                        "artifact_id": validation.artifact_id,
+                        "content_digest": validation.content_digest,
+                        "metrics": dict(validation.metrics),
+                    },
+                    indent=2,
+                )
+            )
+            return
+
+        documents = load_yaml_documents(
+            args.path,
+            validate=True,
+        )
+        gates = documents.by_kind("EvalGate")
+        if len(gates) != 1:
+            raise SystemExit(
+                "decision-eval-gate requires exactly one "
+                "EvalGate document"
+            )
+        result = evaluate_gate(
+            gates[0],
+            validation.metrics,
+        )
+        print(
+            json.dumps(
+                {
+                    "artifact_id": validation.artifact_id,
+                    "content_digest": validation.content_digest,
+                    "gate": asdict(result),
+                },
+                indent=2,
+            )
+        )
+        raise SystemExit(
+            0 if result.passed else 2
+        )
 
     documents = load_yaml_documents(
         args.path,

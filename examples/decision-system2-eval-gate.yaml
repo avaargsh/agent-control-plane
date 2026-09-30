@@ -1,0 +1,18 @@
+apiVersion: agentplane.io/v1alpha1
+kind: EvalGate
+metadata:
+  name: measured-system2-fallback
+spec:
+  suiteRef: benchmark://agent-decision-lab/mcp-tool-router-v1
+  conditions:
+    - metric: fallback_measured
+      op: eq
+      value: 1
+    - metric: system2_accuracy
+      op: gte
+      value: 0.90
+    - metric: system2_p95_latency_ms
+      op: lte
+      value: 5000
+  evidenceRequired: true
+  onFailure: block
