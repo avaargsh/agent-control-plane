@@ -1,0 +1,29 @@
+{
+  "incidentId": "inc-gpu-xid-external-001",
+  "alert": "NVIDIA XID 79",
+  "severity": "critical",
+  "identity": {
+    "agentReleaseId": "gpu-xid-remediation-v1",
+    "sessionId": "session-external-001",
+    "runId": "run-external-001",
+    "temporalWorkflowId": "agent-run/run-external-001",
+    "temporalRunId": "temporal-run-external-001",
+    "sandbox": {
+      "provider": "k8s-agent-sandbox",
+      "currentId": "sandbox-external-b",
+      "replacementLineage": [
+        "sandbox-external-a",
+        "sandbox-external-b"
+      ]
+    },
+    "computeWorkload": {
+      "id": "gpu-xid-validation",
+      "generation": 7
+    }
+  },
+  "refs": {
+    "approvalReceipt": "external://approval/inc-gpu-xid-external-001",
+    "policyDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "mcpDiagnosticReceipt": "external://mcp/logs.search/receipt-001"
+  }
+}
