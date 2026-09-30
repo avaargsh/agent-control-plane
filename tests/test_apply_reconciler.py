@@ -540,6 +540,11 @@ def factory_acceptance_artifact(
     disposition: str = "ACCEPT",
 ):
     accepted = disposition == "ACCEPT"
+    gate_status = {
+        "ACCEPT": "PASS",
+        "HOLD": "WARN",
+        "REJECT": "FAIL",
+    }[disposition]
     payload = {
         "apiVersion": "aifactory.engineering/v1alpha1",
         "kind": "AcceptanceArtifact",
@@ -550,13 +555,21 @@ def factory_acceptance_artifact(
         "gates": [
             {
                 "gateId": "compute",
-                "status": "PASS",
-                "reasons": [],
+                "status": gate_status,
+                "reasons": (
+                    []
+                    if gate_status == "PASS"
+                    else [f"fixture disposition: {disposition}"]
+                ),
             },
             {
                 "gateId": "runtime",
-                "status": "PASS",
-                "reasons": [],
+                "status": gate_status,
+                "reasons": (
+                    []
+                    if gate_status == "PASS"
+                    else [f"fixture disposition: {disposition}"]
+                ),
             },
         ],
         "reasons": [],
