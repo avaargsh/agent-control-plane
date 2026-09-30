@@ -38,6 +38,23 @@ def evaluate_release_gate(
     if evidence_required and not verify_release_evidence(evidence):
         return ReleaseGateDecision("BLOCK", False, release_ref, runtime_run_id, "INVALID_RELEASE_EVIDENCE", empty_eval)
 
+    required_provenance = set(
+        gate.get("spec", {}).get(
+            "requiredProvenance",
+            (),
+        )
+    )
+    if (
+        "authority" in required_provenance
+        and expected_authority_digest is None
+    ):
+        return ReleaseGateDecision(
+            "BLOCK", False, release_ref,
+            runtime_run_id,
+            "EXPECTED_AUTHORITY_DIGEST_REQUIRED",
+            empty_eval,
+        )
+
     if (
         expected_authority_digest is not None
         and evidence.get("authority_digest")
@@ -50,12 +67,6 @@ def evaluate_release_gate(
             empty_eval,
         )
 
-    required_provenance = set(
-        gate.get("spec", {}).get(
-            "requiredProvenance",
-            (),
-        )
-    )
     operation_id = evidence.get("operation_id")
     operation_phase = evidence.get("operation_phase")
     operation_evidence_refs = evidence.get(
