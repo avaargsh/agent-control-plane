@@ -65,7 +65,6 @@ def main() -> int:
             "-m",
             "pip",
             "install",
-            "--no-deps",
             str(wheels[0]),
             cwd=tmp_path,
         )
