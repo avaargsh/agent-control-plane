@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol
 
-from .runtime_clients import RuntimeApplyResult
+from .runtime_clients import RuntimeApplyResult, RuntimeMutationUncertain
 
 
 class KubernetesApi(Protocol):
@@ -87,14 +87,28 @@ class KubernetesSandboxClient:
             existing is None
             or previous_managed != manifest
         )
-        resource = (
-            self.api.apply(
-                namespace=self.namespace,
-                manifest=manifest,
-            )
-            if changed
-            else existing
-        )
+        verified_after_uncertain_mutation = False
+        if changed:
+            try:
+                resource = self.api.apply(
+                    namespace=self.namespace,
+                    manifest=manifest,
+                )
+            except RuntimeMutationUncertain:
+                observed = self.api.get(
+                    namespace=self.namespace,
+                    name=name,
+                )
+                if (
+                    observed is None
+                    or _managed_sandbox_projection(observed) != manifest
+                ):
+                    raise
+                resource = observed
+                verified_after_uncertain_mutation = True
+        else:
+            resource = existing
+
         metadata = dict((resource or {}).get("metadata", {}))
         change_type = (
             "created"
@@ -106,6 +120,9 @@ class KubernetesSandboxClient:
             "resourceVersion": metadata.get("resourceVersion"),
             "kind": "Sandbox",
             "changeType": change_type,
+            "verifiedAfterUncertainMutation": (
+                verified_after_uncertain_mutation
+            ),
         }
         if change_type == "updated":
             evidence["previousManaged"] = previous_managed
