@@ -1,6 +1,9 @@
 import pytest
 
-from agent_control_plane.runtime_clients import RuntimeMutationUncertain
+from agent_control_plane.runtime_clients import (
+    RuntimeMutationUncertain,
+    TerminalRuntimeConflict,
+)
 from agent_control_plane.temporal_runtime_client import TemporalWorkflowClient
 
 
@@ -145,3 +148,48 @@ def test_temporal_terminate_accepts_absent_postcondition_after_uncertain_ack():
     assert terminated["terminated"] is True
     assert terminated["status"] is None
     assert terminated["verifiedAfterUncertainMutation"] is True
+
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        "COMPLETED",
+        "FAILED",
+        "TERMINATED",
+        "WORKFLOW_EXECUTION_STATUS_TIMED_OUT",
+    ],
+)
+def test_temporal_client_rejects_terminal_existing_workflow(status):
+    api = FakeTemporalApi()
+    workflow_id = "agent-release/gpu-xid-remediation-v1"
+    api.workflows[workflow_id] = {
+        "runId": "run-terminal-001",
+        "status": status,
+    }
+    client = TemporalWorkflowClient(api)
+
+    with pytest.raises(
+        TerminalRuntimeConflict,
+        match="already terminal",
+    ):
+        client.ensure_workflow(desired())
+
+    assert api.starts == 0
+
+
+def test_temporal_client_allows_nonterminal_existing_workflow():
+    api = FakeTemporalApi()
+    workflow_id = "agent-release/gpu-xid-remediation-v1"
+    api.workflows[workflow_id] = {
+        "runId": "run-live-001",
+        "status": "RUNNING",
+    }
+    client = TemporalWorkflowClient(api)
+
+    result = client.ensure_workflow(desired())
+
+    assert result.changed is False
+    assert result.evidence["runId"] == "run-live-001"
+    assert result.evidence["status"] == "RUNNING"
+    assert api.starts == 0
