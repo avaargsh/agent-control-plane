@@ -39,7 +39,12 @@ class TemporalRuntimeClient(Protocol):
     def ensure_workflow(self, desired: Mapping[str, Any]) -> RuntimeApplyResult:
         ...
 
-    def terminate_workflow(self, resource_ref: str) -> Mapping[str, Any]:
+    def terminate_workflow(
+        self,
+        resource_ref: str,
+        *,
+        expected_run_id: str,
+    ) -> Mapping[str, Any]:
         ...
 
 
