@@ -503,3 +503,125 @@ def test_tampered_decision_eval_blocks_before_provider_mutation() -> None:
     assert result.error == (
         "DECISION_EVAL_INVALID:CONTENT_DIGEST_MISMATCH"
     )
+
+
+
+def factory_acceptance_artifact(
+    *,
+    disposition: str = "ACCEPT",
+):
+    accepted = disposition == "ACCEPT"
+    payload = {
+        "apiVersion": "aifactory.engineering/v1alpha1",
+        "kind": "AcceptanceArtifact",
+        "caseId": "controlled-lab-golden",
+        "issuedAt": "2026-09-30T10:00:00+00:00",
+        "disposition": disposition,
+        "accepted": accepted,
+        "gates": [
+            {
+                "gateId": "compute",
+                "status": "PASS",
+                "reasons": [],
+            },
+            {
+                "gateId": "runtime",
+                "status": "PASS",
+                "reasons": [],
+            },
+        ],
+        "reasons": [],
+        "evidenceRefs": {
+            "compute": "evidence://gpu/dcgm-001",
+            "runtime": "evidence://runtime/slo-001",
+        },
+    }
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return {
+        **payload,
+        "digest": "sha256:" + hashlib.sha256(canonical).hexdigest(),
+    }
+
+
+def test_factory_acceptance_is_bound_as_untrusted_evidence_only() -> None:
+    artifact = factory_acceptance_artifact()
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        factory_acceptance_artifact=artifact,
+    )
+
+    assert result.phase == "promoted"
+    bound = result.evidence["factory_acceptance"]
+    assert bound["artifact_digest"] == artifact["digest"]
+    assert bound["integrity_verified"] is True
+    assert bound["trusted"] is False
+    assert bound["gate_eligible"] is False
+    assert bound["artifact"]["accepted"] is True
+
+
+def test_untrusted_factory_reject_does_not_become_authorization() -> None:
+    artifact = factory_acceptance_artifact(
+        disposition="REJECT",
+    )
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executor_registry(),
+    ).reconcile(
+        build_plan(),
+        factory_acceptance_artifact=artifact,
+    )
+
+    assert result.phase == "promoted"
+    bound = result.evidence["factory_acceptance"]
+    assert bound["artifact"]["disposition"] == "REJECT"
+    assert bound["trusted"] is False
+    assert bound["gate_eligible"] is False
+
+
+def test_tampered_factory_acceptance_blocks_before_provider_mutation() -> None:
+    artifact = factory_acceptance_artifact()
+    artifact["accepted"] = False
+
+    class CountingExecutor(InMemoryExecutor):
+        calls = 0
+
+        def apply(self, **kwargs):
+            type(self).calls += 1
+            return super().apply(**kwargs)
+
+    executors = ExecutorRegistry()
+    for provider_type, provider_name in [
+        ("sandbox", "k8s-agent-sandbox"),
+        ("tool", "mcp"),
+        ("harness", "codex"),
+        ("workflow", "temporal"),
+        ("decision", "decision-gateway"),
+    ]:
+        executors.register(
+            CountingExecutor(provider_type, provider_name)
+        )
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executors,
+    ).reconcile(
+        build_plan(),
+        factory_acceptance_artifact=artifact,
+    )
+
+    assert result.phase == "blocked"
+    assert result.receipts == ()
+    assert CountingExecutor.calls == 0
+    assert result.error == (
+        "FACTORY_ACCEPTANCE_INVALID:DIGEST_MISMATCH"
+    )
