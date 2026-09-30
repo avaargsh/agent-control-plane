@@ -224,6 +224,41 @@ Projected gate metrics use the `system2_` prefix, for example:
 This keeps the fast-path operating-point `fallback_rate` distinct from the
 measured System-2 execution metrics.
 
+## Trusted AI Factory acceptance
+
+An AI Factory `AcceptanceArtifact` remains evidence-only until a separate
+attestation is verified by an explicitly configured trust verifier.
+
+The reference verifier uses a key-id -> HMAC secret registry for controlled
+integration proofs:
+
+```text
+AcceptanceArtifact
+   -> digest verification
+AcceptanceAttestation
+   -> artifactDigest binding
+   -> keyId lookup in trusted registry
+   -> signature verification
+        |
+        v
+factory_acceptance_trusted = 1
+factory_accepted = 0 | 1
+        |
+        v
+EvalGate
+```
+
+Unsigned artifacts never project these metrics. An attestation with an unknown
+key, unsupported algorithm, mismatched artifact digest, or invalid signature
+blocks before provider mutation.
+
+The HMAC verifier is deliberately behind the `FactoryAttestationVerifier`
+interface. Production deployments should replace it with asymmetric
+KMS/Sigstore/Cosign verification rather than sharing HMAC secrets with the
+control plane.
+
+See `examples/factory-acceptance-gate.yaml`.
+
 ## Current status
 
 v0.1 release candidate.
