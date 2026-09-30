@@ -26,7 +26,17 @@ _KIND_TO_SCHEMA = {
 
 
 def schema_directory() -> Path:
-    return Path(__file__).resolve().parents[2] / "schemas"
+    packaged = Path(__file__).resolve().parent / "schemas"
+    if packaged.is_dir():
+        return packaged
+
+    source_checkout = Path(__file__).resolve().parents[2] / "schemas"
+    if source_checkout.is_dir():
+        return source_checkout
+
+    raise FileNotFoundError(
+        "agent-control-plane manifest schemas are not installed"
+    )
 
 
 def validate_manifest(
