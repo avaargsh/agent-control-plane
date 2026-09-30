@@ -1,0 +1,54 @@
+name: agentos-v32-mcp-execution-contract
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/agent_control_plane/tool_contract.py"
+      - "src/agent_control_plane/mcp_fault_service.py"
+      - "src/agent_control_plane/mcp_subprocess.py"
+      - "experiments/v3_2/mcp_execution_contract.py"
+      - "tests/test_mcp_execution_contract.py"
+      - "docs/v3.2-mcp-execution-contract.md"
+      - ".github/workflows/agentos-v32-mcp-execution-contract.yml"
+  pull_request:
+    paths:
+      - "src/agent_control_plane/tool_contract.py"
+      - "src/agent_control_plane/mcp_fault_service.py"
+      - "src/agent_control_plane/mcp_subprocess.py"
+      - "experiments/v3_2/mcp_execution_contract.py"
+      - "tests/test_mcp_execution_contract.py"
+      - "docs/v3.2-mcp-execution-contract.md"
+      - ".github/workflows/agentos-v32-mcp-execution-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  execution-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install control plane
+        run: pip install -e ".[dev]"
+      - name: Run focused contract tests
+        run: pytest -q tests/test_v32_tool_contract.py tests/test_mcp_execution_contract.py
+      - name: Run MCP fault-injection proof
+        run: |
+          python experiments/v3_2/mcp_execution_contract.py | tee /tmp/mcp-execution-contract.txt
+          grep -qx 'PASS' /tmp/mcp-execution-contract.txt
+          grep -q '"scenario": "lost_ack"' /tmp/mcp-execution-contract.txt
+          grep -q '"scenario": "timeout"' /tmp/mcp-execution-contract.txt
+          grep -q '"scenario": "partial_commit"' /tmp/mcp-execution-contract.txt
+          grep -q '"scenario": "compensation"' /tmp/mcp-execution-contract.txt
+          grep '^evidence_head=sha256:' /tmp/mcp-execution-contract.txt
+      - name: Upload execution proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentos-v32-mcp-execution-contract-proof
+          path: /tmp/mcp-execution-contract.txt
