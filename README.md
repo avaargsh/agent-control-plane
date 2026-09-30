@@ -151,6 +151,7 @@ Implemented:
 - AgentOS v3.2 Binding / Policy Projection / Evidence Provenance / ToolContract schemas
 - CapabilityIntent → Rego v1 compilation with real OPA allow/deny enforcement
 - cross-repository policy-digest provenance proof through Temporal, Kubernetes sandbox replacement and Evidence replay
+- MCP stdio Execution Contract proof with lost-ACK, timeout, partial-commit and compensation fault injection
 - opt-in live smoke preflight
 - `make demo` / `make smoke` developer workflow
 
