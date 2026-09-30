@@ -237,12 +237,10 @@ def _fallback_semantics_reason(
             or not 0.0 <= float(parse_rate) <= 1.0
         ):
             return "FALLBACK_PARSE_VALID_RATE_INVALID"
-        if len(parse_values) != fallback_count:
+        if not parse_values:
             return "FALLBACK_PARSE_VALID_CASES_INCOMPLETE"
         expected_parse_rate = (
-            sum(parse_values) / fallback_count
-            if fallback_count
-            else 0.0
+            sum(parse_values) / len(parse_values)
         )
         if not math.isclose(
             float(parse_rate),
