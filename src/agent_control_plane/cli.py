@@ -62,6 +62,10 @@ def main() -> None:
         "--evidence",
         required=False,
     )
+    gate.add_argument(
+        "--authority-digest",
+        required=False,
+    )
 
     inventory = subparsers.add_parser(
         "authority-inventory"
@@ -160,6 +164,9 @@ def main() -> None:
                 gates[0],
                 metrics,
                 evidence,
+                expected_authority_digest=(
+                    args.authority_digest
+                ),
             )
         else:
             result = evaluate_gate(
