@@ -16,6 +16,47 @@ class KubernetesApi(Protocol):
         ...
 
 
+def _managed_sandbox_projection(
+    resource: Mapping[str, Any],
+) -> dict[str, Any]:
+    metadata = resource.get("metadata")
+    spec = resource.get("spec")
+    return {
+        "apiVersion": resource.get("apiVersion"),
+        "kind": resource.get("kind"),
+        "metadata": {
+            "name": (
+                metadata.get("name")
+                if isinstance(metadata, Mapping)
+                else None
+            ),
+            "namespace": (
+                metadata.get("namespace")
+                if isinstance(metadata, Mapping)
+                else None
+            ),
+        },
+        "spec": {
+            "isolation": (
+                spec.get("isolation")
+                if isinstance(spec, Mapping)
+                else None
+            ),
+            "warmPool": (
+                spec.get("warmPool")
+                if isinstance(spec, Mapping)
+                else None
+            ),
+            "placement": (
+                dict(spec.get("placement", {}))
+                if isinstance(spec, Mapping)
+                and isinstance(spec.get("placement", {}), Mapping)
+                else {}
+            ),
+        },
+    }
+
+
 class KubernetesSandboxClient:
     """SDK-neutral client for reconciling a sandbox custom resource."""
 
@@ -37,8 +78,18 @@ class KubernetesSandboxClient:
                 "placement": dict(desired.get("placement", {})),
             },
         }
-        changed = existing != manifest
-        resource = self.api.apply(namespace=self.namespace, manifest=manifest) if changed else existing
+        changed = (
+            existing is None
+            or _managed_sandbox_projection(existing) != manifest
+        )
+        resource = (
+            self.api.apply(
+                namespace=self.namespace,
+                manifest=manifest,
+            )
+            if changed
+            else existing
+        )
         metadata = dict((resource or {}).get("metadata", {}))
         return RuntimeApplyResult(
             resource_ref=f"k8s://{self.namespace}/sandbox/{name}",
