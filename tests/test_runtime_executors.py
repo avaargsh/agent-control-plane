@@ -1,3 +1,5 @@
+import pytest
+
 from agent_control_plane.runtime_clients import RuntimeApplyResult
 from agent_control_plane.runtime_executors import (
     KubernetesSandboxExecutor,
@@ -33,9 +35,19 @@ class FakeTemporalClient:
             evidence={"workflowId": "run-001"},
         )
 
-    def terminate_workflow(self, resource_ref):
-        self.terminated.append(resource_ref)
-        return {"terminated": True}
+    def terminate_workflow(
+        self,
+        resource_ref,
+        *,
+        expected_run_id,
+    ):
+        self.terminated.append(
+            (resource_ref, expected_run_id)
+        )
+        return {
+            "terminated": True,
+            "runId": expected_run_id,
+        }
 
 
 def test_kubernetes_executor_maps_runtime_client_to_receipts():
@@ -266,4 +278,42 @@ def test_recovered_temporal_mutation_receipt_remains_compensatable():
 
     assert receipt.changed is True
     assert rollback.rolled_back is True
-    assert client.terminated == ["temporal://workflow/recovered"]
+    assert client.terminated == [
+        ("temporal://workflow/recovered", "run-recovered")
+    ]
+
+
+
+class MissingRunIdTemporalClient(FakeTemporalClient):
+    def ensure_workflow(self, desired):
+        return RuntimeApplyResult(
+            resource_ref="temporal://workflow/missing-run",
+            changed=True,
+            evidence={
+                "workflowId": "missing-run",
+            },
+        )
+
+
+def test_temporal_rollback_refuses_changed_receipt_without_run_id():
+    client = MissingRunIdTemporalClient()
+    executor = TemporalWorkflowExecutor(client)
+    plan = build_plan()
+    binding = plan.bindings["workflow"]
+    receipt = executor.apply(
+        plan=plan,
+        binding=binding,
+        prepared={"kind": "WorkflowPlan"},
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="missing runId",
+    ):
+        executor.rollback(
+            plan=plan,
+            binding=binding,
+            receipt=receipt,
+        )
+
+    assert client.terminated == []
