@@ -21,6 +21,8 @@ def evaluate_release_gate(
     gate: Mapping[str, Any],
     metrics: Mapping[str, float],
     evidence: Mapping[str, Any],
+    *,
+    expected_authority_digest: str | None = None,
 ) -> ReleaseGateDecision:
     """Fail-closed promotion decision over metrics + sealed runtime evidence."""
     release_ref = evidence.get("release_ref")
@@ -35,6 +37,18 @@ def evaluate_release_gate(
     evidence_required = bool(gate.get("spec", {}).get("evidenceRequired", True))
     if evidence_required and not verify_release_evidence(evidence):
         return ReleaseGateDecision("BLOCK", False, release_ref, runtime_run_id, "INVALID_RELEASE_EVIDENCE", empty_eval)
+
+    if (
+        expected_authority_digest is not None
+        and evidence.get("authority_digest")
+        != expected_authority_digest
+    ):
+        return ReleaseGateDecision(
+            "BLOCK", False, release_ref,
+            runtime_run_id,
+            "AUTHORITY_DIGEST_MISMATCH",
+            empty_eval,
+        )
 
     required_provenance = set(
         gate.get("spec", {}).get(
