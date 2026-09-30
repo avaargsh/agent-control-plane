@@ -281,6 +281,7 @@ class ApplyReconciler:
                 eval_results=(),
                 evidence=evidence,
                 policy_decision=policy_decision,
+                authority_decision=authority_decision,
                 error=f"provider feature mismatch: {missing}",
             )
 
@@ -383,6 +384,7 @@ class ApplyReconciler:
                 eval_results=(),
                 evidence=evidence,
                 policy_decision=policy_decision,
+                authority_decision=authority_decision,
                 error=str(exc),
             )
 
