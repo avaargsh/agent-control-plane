@@ -16,6 +16,28 @@ class TemporalApi(Protocol):
         ...
 
 
+_TERMINAL_WORKFLOW_STATUSES = {
+    "COMPLETED",
+    "FAILED",
+    "CANCELED",
+    "CANCELLED",
+    "TERMINATED",
+    "TIMED_OUT",
+    "TIMEDOUT",
+}
+
+
+def _workflow_is_terminal(status: Any) -> bool:
+    if not isinstance(status, str) or not status:
+        return False
+    normalized = status.upper()
+    if normalized.startswith("WORKFLOW_EXECUTION_STATUS_"):
+        normalized = normalized.removeprefix(
+            "WORKFLOW_EXECUTION_STATUS_"
+        )
+    return normalized in _TERMINAL_WORKFLOW_STATUSES
+
+
 class TemporalWorkflowClient:
     """SDK-neutral Temporal adapter; Temporal owns continuation, not desired state."""
 
@@ -72,7 +94,24 @@ class TemporalWorkflowClient:
 
     def terminate_workflow(self, resource_ref: str) -> Mapping[str, Any]:
         workflow_id = resource_ref.removeprefix("temporal://workflow/")
-        return self.api.terminate(
-            workflow_id=workflow_id,
-            reason="agent control plane compensation",
-        )
+        try:
+            return self.api.terminate(
+                workflow_id=workflow_id,
+                reason="agent control plane compensation",
+            )
+        except RuntimeMutationUncertain:
+            observed = self.api.describe(workflow_id=workflow_id)
+            if observed is not None and not _workflow_is_terminal(
+                observed.get("status")
+            ):
+                raise
+            return {
+                "terminated": True,
+                "workflowId": workflow_id,
+                "status": (
+                    observed.get("status")
+                    if observed is not None
+                    else None
+                ),
+                "verifiedAfterUncertainMutation": True,
+            }

@@ -82,3 +82,49 @@ def test_temporal_start_preserves_semantic_failure(monkeypatch):
             task_queue="agent-runtime",
             input={"incidentId": "inc-1"},
         )
+
+
+def test_kubectl_delete_classifies_uncertain_failure(monkeypatch):
+    def run(command, **kwargs):
+        return SimpleNamespace(
+            stdout="",
+            stderr="error: connection reset by peer",
+            returncode=1,
+            check_returncode=lambda: (_ for _ in ()).throw(
+                subprocess.CalledProcessError(1, command)
+            ),
+        )
+
+    monkeypatch.setattr(
+        "agent_control_plane.cli_runtime_transports.subprocess.run",
+        run,
+    )
+
+    with pytest.raises(RuntimeMutationUncertain):
+        KubectlApi(context="kind-acp").delete(
+            namespace="agent-runtime",
+            name="demo-sandbox",
+        )
+
+
+def test_temporal_terminate_classifies_uncertain_failure(monkeypatch):
+    def run(command, **kwargs):
+        return SimpleNamespace(
+            stdout="",
+            stderr="rpc error: code = Unavailable desc = transport is closing",
+            returncode=1,
+            check_returncode=lambda: (_ for _ in ()).throw(
+                subprocess.CalledProcessError(1, command)
+            ),
+        )
+
+    monkeypatch.setattr(
+        "agent_control_plane.cli_runtime_transports.subprocess.run",
+        run,
+    )
+
+    with pytest.raises(RuntimeMutationUncertain):
+        TemporalCliApi(address="127.0.0.1:7233").terminate(
+            workflow_id="agent-release/demo",
+            reason="rollback",
+        )
