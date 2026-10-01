@@ -546,3 +546,17 @@ def test_nonzero_stabilization_window_is_unknown_in_single_snapshot_verifier():
 
     assert result.status is VerificationStatus.UNKNOWN
     assert "stabilization window" in result.reasons[0]
+
+
+def test_replay_rejects_newer_generation_even_if_old_action_annotations_remain():
+    fixture = build_transition()
+    execute(fixture)
+    fixture["api"].deployment["metadata"]["generation"] = 9
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="replay generation does not match owned scale mutation",
+    ):
+        execute(fixture)
+
+    assert fixture["api"].patch_calls == 1
