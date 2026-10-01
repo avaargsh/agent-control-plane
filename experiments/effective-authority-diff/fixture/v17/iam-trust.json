@@ -2,7 +2,8 @@
   "serviceAccount": "system:serviceaccount:support:refund-agent",
   "role": "arn:aws:iam::111122223333:role/refund-agent",
   "trustedSubjects": [
-    "refund-agent"
+    "refund-agent",
+    "refund-retry-subagent"
   ],
   "delegatedSessionTags": {
     "support-user": "support-user",
