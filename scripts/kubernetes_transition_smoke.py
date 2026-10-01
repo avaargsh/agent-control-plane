@@ -8,8 +8,9 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from agent_control_plane.cli_runtime_transports import KubectlDeploymentApi
+from agent_control_plane.context_overlay import SQLiteContextOverlayStore
 from agent_control_plane.context_transition import (
-    TransitionProposalBinding,
+    TransitionProposalBindingV2,
     authorize_context_bound_transition,
     build_execution_context_provenance,
     seal_context_bound_policy_input,
@@ -290,15 +291,31 @@ def main() -> int:
         agent=agent,
         claimed_at=started_at + timedelta(milliseconds=1),
     )
+    overlay_store = SQLiteContextOverlayStore(work_db)
+    overlay_store.append(
+        work_id=work.work_id,
+        expected_revision=0,
+        actor=agent,
+        entry_type="observation",
+        payload={
+            "source": "kind-live-smoke",
+            "message": "proposal context before authorization",
+        },
+        created_at=started_at + timedelta(microseconds=1500),
+    )
     projection = work_store.project(
         work_id=work.work_id,
         consumer=agent,
     )
-    proposal = TransitionProposalBinding.seal(
+    observed_overlay = overlay_store.get(
+        work_id=work.work_id,
+    )
+    proposal = TransitionProposalBindingV2.seal(
         proposal_id="kind-live-context-proposal-scale-20-30",
         proposer=agent,
         transition=transition,
         projection=projection,
+        context_overlay=observed_overlay,
         created_at=started_at + timedelta(milliseconds=2),
     )
 
@@ -370,6 +387,33 @@ def main() -> int:
         authorization_expires_at=started_at + timedelta(minutes=4),
         now=started_at + timedelta(milliseconds=3),
     )
+
+    overlay_store.append(
+        work_id=work.work_id,
+        expected_revision=proposal.context_revision,
+        actor=agent,
+        entry_type="note",
+        payload={
+            "message": "context advanced after authorization",
+            "must_not_invalidate_authority": True,
+        },
+        created_at=started_at + timedelta(milliseconds=4),
+    )
+    execution_overlay = overlay_store.get(
+        work_id=work.work_id,
+    )
+    current_work = work_store.get(work.work_id)
+    if (
+        current_work.version != proposal.work_version
+        or current_work.snapshot_hash != proposal.work_snapshot_hash
+    ):
+        raise RuntimeError(
+            "context-only append unexpectedly changed authoritative work"
+        )
+    if execution_overlay.context_revision != proposal.context_revision + 1:
+        raise RuntimeError(
+            "kind smoke did not advance independent context revision"
+        )
     holder = Principal(
         type="controller",
         subject="ci/kind-controller",
@@ -556,6 +600,30 @@ def main() -> int:
                     committed_attempt.context_provenance[
                         "proposal_hash"
                     ]
+                ),
+                "transition_proposal_version": proposal.proposal_version,
+                "execution_context_provenance_version": (
+                    committed_attempt.context_provenance[
+                        "provenance_version"
+                    ]
+                ),
+                "context_revision_observed": (
+                    committed_attempt.context_provenance[
+                        "context_revision"
+                    ]
+                ),
+                "context_head_hash_observed": (
+                    committed_attempt.context_provenance[
+                        "context_head_hash"
+                    ]
+                ),
+                "context_overlay_hash_observed": (
+                    committed_attempt.context_provenance[
+                        "context_overlay_hash"
+                    ]
+                ),
+                "context_revision_at_execution": (
+                    execution_overlay.context_revision
                 ),
                 "execution_context_provenance_hash": (
                     committed_attempt.context_provenance_hash

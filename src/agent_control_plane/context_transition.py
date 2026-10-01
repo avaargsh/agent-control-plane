@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Mapping
 
-from .execution_provenance import ExecutionContextProvenance
+from .context_overlay import ContextOverlay
+from .execution_provenance import (
+    ExecutionContextProvenance,
+    ExecutionContextProvenanceV2,
+)
 from .policy_replay import (
     PolicyDecisionRecord,
     TransitionPolicyInput,
@@ -169,12 +173,212 @@ class TransitionProposalBinding:
             )
 
 
+@dataclass(frozen=True)
+class TransitionProposalBindingV2:
+    """Bind authority state and the exact non-authoritative overlay observed."""
+
+    proposal_id: str
+    proposer: Principal
+    transition_hash: str
+    work_id: str
+    work_version: int
+    work_snapshot_hash: str
+    projection_hash: str
+    context_revision: int
+    context_head_hash: str
+    context_overlay_hash: str
+    created_at: datetime
+    proposal_hash: str
+    proposal_version: str = "transition-proposal-binding/v2"
+
+    @classmethod
+    def seal(
+        cls,
+        *,
+        proposal_id: str,
+        proposer: Principal,
+        transition: StateTransition,
+        projection: ContextProjection,
+        context_overlay: ContextOverlay,
+        created_at: datetime,
+    ) -> "TransitionProposalBindingV2":
+        if not proposal_id:
+            raise ProtocolViolation("proposal_id is required")
+        _require_aware(created_at, "created_at")
+        transition.verify()
+        projection.verify()
+        context_overlay.verify()
+
+        if projection.consumer != proposer:
+            raise ProtocolViolation(
+                "context projection consumer does not match proposer"
+            )
+        if projection.work.owner != proposer:
+            raise ProtocolViolation(
+                "transition proposer does not own projected work"
+            )
+        if projection.work.status is not WorkStatus.ACTIVE:
+            raise ProtocolViolation(
+                "transition proposal requires ACTIVE work"
+            )
+        if context_overlay.work_id != projection.work.work_id:
+            raise ProtocolViolation(
+                "context overlay belongs to another work item"
+            )
+        if context_overlay.authority_version != projection.work.version:
+            raise ProtocolViolation(
+                "context overlay authority version does not match projection"
+            )
+        if (
+            context_overlay.authority_snapshot_hash
+            != projection.work.snapshot_hash
+        ):
+            raise ProtocolViolation(
+                "context overlay authority snapshot does not match projection"
+            )
+
+        provisional = cls(
+            proposal_id=proposal_id,
+            proposer=proposer,
+            transition_hash=transition.transition_hash,
+            work_id=projection.work.work_id,
+            work_version=projection.work.version,
+            work_snapshot_hash=projection.work.snapshot_hash,
+            projection_hash=projection.projection_hash,
+            context_revision=context_overlay.context_revision,
+            context_head_hash=context_overlay.head_hash,
+            context_overlay_hash=context_overlay.overlay_hash,
+            created_at=created_at,
+            proposal_hash="",
+        )
+        return cls(
+            proposal_id=provisional.proposal_id,
+            proposer=provisional.proposer,
+            transition_hash=provisional.transition_hash,
+            work_id=provisional.work_id,
+            work_version=provisional.work_version,
+            work_snapshot_hash=provisional.work_snapshot_hash,
+            projection_hash=provisional.projection_hash,
+            context_revision=provisional.context_revision,
+            context_head_hash=provisional.context_head_hash,
+            context_overlay_hash=provisional.context_overlay_hash,
+            created_at=provisional.created_at,
+            proposal_hash=canonical_digest(
+                provisional,
+                exclude=("proposal_hash",),
+            ),
+        )
+
+    def verify(self) -> None:
+        if not self.proposal_id:
+            raise ProtocolViolation("proposal_id is required")
+        if self.work_version <= 0:
+            raise ProtocolViolation("proposal work version must be positive")
+        if self.context_revision < 0:
+            raise ProtocolViolation(
+                "proposal context revision cannot be negative"
+            )
+        if not all(
+            (
+                self.transition_hash,
+                self.work_id,
+                self.work_snapshot_hash,
+                self.projection_hash,
+                self.context_head_hash,
+                self.context_overlay_hash,
+            )
+        ):
+            raise ProtocolViolation(
+                "proposal v2 context binding fields are required"
+            )
+        _require_aware(self.created_at, "created_at")
+        actual = canonical_digest(
+            self,
+            exclude=("proposal_hash",),
+        )
+        if actual != self.proposal_hash:
+            raise ProtocolViolation(
+                "transition proposal v2 binding digest mismatch"
+            )
+
+    def verify_projection(
+        self,
+        projection: ContextProjection,
+    ) -> None:
+        self.verify()
+        projection.verify()
+        expected = {
+            "consumer": self.proposer,
+            "work_id": self.work_id,
+            "work_version": self.work_version,
+            "work_snapshot_hash": self.work_snapshot_hash,
+            "projection_hash": self.projection_hash,
+        }
+        actual = {
+            "consumer": projection.consumer,
+            "work_id": projection.work.work_id,
+            "work_version": projection.work.version,
+            "work_snapshot_hash": projection.work.snapshot_hash,
+            "projection_hash": projection.projection_hash,
+        }
+        if actual != expected:
+            raise ProtocolViolation(
+                "context projection does not match transition proposal v2"
+            )
+
+    def verify_context_overlay(
+        self,
+        context_overlay: ContextOverlay,
+    ) -> None:
+        self.verify()
+        context_overlay.verify()
+        expected = {
+            "work_id": self.work_id,
+            "authority_version": self.work_version,
+            "authority_snapshot_hash": self.work_snapshot_hash,
+            "context_revision": self.context_revision,
+            "head_hash": self.context_head_hash,
+            "overlay_hash": self.context_overlay_hash,
+        }
+        actual = {
+            "work_id": context_overlay.work_id,
+            "authority_version": context_overlay.authority_version,
+            "authority_snapshot_hash": (
+                context_overlay.authority_snapshot_hash
+            ),
+            "context_revision": context_overlay.context_revision,
+            "head_hash": context_overlay.head_hash,
+            "overlay_hash": context_overlay.overlay_hash,
+        }
+        if actual != expected:
+            raise ProtocolViolation(
+                "context overlay does not match transition proposal v2"
+            )
+
+
+ContextProposalBinding = (
+    TransitionProposalBinding | TransitionProposalBindingV2
+)
+
+
 def build_execution_context_provenance(
-    proposal: TransitionProposalBinding,
-) -> ExecutionContextProvenance:
+    proposal: ContextProposalBinding,
+) -> ExecutionContextProvenance | ExecutionContextProvenanceV2:
     """Project a proposal binding into durable execution provenance."""
 
     proposal.verify()
+    if isinstance(proposal, TransitionProposalBindingV2):
+        return ExecutionContextProvenanceV2.seal(
+            work_id=proposal.work_id,
+            work_version=proposal.work_version,
+            work_snapshot_hash=proposal.work_snapshot_hash,
+            projection_hash=proposal.projection_hash,
+            context_revision=proposal.context_revision,
+            context_head_hash=proposal.context_head_hash,
+            context_overlay_hash=proposal.context_overlay_hash,
+            proposal_hash=proposal.proposal_hash,
+            proposer=proposal.proposer,
+        )
     return ExecutionContextProvenance.seal(
         work_id=proposal.work_id,
         work_version=proposal.work_version,
@@ -187,7 +391,7 @@ def build_execution_context_provenance(
 
 def assert_proposal_fresh(
     *,
-    proposal: TransitionProposalBinding,
+    proposal: ContextProposalBinding,
     store: SQLiteWorkContextStore,
 ) -> None:
     """Fail closed when canonical work moved after proposal construction."""
@@ -217,9 +421,9 @@ def assert_proposal_fresh(
 
 
 def _proposal_policy_value(
-    proposal: TransitionProposalBinding,
+    proposal: ContextProposalBinding,
 ) -> dict[str, Any]:
-    return {
+    value = {
         "proposal_hash": proposal.proposal_hash,
         "proposal_version": proposal.proposal_version,
         "projection_hash": proposal.projection_hash,
@@ -231,6 +435,15 @@ def _proposal_policy_value(
             "subject": proposal.proposer.subject,
         },
     }
+    if isinstance(proposal, TransitionProposalBindingV2):
+        value.update(
+            {
+                "context_revision": proposal.context_revision,
+                "context_head_hash": proposal.context_head_hash,
+                "context_overlay_hash": proposal.context_overlay_hash,
+            }
+        )
+    return value
 
 
 def seal_context_bound_policy_input(
@@ -241,7 +454,7 @@ def seal_context_bound_policy_input(
     action: ActionIntent,
     principal: Principal,
     context: Mapping[str, Any],
-    proposal: TransitionProposalBinding,
+    proposal: ContextProposalBinding,
     store: SQLiteWorkContextStore,
 ) -> TransitionPolicyInput:
     """Seal a policy input whose digest transitively binds proposal context."""
@@ -281,7 +494,7 @@ def seal_context_bound_policy_input(
 def verify_policy_binds_proposal(
     *,
     policy_input: TransitionPolicyInput,
-    proposal: TransitionProposalBinding,
+    proposal: ContextProposalBinding,
 ) -> None:
     policy_input.verify()
     proposal.verify()
@@ -311,7 +524,7 @@ def authorize_context_bound_transition(
     action: ActionIntent,
     policy_input: TransitionPolicyInput,
     policy_decision: PolicyDecisionRecord,
-    proposal: TransitionProposalBinding,
+    proposal: ContextProposalBinding,
     store: SQLiteWorkContextStore,
     signed_approval: SignedTransitionApproval,
     approval_verifier: HMACApprovalVerifier,
@@ -354,7 +567,7 @@ def validate_context_binding(
     authorization: AuthorizationBinding,
     now: datetime,
     policy_input: TransitionPolicyInput,
-    proposal: TransitionProposalBinding,
+    proposal: ContextProposalBinding,
     store: SQLiteWorkContextStore,
     signed_approval: SignedTransitionApproval,
     approval_verifier: HMACApprovalVerifier,
@@ -431,7 +644,7 @@ def validate_context_bound_execution(
     caller: Principal,
     now: datetime,
     policy_input: TransitionPolicyInput,
-    proposal: TransitionProposalBinding,
+    proposal: ContextProposalBinding,
     store: SQLiteWorkContextStore,
     signed_approval: SignedTransitionApproval,
     approval_verifier: HMACApprovalVerifier,

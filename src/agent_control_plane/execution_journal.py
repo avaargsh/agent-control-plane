@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
-from .execution_provenance import ExecutionContextProvenance
+from .execution_provenance import (
+    ExecutionContextProvenance,
+    ExecutionContextProvenanceV2,
+)
 from .state_transition_protocol import (
     ActionIntent,
     AuthorizationBinding,
@@ -339,7 +342,11 @@ class SQLiteExecutionJournal:
         authorization: AuthorizationBinding,
         fence: ExecutionFence,
         prepared_at: datetime,
-        context_provenance: ExecutionContextProvenance | None = None,
+        context_provenance: (
+            ExecutionContextProvenance
+            | ExecutionContextProvenanceV2
+            | None
+        ) = None,
     ) -> ExecutionAttempt:
         _require_aware(prepared_at, "prepared_at")
         transition.verify()
