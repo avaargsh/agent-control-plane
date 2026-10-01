@@ -587,18 +587,32 @@ class SQLiteContextOverlayStore:
                 "context revision cannot be negative"
             )
 
-        overlay = self.get(
-            work_id=work_id,
-            recent_entry_limit=1,
-        )
-        if revision > overlay.context_revision:
-            raise ProtocolViolation(
-                "requested context revision is newer than current revision"
-            )
-        if revision == overlay.context_revision:
-            return ()
-
         with self._connect() as connection:
+            connection.execute("BEGIN")
+            self._authority_row(connection, work_id)
+            head = connection.execute(
+                """
+                SELECT revision, head_hash
+                FROM work_context_heads
+                WHERE work_id = ?
+                """,
+                (work_id,),
+            ).fetchone()
+            current_revision = (
+                int(head["revision"])
+                if head is not None
+                else 0
+            )
+            head_hash = (
+                str(head["head_hash"])
+                if head is not None
+                else _GENESIS_HASH
+            )
+            if revision > current_revision:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "requested context revision is newer than current revision"
+                )
             rows = connection.execute(
                 """
                 SELECT *
@@ -608,6 +622,14 @@ class SQLiteContextOverlayStore:
                 """,
                 (work_id, revision),
             ).fetchall()
+            connection.execute("COMMIT")
+
+        if revision == current_revision:
+            if rows:
+                raise ProtocolViolation(
+                    "context history contains entries past current revision"
+                )
+            return ()
 
         entries = tuple(self._entry_from_row(row) for row in rows)
         if not entries or entries[0].revision != revision + 1:
@@ -616,8 +638,8 @@ class SQLiteContextOverlayStore:
             )
         _verify_entry_tail(
             work_id=work_id,
-            context_revision=overlay.context_revision,
-            head_hash=overlay.head_hash,
+            context_revision=current_revision,
+            head_hash=head_hash,
             entries=entries,
         )
         return entries
