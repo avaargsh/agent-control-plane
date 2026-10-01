@@ -60,21 +60,7 @@ def run(command: list[str], *, input_text: str | None = None) -> str:
 
 
 def bootstrap(context: str) -> None:
-    run(
-        [
-            "kubectl",
-            "--context",
-            context,
-            "create",
-            "namespace",
-            NAMESPACE,
-            "--dry-run=client",
-            "-o",
-            "yaml",
-        ]
-    )
-    namespace = run(
-        [
+    namespace = run(\n        [
             "kubectl",
             "--context",
             context,
