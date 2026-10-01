@@ -4,42 +4,57 @@ from datetime import timedelta
 import pytest
 
 from agent_control_plane.execution_attestation import ExecutionAttestation
-from agent_control_plane.execution_journal import (
-    ExecutionContextProvenance,
-    SQLiteExecutionJournal,
+from agent_control_plane.execution_journal import SQLiteExecutionJournal
+from agent_control_plane.state_transition_protocol import (
+    EvidenceBundle,
+    EvidenceItem,
+    Principal,
+    ProtocolViolation,
+    ResourceIdentity,
 )
-from agent_control_plane.state_transition_protocol import ProtocolViolation
-from test_execution_context_provenance import _prepare_context_attempt
-from test_kubernetes_deployment_transition import NOW, build_transition
+from context_testkit import NOW, prepare_context_attempt
+from kubernetes_testkit import build_transition
 
 
-def test_attestation_binds_committed_execution_and_context_provenance(
-    tmp_path,
-):
+def _committed_context_attempt(tmp_path):
     (
+        fixture,
         _,
         _,
         _,
         journal,
         provenance,
         attempt,
-    ) = _prepare_context_attempt(tmp_path)
+    ) = prepare_context_attempt(tmp_path)
     committed = journal.commit(
         attempt,
         completed_at=NOW + timedelta(seconds=5),
         result={"status": "APPLIED"},
     )
+    return fixture, journal, provenance, committed
+
+
+def test_attestation_binds_committed_execution_and_context_provenance(
+    tmp_path,
+):
+    fixture, _, provenance, committed = _committed_context_attempt(
+        tmp_path
+    )
 
     attestation = ExecutionAttestation.seal(
         attestation_id="attestation-001",
         attempt=committed,
-        outcome_contract_hash="sha256:" + "a" * 64,
-        observation_evidence_hash="sha256:" + "b" * 64,
+        outcome_contract=fixture["outcome"],
+        observation_evidence=fixture["evidence"],
         verification_status="SUCCEEDED",
         verified_at=NOW + timedelta(seconds=6),
     )
     attestation.verify()
     attestation.verify_attempt(committed)
+    attestation.verify_evidence(
+        outcome_contract=fixture["outcome"],
+        observation_evidence=fixture["evidence"],
+    )
 
     assert (
         attestation.context_provenance_hash
@@ -50,7 +65,15 @@ def test_attestation_binds_committed_execution_and_context_provenance(
 
 
 def test_attestation_rejects_prepared_attempt(tmp_path):
-    _, _, _, _, _, attempt = _prepare_context_attempt(tmp_path)
+    (
+        fixture,
+        _,
+        _,
+        _,
+        _,
+        _,
+        attempt,
+    ) = prepare_context_attempt(tmp_path)
 
     with pytest.raises(
         ProtocolViolation,
@@ -59,25 +82,60 @@ def test_attestation_rejects_prepared_attempt(tmp_path):
         ExecutionAttestation.seal(
             attestation_id="attestation-prepared",
             attempt=attempt,
-            outcome_contract_hash="sha256:" + "a" * 64,
-            observation_evidence_hash="sha256:" + "b" * 64,
+            outcome_contract=fixture["outcome"],
+            observation_evidence=fixture["evidence"],
+            verification_status="SUCCEEDED",
+            verified_at=NOW + timedelta(seconds=6),
+        )
+
+
+def test_attestation_rejects_observation_for_other_resource(tmp_path):
+    fixture, _, _, committed = _committed_context_attempt(tmp_path)
+    other_resource = ResourceIdentity(
+        provider="kubernetes",
+        resource_uid="uid-other",
+        namespace="prod",
+        kind="Deployment",
+        name="other",
+    )
+    item = EvidenceItem.capture(
+        evidence_id="other",
+        evidence_type="kubernetes_deployment",
+        source="kubernetes://prod/deployment/other",
+        collected_at=NOW,
+        collector_name="test",
+        collector_version="v1",
+        principal=Principal(type="service_account", subject="observer"),
+        payload={"spec": {"replicas": 30}},
+    )
+    other_evidence = EvidenceBundle.seal(
+        resource=other_resource,
+        generation=1,
+        created_at=NOW,
+        items=(item,),
+    )
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="observation resource does not match execution",
+    ):
+        ExecutionAttestation.seal(
+            attestation_id="attestation-wrong-resource",
+            attempt=committed,
+            outcome_contract=fixture["outcome"],
+            observation_evidence=other_evidence,
             verification_status="SUCCEEDED",
             verified_at=NOW + timedelta(seconds=6),
         )
 
 
 def test_attestation_detects_tampering(tmp_path):
-    _, _, _, journal, _, attempt = _prepare_context_attempt(tmp_path)
-    committed = journal.commit(
-        attempt,
-        completed_at=NOW + timedelta(seconds=5),
-        result={"status": "APPLIED"},
-    )
+    fixture, _, _, committed = _committed_context_attempt(tmp_path)
     attestation = ExecutionAttestation.seal(
         attestation_id="attestation-tamper",
         attempt=committed,
-        outcome_contract_hash="sha256:" + "a" * 64,
-        observation_evidence_hash="sha256:" + "b" * 64,
+        outcome_contract=fixture["outcome"],
+        observation_evidence=fixture["evidence"],
         verification_status="SUCCEEDED",
         verified_at=NOW + timedelta(seconds=6),
     )
@@ -94,39 +152,25 @@ def test_attestation_detects_tampering(tmp_path):
 
 
 def test_attestation_detects_attempt_swap(tmp_path):
-    (
-        fixture,
-        proposal,
-        _,
-        journal,
-        _,
-        attempt,
-    ) = _prepare_context_attempt(tmp_path)
-    committed = journal.commit(
-        attempt,
-        completed_at=NOW + timedelta(seconds=5),
-        result={"status": "APPLIED"},
-    )
+    fixture, _, _, committed = _committed_context_attempt(tmp_path)
+
     attestation = ExecutionAttestation.seal(
         attestation_id="attestation-swap",
         attempt=committed,
-        outcome_contract_hash="sha256:" + "a" * 64,
-        observation_evidence_hash="sha256:" + "b" * 64,
+        outcome_contract=fixture["outcome"],
+        observation_evidence=fixture["evidence"],
         verification_status="SUCCEEDED",
         verified_at=NOW + timedelta(seconds=6),
     )
 
     other_journal = SQLiteExecutionJournal(tmp_path / "other.db")
-    other_provenance = ExecutionContextProvenance.seal(
-        proposal=proposal,
-    )
     other = other_journal.prepare(
         transition=fixture["transition"],
         action=fixture["action"],
         authorization=fixture["authorization"],
         fence=fixture["fence"],
         prepared_at=NOW + timedelta(seconds=7),
-        context_provenance=other_provenance,
+        context_provenance=None,
     )
     other_committed = other_journal.commit(
         other,
@@ -160,8 +204,8 @@ def test_attestation_supports_non_context_attempt(tmp_path):
     attestation = ExecutionAttestation.seal(
         attestation_id="attestation-plain",
         attempt=committed,
-        outcome_contract_hash="sha256:" + "a" * 64,
-        observation_evidence_hash="sha256:" + "b" * 64,
+        outcome_contract=fixture["outcome"],
+        observation_evidence=fixture["evidence"],
         verification_status="SUCCEEDED",
         verified_at=NOW + timedelta(seconds=2),
     )
