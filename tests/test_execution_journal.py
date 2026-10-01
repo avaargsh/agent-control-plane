@@ -16,11 +16,7 @@ from agent_control_plane.runtime_clients import (
     RuntimeMutationOwnershipUncertain,
 )
 from agent_control_plane.state_transition_protocol import ProtocolViolation
-from test_kubernetes_deployment_transition import (
-    NOW,
-    FakeDeploymentApi,
-    build_transition,
-)
+from kubernetes_testkit import NOW, FakeDeploymentApi, build_transition
 
 
 def _prepare(journal, fixture):
