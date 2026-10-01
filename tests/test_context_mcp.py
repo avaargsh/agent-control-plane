@@ -240,3 +240,127 @@ def test_invalid_status_fails_closed(tmp_path):
             expected_version=claimed["version"],
             status="MAGIC",
         )
+
+
+def test_in_process_mcp_clients_share_one_authoritative_store(tmp_path):
+    from mcp.client import Client
+
+    store = SQLiteWorkContextStore(tmp_path / "context.db")
+    human_server = build_mcp_server(
+        store=store,
+        principal=HUMAN,
+        clock=_clock(NOW),
+    )
+    claude_server = build_mcp_server(
+        store=store,
+        principal=CLAUDE,
+        clock=_clock(NOW + timedelta(seconds=1)),
+    )
+    codex_server = build_mcp_server(
+        store=store,
+        principal=CODEX,
+        clock=_clock(NOW + timedelta(seconds=2)),
+    )
+
+    async def scenario():
+        async with Client(human_server) as human_client:
+            created_result = await human_client.call_tool(
+                "create_work",
+                {
+                    "work_id": "mcp-handoff-1",
+                    "namespace": "repo/demo",
+                    "goal": "Claude implements; Codex reviews",
+                    "state": {"phase": "implementation"},
+                },
+            )
+            assert created_result.is_error is False
+            created = created_result.structured_content
+            assert created is not None
+
+        async with Client(claude_server) as claude_client:
+            claimed_result = await claude_client.call_tool(
+                "claim_work",
+                {
+                    "work_id": "mcp-handoff-1",
+                    "expected_version": created["version"],
+                },
+            )
+            assert claimed_result.is_error is False
+            claimed = claimed_result.structured_content
+            assert claimed is not None
+
+            progress_result = await claude_client.call_tool(
+                "record_progress",
+                {
+                    "work_id": "mcp-handoff-1",
+                    "expected_version": claimed["version"],
+                    "state_patch": {
+                        "implementation": "complete",
+                        "tests": "passing",
+                    },
+                    "evidence_refs": ["test:pytest:mcp-1"],
+                },
+            )
+            assert progress_result.is_error is False
+            progressed = progress_result.structured_content
+            assert progressed is not None
+
+            handoff_result = await claude_client.call_tool(
+                "handoff_work",
+                {
+                    "work_id": "mcp-handoff-1",
+                    "expected_version": progressed["version"],
+                    "to_principal_type": "agent",
+                    "to_principal_subject": "codex",
+                    "reason": "Independent review required",
+                    "state_patch": {"phase": "review"},
+                },
+            )
+            assert handoff_result.is_error is False
+            handed_off = handoff_result.structured_content
+            assert handed_off is not None
+
+        async with Client(codex_server) as codex_client:
+            projection_result = await codex_client.call_tool(
+                "get_work",
+                {"work_id": "mcp-handoff-1"},
+            )
+            assert projection_result.is_error is False
+            projection = projection_result.structured_content
+            assert projection is not None
+
+            assert projection["consumer"] == {
+                "type": "agent",
+                "subject": "codex",
+            }
+            assert projection["work"]["version"] == handed_off["version"]
+            assert projection["work"]["owner"] == {
+                "type": "agent",
+                "subject": "codex",
+            }
+            assert projection["work"]["state"]["tests"] == "passing"
+            assert projection["work"]["state"]["phase"] == "review"
+
+            review_result = await codex_client.call_tool(
+                "record_progress",
+                {
+                    "work_id": "mcp-handoff-1",
+                    "expected_version": handed_off["version"],
+                    "state_patch": {"review": "passed"},
+                    "evidence_refs": ["review:codex:mcp-1"],
+                },
+            )
+            assert review_result.is_error is False
+
+        async with Client(claude_server) as stale_claude:
+            stale_result = await stale_claude.call_tool(
+                "record_progress",
+                {
+                    "work_id": "mcp-handoff-1",
+                    "expected_version": progressed["version"],
+                    "state_patch": {"late_write": True},
+                },
+            )
+            assert stale_result.is_error is True
+
+    asyncio.run(scenario())
