@@ -134,16 +134,14 @@ class ExecutionContextProvenance:
     def as_mapping(self) -> dict[str, Any]:
         self.verify()
         return {
-            "provenance_version": self.provenance_version,
             "work_id": self.work_id,
             "work_version": self.work_version,
             "work_snapshot_hash": self.work_snapshot_hash,
             "projection_hash": self.projection_hash,
             "proposal_hash": self.proposal_hash,
-            "proposer": {
-                "type": self.proposer_type,
-                "subject": self.proposer_subject,
-            },
+            "proposer_type": self.proposer_type,
+            "proposer_subject": self.proposer_subject,
+            "provenance_version": self.provenance_version,
         }
 
 
