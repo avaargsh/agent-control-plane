@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from agent_control_plane.cli_runtime_transports import KubectlDeploymentApi
 from agent_control_plane.context_overlay import SQLiteContextOverlayStore
 from agent_control_plane.context_transition import (
-    TransitionProposalBindingV2,
+    TransitionProposalBindingV3,
     authorize_context_bound_transition,
     build_execution_context_provenance,
     seal_context_bound_policy_input,
@@ -310,11 +310,15 @@ def main() -> int:
     observed_overlay = overlay_store.get(
         work_id=work.work_id,
     )
-    proposal = TransitionProposalBindingV2.seal(
+    observed_authority = work_store.get_authority_head(
+        work.work_id
+    )
+    proposal = TransitionProposalBindingV3.seal(
         proposal_id="kind-live-context-proposal-scale-20-30",
         proposer=agent,
         transition=transition,
         projection=projection,
+        authority_head=observed_authority,
         context_overlay=observed_overlay,
         created_at=started_at + timedelta(milliseconds=2),
     )
@@ -403,12 +407,19 @@ def main() -> int:
         work_id=work.work_id,
     )
     current_work = work_store.get(work.work_id)
+    current_authority = work_store.get_authority_head(
+        work.work_id
+    )
     if (
         current_work.version != proposal.work_version
         or current_work.snapshot_hash != proposal.work_snapshot_hash
     ):
         raise RuntimeError(
             "context-only append unexpectedly changed authoritative work"
+        )
+    if current_authority.authority_hash != proposal.authority_hash:
+        raise RuntimeError(
+            "context-only append unexpectedly changed authority head"
         )
     if execution_overlay.context_revision != proposal.context_revision + 1:
         raise RuntimeError(
@@ -604,6 +615,21 @@ def main() -> int:
                 "execution_context_provenance_version": (
                     committed_attempt.context_provenance[
                         "provenance_version"
+                    ]
+                ),
+                "authority_generation": (
+                    committed_attempt.context_provenance[
+                        "authority_generation"
+                    ]
+                ),
+                "authority_state_hash": (
+                    committed_attempt.context_provenance[
+                        "authority_state_hash"
+                    ]
+                ),
+                "authority_hash": (
+                    committed_attempt.context_provenance[
+                        "authority_hash"
                     ]
                 ),
                 "context_revision_observed": (
