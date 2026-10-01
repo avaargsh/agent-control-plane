@@ -458,6 +458,17 @@ class KubernetesDeploymentFenceProjector:
                 raise ProtocolViolation(
                     "cannot project an older fence epoch over a newer target"
                 )
+            if existing_epoch == record.lease.epoch:
+                if (
+                    annotations.get(_FENCE_LEASE_ID_ANNOTATION)
+                    != record.lease.lease_id
+                    or annotations.get(_FENCE_HOLDER_ANNOTATION)
+                    != _holder_value(record.lease.holder)
+                ):
+                    raise ProtocolViolation(
+                        "target fence epoch is already owned by another lease"
+                    )
+                return live
 
         projected = self.api.patch_deployment(
             namespace=namespace,
