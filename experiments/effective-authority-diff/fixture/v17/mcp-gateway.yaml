@@ -1,0 +1,45 @@
+apiVersion: security.example.io/v1
+kind: MCPGatewayConfig
+metadata:
+  name: refund-tools
+spec:
+  tools:
+    - name: refund.lookup
+      exposed: true
+      requiredScope: refund:read
+      connector: primary
+      operationId: lookupRefund
+    - name: refund.preview
+      exposed: true
+      requiredScope: refund:read
+      connector: semantic
+      operationId: previewRefund
+    - name: refund.execute
+      exposed: false
+      requiredScope: refund:write
+      connector: primary
+      operationId: createRefund
+    - name: refund.test_execute
+      exposed: true
+      requiredScope: refund:write
+      connector: test
+      operationId: createRefund
+    - name: refund.delegated_execute
+      exposed: false
+      requiredScope: refund:write
+      connector: delegated
+      operationId: createRefund
+      delegation:
+        allowSubAgent: false
+        allowedSubjects:
+          - support-user
+    - name: refund.recovery_execute
+      exposed: true
+      requiredScope: refund:write
+      connector: recovery
+      operationId: createRefund
+    - name: refund.high_value_execute
+      exposed: true
+      requiredScope: refund:write
+      connector: highvalue
+      operationId: createRefund
