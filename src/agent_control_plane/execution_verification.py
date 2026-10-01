@@ -33,6 +33,16 @@ class ConditionEvaluation:
     observed: Any
     passed: bool | None
 
+    def verify(self) -> None:
+        if not self.source or not self.expression or not self.comparator:
+            raise ProtocolViolation(
+                "condition evaluation source/expression/comparator required"
+            )
+        if self.passed not in (True, False, None):
+            raise ProtocolViolation(
+                "condition evaluation passed must be true, false or null"
+            )
+
 
 @dataclass(frozen=True)
 class OutcomeVerificationResult:
@@ -62,6 +72,10 @@ class OutcomeVerificationResult:
         safety: tuple[ConditionEvaluation, ...],
         reasons: tuple[str, ...],
     ) -> "OutcomeVerificationResult":
+        if not isinstance(status, VerificationStatus):
+            raise ProtocolViolation(
+                "verification status must be a VerificationStatus"
+            )
         if not transition_hash:
             raise ProtocolViolation(
                 "verification transition_hash is required"
@@ -75,15 +89,29 @@ class OutcomeVerificationResult:
                 "verification observation_hash is required"
             )
         _require_aware(checked_at, "checked_at")
+        desired = tuple(desired)
+        safety = tuple(safety)
+        reasons = tuple(reasons)
+        for item in desired + safety:
+            item.verify()
+        if status is VerificationStatus.SUCCEEDED:
+            if not desired or any(item.passed is not True for item in desired):
+                raise ProtocolViolation(
+                    "SUCCEEDED verification requires all desired conditions"
+                )
+            if any(item.passed is not True for item in safety):
+                raise ProtocolViolation(
+                    "SUCCEEDED verification requires all safety conditions"
+                )
         provisional = cls(
             status=status,
             transition_hash=transition_hash,
             outcome_contract_hash=outcome_contract_hash,
             observation_hash=observation_hash,
             checked_at=checked_at,
-            desired=tuple(desired),
-            safety=tuple(safety),
-            reasons=tuple(reasons),
+            desired=desired,
+            safety=safety,
+            reasons=reasons,
             verification_hash="",
         )
         return cls(
@@ -106,6 +134,19 @@ class OutcomeVerificationResult:
             raise ProtocolViolation(
                 "verification status must be a VerificationStatus"
             )
+        for item in self.desired + self.safety:
+            item.verify()
+        if self.status is VerificationStatus.SUCCEEDED:
+            if not self.desired or any(
+                item.passed is not True for item in self.desired
+            ):
+                raise ProtocolViolation(
+                    "SUCCEEDED verification requires all desired conditions"
+                )
+            if any(item.passed is not True for item in self.safety):
+                raise ProtocolViolation(
+                    "SUCCEEDED verification requires all safety conditions"
+                )
         if not all(
             (
                 self.transition_hash,
