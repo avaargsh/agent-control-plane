@@ -380,3 +380,71 @@ def test_tampered_approval_content_is_rejected_before_signature_check():
             authorization_expires_at=NOW + timedelta(minutes=5),
             now=NOW + timedelta(seconds=1),
         )
+
+
+def test_unknown_approval_signing_key_is_rejected():
+    fixture, policy_input, policy_decision = build_policy_chain()
+    _, signed, _ = sign_approval(
+        fixture,
+        policy_input,
+        policy_decision,
+    )
+    verifier = HMACApprovalVerifier(keys={})
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="signing key is not trusted",
+    ):
+        authorize_transition_from_approval(
+            transition=fixture["transition"],
+            action=fixture["action"],
+            policy_input=policy_input,
+            policy_decision=policy_decision,
+            signed_approval=signed,
+            approval_verifier=verifier,
+            authorization_expires_at=NOW + timedelta(minutes=5),
+            now=NOW + timedelta(seconds=1),
+        )
+
+
+def test_execution_principal_change_after_approval_is_rejected():
+    fixture, policy_input, policy_decision = build_policy_chain()
+    _, signed, verifier = sign_approval(
+        fixture,
+        policy_input,
+        policy_decision,
+    )
+    changed_input = TransitionPolicyInput.seal(
+        policy_version=policy_input.policy_version,
+        evidence=fixture["evidence"],
+        transition=fixture["transition"],
+        action=fixture["action"],
+        principal=Principal(
+            type="agent",
+            subject="different-agent",
+        ),
+        context=policy_input.context,
+    )
+    changed_decision = evaluate_policy(
+        policy_input=changed_input,
+        evaluator=DeploymentScalePolicy(
+            policy_version=policy_input.policy_version,
+            max_replicas=30,
+            allowed_namespaces=("prod",),
+        ),
+    )
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="does not match authorization inputs",
+    ):
+        authorize_transition_from_approval(
+            transition=fixture["transition"],
+            action=fixture["action"],
+            policy_input=changed_input,
+            policy_decision=changed_decision,
+            signed_approval=signed,
+            approval_verifier=verifier,
+            authorization_expires_at=NOW + timedelta(minutes=5),
+            now=NOW + timedelta(seconds=1),
+        )
