@@ -13,10 +13,7 @@ from agent_control_plane.state_transition_protocol import (
     ProtocolViolation,
 )
 from agent_control_plane.work_context import SQLiteWorkContextStore
-from context_testkit import (
-    PROPOSER,
-    build_context_bound_execution,
-)
+from context_testkit import build_context_bound_execution
 
 
 NOW = datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
