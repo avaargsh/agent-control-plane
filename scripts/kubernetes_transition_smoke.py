@@ -13,6 +13,11 @@ from agent_control_plane.execution_fencing import (
     SQLiteExecutionLeaseStore,
     acquire_fenced_execution_lease,
 )
+from agent_control_plane.execution_journal import (
+    ReconcileStatus,
+    SQLiteExecutionJournal,
+    reconcile_deployment_attempt,
+)
 from agent_control_plane.kubernetes_deployment_transition import (
     KubernetesDeploymentObserver,
     KubernetesDeploymentScaleProvider,
@@ -310,6 +315,20 @@ def main() -> int:
         lease=lease,
     )
 
+    journal_db = os.environ.get(
+        "EXECUTION_JOURNAL_DB",
+        ".artifacts/kubernetes-transition/execution-journal.db",
+    )
+    os.makedirs(os.path.dirname(journal_db) or ".", exist_ok=True)
+    execution_journal = SQLiteExecutionJournal(journal_db)
+    attempt = execution_journal.prepare(
+        transition=transition,
+        action=action,
+        authorization=authorization,
+        fence=fence,
+        prepared_at=datetime.now(timezone.utc),
+    )
+
     receipt = KubernetesDeploymentScaleProvider(
         api,
         lease_authority=lease_authority,
@@ -323,7 +342,33 @@ def main() -> int:
         active_lease=lease,
         caller=holder,
         now=datetime.now(timezone.utc),
+        operation_id=attempt.operation_id,
     )
+
+    # Deliberately skip the normal COMMITTED write to exercise the process-
+    # crash boundary. Reopen the durable journal and reconstruct the exact
+    # attempt from live Kubernetes state.
+    restarted_journal = SQLiteExecutionJournal(journal_db)
+    reconciled = reconcile_deployment_attempt(
+        api=api,
+        journal=restarted_journal,
+        attempt=restarted_journal.get(attempt.attempt_id),
+        transition=transition,
+        action=action,
+        namespace=NAMESPACE,
+        name=DEPLOYMENT,
+        reconciled_at=datetime.now(timezone.utc),
+    )
+    if reconciled.status is not ReconcileStatus.APPLIED:
+        raise RuntimeError(
+            "live execution attempt did not reconcile as APPLIED: "
+            f"{reconciled.status.value}: {reconciled.reason}"
+        )
+    committed_attempt = restarted_journal.get(attempt.attempt_id)
+    if committed_attempt is None or committed_attempt.result_hash is None:
+        raise RuntimeError(
+            "reconciled execution attempt was not durably committed"
+        )
 
     observer = KubernetesDeploymentObserver(
         api,
@@ -356,6 +401,10 @@ def main() -> int:
                 "authorization_hash": authorization.authorization_hash,
                 "lease_id": lease.lease_id,
                 "lease_epoch": lease.epoch,
+                "execution_attempt_id": attempt.attempt_id,
+                "operation_id": attempt.operation_id,
+                "reconcile_status": reconciled.status.value,
+                "reconciled_result_hash": committed_attempt.result_hash,
                 "evidence_before": evidence.manifest_hash,
                 "evidence_after": (
                     observation.evidence_bundle.manifest_hash
