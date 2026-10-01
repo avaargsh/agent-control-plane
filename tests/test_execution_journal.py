@@ -14,6 +14,7 @@ from agent_control_plane.kubernetes_deployment_transition import (
 from agent_control_plane.runtime_clients import (
     RuntimeMutationOwnershipUncertain,
 )
+from agent_control_plane.state_transition_protocol import ProtocolViolation
 from test_kubernetes_deployment_transition import (
     NOW,
     FakeDeploymentApi,
@@ -255,7 +256,7 @@ def test_open_attempt_must_reconcile_before_lease_rebinding(tmp_path):
     )
 
     with pytest.raises(
-        Exception,
+        ProtocolViolation,
         match="must be reconciled before lease rebinding",
     ):
         journal.prepare(
@@ -278,7 +279,7 @@ def test_committed_action_cannot_open_new_execution_attempt(tmp_path):
     )
 
     with pytest.raises(
-        Exception,
+        ProtocolViolation,
         match="already committed",
     ):
         _prepare(journal, fixture)
@@ -295,7 +296,7 @@ def test_unknown_action_blocks_new_execution_attempt(tmp_path):
     )
 
     with pytest.raises(
-        Exception,
+        ProtocolViolation,
         match="UNKNOWN prior attempt",
     ):
         _prepare(journal, fixture)
