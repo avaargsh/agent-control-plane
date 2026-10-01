@@ -235,3 +235,67 @@ def test_commit_is_idempotent_for_same_terminal_result(tmp_path):
     assert first.state is ExecutionAttemptState.COMMITTED
     assert second.state is ExecutionAttemptState.COMMITTED
     assert second.result_hash == first.result_hash
+
+
+def test_open_attempt_must_reconcile_before_lease_rebinding(tmp_path):
+    fixture = build_transition()
+    journal = SQLiteExecutionJournal(tmp_path / "execution.db")
+    _prepare(journal, fixture)
+
+    newer_fence = fixture["fence"].__class__(
+        resource_uid=fixture["fence"].resource_uid,
+        desired_generation=fixture["fence"].desired_generation,
+        lease_id="replacement-lease",
+        lease_holder=fixture["fence"].lease_holder,
+        lease_epoch=fixture["fence"].lease_epoch + 1,
+        transition_hash=fixture["fence"].transition_hash,
+        action_hash=fixture["fence"].action_hash,
+        authorization_hash=fixture["fence"].authorization_hash,
+        expires_at=fixture["fence"].expires_at,
+    )
+
+    with pytest.raises(
+        Exception,
+        match="must be reconciled before lease rebinding",
+    ):
+        journal.prepare(
+            transition=fixture["transition"],
+            action=fixture["action"],
+            authorization=fixture["authorization"],
+            fence=newer_fence,
+            prepared_at=NOW + timedelta(seconds=1),
+        )
+
+
+def test_committed_action_cannot_open_new_execution_attempt(tmp_path):
+    fixture = build_transition()
+    journal = SQLiteExecutionJournal(tmp_path / "execution.db")
+    attempt = _prepare(journal, fixture)
+    journal.commit(
+        attempt,
+        completed_at=NOW + timedelta(seconds=1),
+        result={"status": "APPLIED"},
+    )
+
+    with pytest.raises(
+        Exception,
+        match="already committed",
+    ):
+        _prepare(journal, fixture)
+
+
+def test_unknown_action_blocks_new_execution_attempt(tmp_path):
+    fixture = build_transition()
+    journal = SQLiteExecutionJournal(tmp_path / "execution.db")
+    attempt = _prepare(journal, fixture)
+    journal.mark_unknown(
+        attempt,
+        completed_at=NOW + timedelta(seconds=1),
+        result={"status": "AMBIGUOUS"},
+    )
+
+    with pytest.raises(
+        Exception,
+        match="UNKNOWN prior attempt",
+    ):
+        _prepare(journal, fixture)
