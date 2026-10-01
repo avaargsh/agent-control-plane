@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Mapping
@@ -141,7 +141,7 @@ class TransitionApproval:
 class ApprovalSigningKey:
     key_id: str
     approver: Principal
-    secret: bytes
+    secret: bytes = field(repr=False)
 
     def __post_init__(self) -> None:
         if not self.key_id:
@@ -215,6 +215,10 @@ class HMACApprovalVerifier:
         if key is None:
             raise ProtocolViolation(
                 "transition approval signing key is not trusted"
+            )
+        if key.key_id != signed.key_id:
+            raise ProtocolViolation(
+                "transition approval trusted key id mismatch"
             )
         if key.approver != approval.approver:
             raise ProtocolViolation(
