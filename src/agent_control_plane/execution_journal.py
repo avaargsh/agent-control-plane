@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
+from .context_transition import TransitionProposalBinding
 from .state_transition_protocol import (
     ActionIntent,
     AuthorizationBinding,
@@ -60,6 +61,93 @@ class ExecutionAttemptState(str, Enum):
 
 
 @dataclass(frozen=True)
+class ExecutionContextProvenance:
+    work_id: str
+    work_version: int
+    work_snapshot_hash: str
+    projection_hash: str
+    proposal_hash: str
+    proposer_type: str
+    proposer_subject: str
+    provenance_hash: str
+    provenance_version: str = "execution-context-provenance/v1"
+
+    @classmethod
+    def seal(
+        cls,
+        *,
+        proposal: TransitionProposalBinding,
+    ) -> "ExecutionContextProvenance":
+        proposal.verify()
+        provisional = cls(
+            work_id=proposal.work_id,
+            work_version=proposal.work_version,
+            work_snapshot_hash=proposal.work_snapshot_hash,
+            projection_hash=proposal.projection_hash,
+            proposal_hash=proposal.proposal_hash,
+            proposer_type=proposal.proposer.type,
+            proposer_subject=proposal.proposer.subject,
+            provenance_hash="",
+        )
+        return cls(
+            work_id=provisional.work_id,
+            work_version=provisional.work_version,
+            work_snapshot_hash=provisional.work_snapshot_hash,
+            projection_hash=provisional.projection_hash,
+            proposal_hash=provisional.proposal_hash,
+            proposer_type=provisional.proposer_type,
+            proposer_subject=provisional.proposer_subject,
+            provenance_hash=canonical_digest(
+                provisional,
+                exclude=("provenance_hash",),
+            ),
+        )
+
+    def verify(self) -> None:
+        if not self.work_id:
+            raise ProtocolViolation("execution provenance work_id is required")
+        if self.work_version <= 0:
+            raise ProtocolViolation(
+                "execution provenance work_version must be positive"
+            )
+        if not all(
+            (
+                self.work_snapshot_hash,
+                self.projection_hash,
+                self.proposal_hash,
+                self.proposer_type,
+                self.proposer_subject,
+            )
+        ):
+            raise ProtocolViolation(
+                "execution context provenance fields are required"
+            )
+        actual = canonical_digest(
+            self,
+            exclude=("provenance_hash",),
+        )
+        if actual != self.provenance_hash:
+            raise ProtocolViolation(
+                "execution context provenance digest mismatch"
+            )
+
+    def as_mapping(self) -> dict[str, Any]:
+        self.verify()
+        return {
+            "provenance_version": self.provenance_version,
+            "work_id": self.work_id,
+            "work_version": self.work_version,
+            "work_snapshot_hash": self.work_snapshot_hash,
+            "projection_hash": self.projection_hash,
+            "proposal_hash": self.proposal_hash,
+            "proposer": {
+                "type": self.proposer_type,
+                "subject": self.proposer_subject,
+            },
+        }
+
+
+@dataclass(frozen=True)
 class ExecutionAttempt:
     attempt_id: str
     operation_id: str
@@ -72,6 +160,8 @@ class ExecutionAttempt:
     expected_generation: int
     before_json: str
     desired_json: str
+    context_provenance_json: str | None
+    context_provenance_hash: str | None
     attempt_hash: str
     state: ExecutionAttemptState
     prepared_at: datetime
@@ -80,22 +170,40 @@ class ExecutionAttempt:
     result_json: str | None
 
     def verify(self) -> None:
-        actual = canonical_digest(
-            {
-                "attempt_id": self.attempt_id,
-                "operation_id": self.operation_id,
-                "resource_uid": self.resource_uid,
-                "transition_hash": self.transition_hash,
-                "action_hash": self.action_hash,
-                "authorization_hash": self.authorization_hash,
-                "lease_id": self.lease_id,
-                "lease_epoch": self.lease_epoch,
-                "expected_generation": self.expected_generation,
-                "before": json.loads(self.before_json),
-                "desired": json.loads(self.desired_json),
-                "prepared_at": self.prepared_at.isoformat(),
-            }
-        )
+        payload = {
+            "attempt_id": self.attempt_id,
+            "operation_id": self.operation_id,
+            "resource_uid": self.resource_uid,
+            "transition_hash": self.transition_hash,
+            "action_hash": self.action_hash,
+            "authorization_hash": self.authorization_hash,
+            "lease_id": self.lease_id,
+            "lease_epoch": self.lease_epoch,
+            "expected_generation": self.expected_generation,
+            "before": json.loads(self.before_json),
+            "desired": json.loads(self.desired_json),
+            "prepared_at": self.prepared_at.isoformat(),
+        }
+        if (
+            (self.context_provenance_json is None)
+            != (self.context_provenance_hash is None)
+        ):
+            raise ProtocolViolation(
+                "execution context provenance is only partially populated"
+            )
+        if self.context_provenance_json is not None:
+            provenance = json.loads(self.context_provenance_json)
+            if not isinstance(provenance, Mapping):
+                raise ProtocolViolation(
+                    "execution context provenance must be an object"
+                )
+            if canonical_digest(provenance) != self.context_provenance_hash:
+                raise ProtocolViolation(
+                    "execution context provenance digest mismatch"
+                )
+            payload["context_provenance"] = provenance
+
+        actual = canonical_digest(payload)
         if actual != self.attempt_hash:
             raise ProtocolViolation(
                 "execution attempt digest mismatch"
@@ -138,6 +246,17 @@ class ExecutionAttempt:
         value = json.loads(self.desired_json)
         if not isinstance(value, Mapping):
             raise ProtocolViolation("journal desired state must be an object")
+        return value
+
+    @property
+    def context_provenance(self) -> Mapping[str, Any] | None:
+        if self.context_provenance_json is None:
+            return None
+        value = json.loads(self.context_provenance_json)
+        if not isinstance(value, Mapping):
+            raise ProtocolViolation(
+                "journal context provenance must be an object"
+            )
         return value
 
     @property
@@ -188,6 +307,8 @@ class SQLiteExecutionJournal:
                     expected_generation INTEGER NOT NULL,
                     before_json TEXT NOT NULL,
                     desired_json TEXT NOT NULL,
+                    context_provenance_json TEXT,
+                    context_provenance_hash TEXT,
                     attempt_hash TEXT NOT NULL,
                     state TEXT NOT NULL,
                     prepared_at TEXT NOT NULL,
@@ -208,6 +329,22 @@ class SQLiteExecutionJournal:
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(execution_attempts)"
+                ).fetchall()
+            }
+            if "context_provenance_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_attempts "
+                    "ADD COLUMN context_provenance_json TEXT"
+                )
+            if "context_provenance_hash" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_attempts "
+                    "ADD COLUMN context_provenance_hash TEXT"
+                )
 
     @staticmethod
     def _attempt(row: sqlite3.Row) -> ExecutionAttempt:
@@ -228,6 +365,8 @@ class SQLiteExecutionJournal:
             expected_generation=int(row["expected_generation"]),
             before_json=row["before_json"],
             desired_json=row["desired_json"],
+            context_provenance_json=row["context_provenance_json"],
+            context_provenance_hash=row["context_provenance_hash"],
             attempt_hash=row["attempt_hash"],
             state=ExecutionAttemptState(row["state"]),
             prepared_at=prepared_at,
@@ -286,6 +425,7 @@ class SQLiteExecutionJournal:
         authorization: AuthorizationBinding,
         fence: ExecutionFence,
         prepared_at: datetime,
+        context_provenance: ExecutionContextProvenance | None = None,
     ) -> ExecutionAttempt:
         _require_aware(prepared_at, "prepared_at")
         transition.verify()
@@ -319,6 +459,23 @@ class SQLiteExecutionJournal:
 
         before_json = _json_snapshot(transition.before)
         desired_json = _json_snapshot(transition.desired)
+        context_provenance_json = None
+        context_provenance_hash = None
+        if context_provenance is not None:
+            context_provenance.verify()
+            context_provenance_json = _json_snapshot(
+                context_provenance.as_mapping()
+            )
+            context_provenance_hash = canonical_digest(
+                json.loads(context_provenance_json)
+            )
+            if (
+                context_provenance.provenance_hash
+                != context_provenance_hash
+            ):
+                raise ProtocolViolation(
+                    "execution context provenance hash mismatch"
+                )
 
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -341,6 +498,15 @@ class SQLiteExecutionJournal:
             if row is not None:
                 existing = self._attempt(row)
                 if existing.state is ExecutionAttemptState.PREPARED:
+                    if (
+                        existing.context_provenance_hash
+                        != context_provenance_hash
+                    ):
+                        connection.execute("ROLLBACK")
+                        raise ProtocolViolation(
+                            "open execution attempt context provenance "
+                            "does not match"
+                        )
                     if (
                         existing.lease_id != fence.lease_id
                         or existing.lease_epoch != fence.lease_epoch
@@ -365,22 +531,25 @@ class SQLiteExecutionJournal:
 
             attempt_id = uuid4().hex
             operation_id = uuid4().hex
-            attempt_hash = canonical_digest(
-                {
-                    "attempt_id": attempt_id,
-                    "operation_id": operation_id,
-                    "resource_uid": transition.subject.resource_uid,
-                    "transition_hash": transition.transition_hash,
-                    "action_hash": action.action_hash,
-                    "authorization_hash": authorization.authorization_hash,
-                    "lease_id": fence.lease_id,
-                    "lease_epoch": fence.lease_epoch,
-                    "expected_generation": transition.expected_generation,
-                    "before": json.loads(before_json),
-                    "desired": json.loads(desired_json),
-                    "prepared_at": prepared_at.isoformat(),
-                }
-            )
+            attempt_payload = {
+                "attempt_id": attempt_id,
+                "operation_id": operation_id,
+                "resource_uid": transition.subject.resource_uid,
+                "transition_hash": transition.transition_hash,
+                "action_hash": action.action_hash,
+                "authorization_hash": authorization.authorization_hash,
+                "lease_id": fence.lease_id,
+                "lease_epoch": fence.lease_epoch,
+                "expected_generation": transition.expected_generation,
+                "before": json.loads(before_json),
+                "desired": json.loads(desired_json),
+                "prepared_at": prepared_at.isoformat(),
+            }
+            if context_provenance_json is not None:
+                attempt_payload["context_provenance"] = json.loads(
+                    context_provenance_json
+                )
+            attempt_hash = canonical_digest(attempt_payload)
             connection.execute(
                 """
                 INSERT INTO execution_attempts (
@@ -395,6 +564,8 @@ class SQLiteExecutionJournal:
                     expected_generation,
                     before_json,
                     desired_json,
+                    context_provenance_json,
+                    context_provenance_hash,
                     attempt_hash,
                     state,
                     prepared_at,
@@ -402,7 +573,7 @@ class SQLiteExecutionJournal:
                     result_hash,
                     result_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
                 """,
                 (
                     attempt_id,
@@ -416,6 +587,8 @@ class SQLiteExecutionJournal:
                     transition.expected_generation,
                     before_json,
                     desired_json,
+                    context_provenance_json,
+                    context_provenance_hash,
                     attempt_hash,
                     ExecutionAttemptState.PREPARED.value,
                     prepared_at.isoformat(),
