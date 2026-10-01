@@ -70,6 +70,10 @@ class ExecutionAttestation:
         outcome_contract.verify()
         observation_evidence.verify()
         verification.verify()
+        if verification.status is not VerificationStatus.SUCCEEDED:
+            raise ProtocolViolation(
+                "execution attestation requires SUCCEEDED verification"
+            )
 
         attempt.verify()
         if attempt.state is not ExecutionAttemptState.COMMITTED:
@@ -180,6 +184,10 @@ class ExecutionAttestation:
         if not isinstance(self.verification_status, VerificationStatus):
             raise ProtocolViolation(
                 "attestation verification status is invalid"
+            )
+        if self.verification_status is not VerificationStatus.SUCCEEDED:
+            raise ProtocolViolation(
+                "execution attestation requires SUCCEEDED verification"
             )
         _require_aware(self.verified_at, "verified_at")
         actual = canonical_digest(
