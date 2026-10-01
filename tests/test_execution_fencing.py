@@ -366,3 +366,63 @@ def test_stale_controller_reading_after_takeover_is_rejected_before_patch(
 
     assert api.spec_patch_calls == 0
     assert api.deployment["spec"]["replicas"] == 20
+
+
+def test_target_fence_projection_is_idempotent_for_same_prepared_lease(tmp_path):
+    api = FencedFakeDeploymentApi()
+    store = SQLiteExecutionLeaseStore(tmp_path / "leases.db")
+    prepared = store.prepare(
+        resource_uid="uid-payment-api",
+        holder=Principal(type="controller", subject="controller-a"),
+        now=NOW,
+        ttl_seconds=300,
+    )
+    projector = KubernetesDeploymentFenceProjector(api)
+
+    first = projector.project(
+        record=prepared,
+        namespace="prod",
+        name="payment-api",
+    )
+    first_rv = first["metadata"]["resourceVersion"]
+    calls_after_first = api.patch_calls
+
+    second = projector.project(
+        record=prepared,
+        namespace="prod",
+        name="payment-api",
+    )
+
+    assert second["metadata"]["resourceVersion"] == first_rv
+    assert api.patch_calls == calls_after_first
+
+
+def test_equal_target_epoch_cannot_be_rebound_to_different_lease(tmp_path):
+    api = FencedFakeDeploymentApi()
+    store = SQLiteExecutionLeaseStore(tmp_path / "leases.db")
+    prepared = store.prepare(
+        resource_uid="uid-payment-api",
+        holder=Principal(type="controller", subject="controller-a"),
+        now=NOW,
+        ttl_seconds=300,
+    )
+    projector = KubernetesDeploymentFenceProjector(api)
+    projector.project(
+        record=prepared,
+        namespace="prod",
+        name="payment-api",
+    )
+
+    api.deployment["metadata"]["annotations"][
+        "agent-control-plane.openai.com/fence-lease-id"
+    ] = "forged-lease"
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="already owned by another lease",
+    ):
+        projector.project(
+            record=prepared,
+            namespace="prod",
+            name="payment-api",
+        )
