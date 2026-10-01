@@ -5,8 +5,10 @@ from datetime import datetime, timedelta
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
+from .authority_reservation import SQLiteAuthorityReservationStore
 from .context_transition import (
     ContextProposalBinding,
+    TransitionProposalBindingV3,
     validate_context_binding,
     validate_context_bound_execution,
 )
@@ -52,6 +54,9 @@ from .state_transition_protocol import (
 _ACTION_HASH_ANNOTATION = "agent-control-plane.openai.com/action-hash"
 _TRANSITION_HASH_ANNOTATION = "agent-control-plane.openai.com/transition-hash"
 _OPERATION_ID_ANNOTATION = "agent-control-plane.openai.com/operation-id"
+_AUTHORITY_RESERVATION_HASH_ANNOTATION = (
+    "agent-control-plane.openai.com/authority-reservation-hash"
+)
 
 
 class KubernetesDeploymentApi(Protocol):
@@ -103,6 +108,7 @@ class DeploymentScaleReceipt:
     after_resource_version: str
     before_generation: int
     after_generation: int
+    authority_reservation_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -454,8 +460,28 @@ class KubernetesDeploymentScaleProvider:
                 after_resource_version=resource_version,
                 before_generation=generation,
                 after_generation=generation,
+                authority_reservation_hash=(
+                    str(
+                        annotations.get(
+                            _AUTHORITY_RESERVATION_HASH_ANNOTATION
+                        )
+                    )
+                    if annotations.get(
+                        _AUTHORITY_RESERVATION_HASH_ANNOTATION
+                    )
+                    is not None
+                    else None
+                ),
             )
 
+        expected_before = transition.before.get("replicas")
+        if expected_before is not None and live_replicas != expected_before:
+            raise ProtocolViolation(
+                "live replicas do not match transition before state"
+            )
+
+        reservation_store = None
+        reservation = None
         if context_binding is None:
             validate_execution(
                 transition=transition,
@@ -470,6 +496,8 @@ class KubernetesDeploymentScaleProvider:
                 now=now,
             )
         else:
+            # First validate before acquiring the reservation so deterministic
+            # protocol failures do not leave a needless authority freeze.
             validate_context_bound_execution(
                 transition=transition,
                 evidence=evidence,
@@ -487,12 +515,49 @@ class KubernetesDeploymentScaleProvider:
                 signed_approval=context_binding.signed_approval,
                 approval_verifier=context_binding.approval_verifier,
             )
-
-        expected_before = transition.before.get("replicas")
-        if expected_before is not None and live_replicas != expected_before:
-            raise ProtocolViolation(
-                "live replicas do not match transition before state"
-            )
+            if isinstance(
+                context_binding.proposal,
+                TransitionProposalBindingV3,
+            ):
+                reservation_store = SQLiteAuthorityReservationStore(
+                    context_binding.store.path
+                )
+                reservation = reservation_store.acquire(
+                    reservation_id=uuid4().hex,
+                    work_id=context_binding.proposal.work_id,
+                    expected_authority_generation=(
+                        context_binding.proposal.authority_generation
+                    ),
+                    expected_authority_hash=(
+                        context_binding.proposal.authority_hash
+                    ),
+                    execution_lease=active_lease,
+                    now=now,
+                )
+                reservation_store.assert_active(
+                    reservation,
+                    execution_lease=active_lease,
+                    now=now,
+                )
+                # Revalidate under the reservation. From here until release,
+                # authoritative Work mutations are transactionally blocked.
+                validate_context_bound_execution(
+                    transition=transition,
+                    evidence=evidence,
+                    outcome_contract=outcome_contract,
+                    action=action,
+                    authorization=authorization,
+                    fence=fence,
+                    active_lease=active_lease,
+                    current_generation=generation,
+                    caller=caller,
+                    now=now,
+                    policy_input=context_binding.policy_input,
+                    proposal=context_binding.proposal,
+                    store=context_binding.store,
+                    signed_approval=context_binding.signed_approval,
+                    approval_verifier=context_binding.approval_verifier,
+                )
 
         operation_id = operation_id or uuid4().hex
         patch = {
@@ -502,6 +567,15 @@ class KubernetesDeploymentScaleProvider:
                     _ACTION_HASH_ANNOTATION: action.action_hash,
                     _TRANSITION_HASH_ANNOTATION: transition.transition_hash,
                     _OPERATION_ID_ANNOTATION: operation_id,
+                    **(
+                        {
+                            _AUTHORITY_RESERVATION_HASH_ANNOTATION: (
+                                reservation.reservation_hash
+                            ),
+                        }
+                        if reservation is not None
+                        else {}
+                    ),
                     **(
                         {
                             _FENCE_EPOCH_ANNOTATION: str(active_lease.epoch),
@@ -590,6 +664,30 @@ class KubernetesDeploymentScaleProvider:
             raise ProtocolViolation(
                 "kubernetes patch acknowledgement lost action ownership"
             )
+        if reservation is not None:
+            if (
+                changed_annotations.get(
+                    _AUTHORITY_RESERVATION_HASH_ANNOTATION
+                )
+                != reservation.reservation_hash
+            ):
+                raise ProtocolViolation(
+                    "kubernetes patch acknowledgement lost authority reservation"
+                )
+            if reservation_store is None:
+                raise ProtocolViolation(
+                    "authority reservation store is missing"
+                )
+            reservation_store.assert_active(
+                reservation,
+                execution_lease=active_lease,
+                now=now,
+            )
+            reservation_store.release(
+                reservation,
+                execution_lease=active_lease,
+                now=now,
+            )
 
         return DeploymentScaleReceipt(
             resource_ref=(
@@ -607,6 +705,11 @@ class KubernetesDeploymentScaleProvider:
             after_resource_version=after_resource_version,
             before_generation=generation,
             after_generation=after_generation,
+            authority_reservation_hash=(
+                reservation.reservation_hash
+                if reservation is not None
+                else None
+            ),
         )
 
 
