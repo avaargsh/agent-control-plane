@@ -197,11 +197,17 @@ Context = what a specific agent should see now
 ```
 
 The reference test proves that Claude can hand work to Codex while a stale
-pre-handoff write is rejected by version fencing.
+pre-handoff write is rejected by version fencing. The same contract is exposed
+through an optional principal-bound MCP v2 server.
 
 ```bash
-pytest tests/test_work_context.py -q
+pytest tests/test_work_context.py tests/test_context_mcp.py -q
 python examples/cross_agent_context_demo.py
+
+pip install -e '.[mcp]'
+export AGENT_CONTEXT_PRINCIPAL_TYPE=agent
+export AGENT_CONTEXT_PRINCIPAL_SUBJECT=claude-code
+agent-context-mcp
 ```
 
 See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).

@@ -16,10 +16,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+mcp = ["mcp>=2,<3"]
+dev = [
+  "pytest>=8.0",
+  "mcp>=2,<3",
+]
 
 [project.scripts]
 agent-control-plane = "agent_control_plane.cli:main"
+agent-context-mcp = "agent_control_plane.context_mcp:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
