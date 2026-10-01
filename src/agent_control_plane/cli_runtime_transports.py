@@ -108,3 +108,142 @@ class TemporalCliApi:
         if completed.returncode != 0:
             _raise_mutation_failure(completed)
         return {"terminated": True, "workflowId": workflow_id}
+
+
+class KubectlDeploymentApi:
+    """kubectl transport for apps/v1 Deployment scale transitions."""
+
+    def __init__(self, *, context: str) -> None:
+        self.context = context
+
+    def get_deployment(
+        self,
+        *,
+        namespace: str,
+        name: str,
+    ) -> Mapping[str, Any] | None:
+        command = [
+            "kubectl",
+            "--context",
+            self.context,
+            "-n",
+            namespace,
+            "get",
+            "deployment",
+            name,
+            "-o",
+            "json",
+        ]
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            if (
+                "NotFound" in completed.stderr
+                or "not found" in completed.stderr.lower()
+            ):
+                return None
+            completed.check_returncode()
+        return json.loads(completed.stdout)
+
+    def patch_deployment(
+        self,
+        *,
+        namespace: str,
+        name: str,
+        patch: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        completed = subprocess.run(
+            [
+                "kubectl",
+                "--context",
+                self.context,
+                "-n",
+                namespace,
+                "patch",
+                "deployment",
+                name,
+                "--type",
+                "merge",
+                "-p",
+                json.dumps(patch),
+                "-o",
+                "json",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            _raise_mutation_failure(completed)
+        return json.loads(completed.stdout)
+
+    def list_pods(
+        self,
+        *,
+        namespace: str,
+        selector: str,
+    ) -> list[Mapping[str, Any]]:
+        completed = subprocess.run(
+            [
+                "kubectl",
+                "--context",
+                self.context,
+                "-n",
+                namespace,
+                "get",
+                "pods",
+                "-l",
+                selector,
+                "-o",
+                "json",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(completed.stdout)
+        items = payload.get("items", [])
+        if not isinstance(items, list):
+            raise ValueError("kubectl pod list response must contain items")
+        return [
+            item
+            for item in items
+            if isinstance(item, Mapping)
+        ]
+
+    def list_events(
+        self,
+        *,
+        namespace: str,
+        involved_object_uid: str,
+    ) -> list[Mapping[str, Any]]:
+        completed = subprocess.run(
+            [
+                "kubectl",
+                "--context",
+                self.context,
+                "-n",
+                namespace,
+                "get",
+                "events",
+                "--field-selector",
+                f"involvedObject.uid={involved_object_uid}",
+                "-o",
+                "json",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(completed.stdout)
+        items = payload.get("items", [])
+        if not isinstance(items, list):
+            raise ValueError("kubectl event list response must contain items")
+        return [
+            item
+            for item in items
+            if isinstance(item, Mapping)
+        ]
