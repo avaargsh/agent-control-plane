@@ -72,11 +72,59 @@ class ExecutionAttempt:
     expected_generation: int
     before_json: str
     desired_json: str
+    attempt_hash: str
     state: ExecutionAttemptState
     prepared_at: datetime
     completed_at: datetime | None
     result_hash: str | None
     result_json: str | None
+
+    def verify(self) -> None:
+        actual = canonical_digest(
+            {
+                "attempt_id": self.attempt_id,
+                "operation_id": self.operation_id,
+                "resource_uid": self.resource_uid,
+                "transition_hash": self.transition_hash,
+                "action_hash": self.action_hash,
+                "authorization_hash": self.authorization_hash,
+                "lease_id": self.lease_id,
+                "lease_epoch": self.lease_epoch,
+                "expected_generation": self.expected_generation,
+                "before": json.loads(self.before_json),
+                "desired": json.loads(self.desired_json),
+                "prepared_at": self.prepared_at.isoformat(),
+            }
+        )
+        if actual != self.attempt_hash:
+            raise ProtocolViolation(
+                "execution attempt digest mismatch"
+            )
+
+        if self.state is ExecutionAttemptState.PREPARED:
+            if (
+                self.completed_at is not None
+                or self.result_hash is not None
+                or self.result_json is not None
+            ):
+                raise ProtocolViolation(
+                    "PREPARED execution attempt cannot carry terminal result"
+                )
+            return
+
+        if (
+            self.completed_at is None
+            or self.result_hash is None
+            or self.result_json is None
+        ):
+            raise ProtocolViolation(
+                "terminal execution attempt requires result evidence"
+            )
+        result_value = json.loads(self.result_json)
+        if canonical_digest(result_value) != self.result_hash:
+            raise ProtocolViolation(
+                "execution result digest mismatch"
+            )
 
     @property
     def before(self) -> Mapping[str, Any]:
@@ -140,6 +188,7 @@ class SQLiteExecutionJournal:
                     expected_generation INTEGER NOT NULL,
                     before_json TEXT NOT NULL,
                     desired_json TEXT NOT NULL,
+                    attempt_hash TEXT NOT NULL,
                     state TEXT NOT NULL,
                     prepared_at TEXT NOT NULL,
                     completed_at TEXT,
@@ -167,7 +216,7 @@ class SQLiteExecutionJournal:
             raise ProtocolViolation(
                 "journal prepared_at cannot be null"
             )
-        return ExecutionAttempt(
+        attempt = ExecutionAttempt(
             attempt_id=row["attempt_id"],
             operation_id=row["operation_id"],
             resource_uid=row["resource_uid"],
@@ -179,12 +228,15 @@ class SQLiteExecutionJournal:
             expected_generation=int(row["expected_generation"]),
             before_json=row["before_json"],
             desired_json=row["desired_json"],
+            attempt_hash=row["attempt_hash"],
             state=ExecutionAttemptState(row["state"]),
             prepared_at=prepared_at,
             completed_at=_parse_time(row["completed_at"]),
             result_hash=row["result_hash"],
             result_json=row["result_json"],
         )
+        attempt.verify()
+        return attempt
 
     def get(self, attempt_id: str) -> ExecutionAttempt | None:
         with self._connect() as connection:
@@ -313,6 +365,22 @@ class SQLiteExecutionJournal:
 
             attempt_id = uuid4().hex
             operation_id = uuid4().hex
+            attempt_hash = canonical_digest(
+                {
+                    "attempt_id": attempt_id,
+                    "operation_id": operation_id,
+                    "resource_uid": transition.subject.resource_uid,
+                    "transition_hash": transition.transition_hash,
+                    "action_hash": action.action_hash,
+                    "authorization_hash": authorization.authorization_hash,
+                    "lease_id": fence.lease_id,
+                    "lease_epoch": fence.lease_epoch,
+                    "expected_generation": transition.expected_generation,
+                    "before": json.loads(before_json),
+                    "desired": json.loads(desired_json),
+                    "prepared_at": prepared_at.isoformat(),
+                }
+            )
             connection.execute(
                 """
                 INSERT INTO execution_attempts (
@@ -327,13 +395,14 @@ class SQLiteExecutionJournal:
                     expected_generation,
                     before_json,
                     desired_json,
+                    attempt_hash,
                     state,
                     prepared_at,
                     completed_at,
                     result_hash,
                     result_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
                 """,
                 (
                     attempt_id,
@@ -347,6 +416,7 @@ class SQLiteExecutionJournal:
                     transition.expected_generation,
                     before_json,
                     desired_json,
+                    attempt_hash,
                     ExecutionAttemptState.PREPARED.value,
                     prepared_at.isoformat(),
                 ),
