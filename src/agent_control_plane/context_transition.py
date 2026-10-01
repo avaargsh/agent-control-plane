@@ -169,7 +169,7 @@ class TransitionProposalBinding:
             )
 
 
-def execution_context_provenance(
+def build_execution_context_provenance(
     proposal: TransitionProposalBinding,
 ) -> ExecutionContextProvenance:
     """Project a proposal binding into durable execution provenance."""
