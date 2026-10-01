@@ -506,10 +506,8 @@ def main() -> int:
             attestation = ExecutionAttestation.seal(
                 attestation_id="kind-live-execution-attestation-20-30",
                 attempt=committed_attempt,
-                outcome_contract_hash=outcome.contract_hash,
-                observation_evidence_hash=(
-                    observation.evidence_bundle.manifest_hash
-                ),
+                outcome_contract=outcome,
+                observation_evidence=observation.evidence_bundle,
                 verification_status=last.status.value,
                 verified_at=checked_at,
             )
