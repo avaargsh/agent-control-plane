@@ -9,10 +9,11 @@ This is **not** an Agent Governance Platform, runtime authorizer, identity syste
 ## Experiment shape
 
 - baseline branch: `exp/effective-authority-v17`
-- candidate branches: `exp/effective-authority-case-01` … `08`
+- blind candidate branches: `blind/effective-authority-01` … `08`
 - each candidate is reviewed independently against the baseline
 - candidates are intentionally numbered so their semantic class is not disclosed
 - ground truth is intentionally not committed before the blind review
+- closed/superseded experiment PRs are setup history and must not be used during review
 
 ## Allowed reviewer tools
 
