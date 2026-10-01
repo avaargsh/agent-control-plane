@@ -9,6 +9,7 @@ setup:
 
 quality-context:
 	$(PYTHON) -m ruff check \
+		src/agent_control_plane/authority_reservation.py \
 		src/agent_control_plane/work_context.py \
 		src/agent_control_plane/context_mcp.py \
 		src/agent_control_plane/context_overlay.py \
@@ -21,6 +22,7 @@ quality-context:
 		scripts/kubernetes_transition_smoke.py \
 		scripts/live_cross_agent_context_handoff.py \
 		tests/kubernetes_testkit.py \
+		tests/test_authority_reservation.py \
 		tests/context_testkit.py \
 		tests/test_work_context.py \
 		tests/test_context_mcp.py \

@@ -52,14 +52,18 @@ def _create_claimed_work(
     *,
     db_name: str,
     work_id: str,
+    api: Any = None,
 ) -> tuple[
     dict[str, Any],
     SQLiteWorkContextStore,
     SQLiteContextOverlayStore,
 ]:
-    fixture = build_transition()
+    fixture = build_transition(api=api)
     path = tmp_path / db_name
-    store = SQLiteWorkContextStore(path)
+    store = SQLiteWorkContextStore(
+        path,
+        clock=lambda: NOW + timedelta(seconds=5),
+    )
     overlay_store = SQLiteContextOverlayStore(path)
 
     created = store.create(
@@ -236,11 +240,12 @@ def build_context_bound_execution_v2(tmp_path):
     return fixture, store, overlay_store, proposal, context
 
 
-def build_context_bound_execution_v3(tmp_path):
+def build_context_bound_execution_v3(tmp_path, *, api: Any = None):
     fixture, store, overlay_store = _create_claimed_work(
         tmp_path,
         db_name="context-v3.db",
         work_id="scale-payment-api-v3",
+        api=api,
     )
     _append_initial_overlay(
         overlay_store=overlay_store,

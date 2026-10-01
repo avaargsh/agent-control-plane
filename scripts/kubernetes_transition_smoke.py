@@ -491,6 +491,10 @@ def main() -> int:
         operation_id=attempt.operation_id,
         context_binding=context_binding,
     )
+    if not receipt.authority_reservation_hash:
+        raise RuntimeError(
+            "proposal v3 live transition did not use authority reservation"
+        )
 
     # Deliberately skip the normal COMMITTED write to exercise the process-
     # crash boundary. Reopen the durable journal and reconstruct the exact
@@ -631,6 +635,9 @@ def main() -> int:
                     committed_attempt.context_provenance[
                         "authority_hash"
                     ]
+                ),
+                "authority_reservation_hash": (
+                    receipt.authority_reservation_hash
                 ),
                 "context_revision_observed": (
                     committed_attempt.context_provenance[
