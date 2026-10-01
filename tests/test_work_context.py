@@ -7,7 +7,9 @@ from agent_control_plane.state_transition_protocol import (
     ProtocolViolation,
 )
 from agent_control_plane.work_context import (
+    ContextProjection,
     SQLiteWorkContextStore,
+    WorkEvent,
     WorkStatus,
 )
 
@@ -277,17 +279,25 @@ def test_projection_rejects_broken_event_version_chain(tmp_path):
         consumer=CLAUDE,
     )
     broken = list(projection.recent_events)
-    object.__setattr__(
-        broken[-1],
-        "from_version",
-        broken[-1].from_version - 1,
+    last = broken[-1]
+    broken[-1] = WorkEvent.seal(
+        event_id=last.event_id,
+        work_id=last.work_id,
+        from_version=last.from_version - 1,
+        to_version=last.to_version - 1,
+        actor=last.actor,
+        operation=last.operation,
+        payload=last.payload,
+        prior_snapshot_hash=last.prior_snapshot_hash,
+        snapshot_hash=last.snapshot_hash,
+        created_at=last.created_at,
     )
 
     with pytest.raises(
         ProtocolViolation,
         match="work event versions are not contiguous",
     ):
-        projection.__class__.seal(
+        ContextProjection.seal(
             consumer=CLAUDE,
             work=progressed,
             recent_events=broken,
@@ -320,8 +330,6 @@ def test_projection_rejects_event_tail_not_bound_to_current_snapshot(
         match="tail does not reach current snapshot version",
     ):
         current_projection = events[:-1]
-        from agent_control_plane.work_context import ContextProjection
-
         ContextProjection.seal(
             consumer=CLAUDE,
             work=current,
