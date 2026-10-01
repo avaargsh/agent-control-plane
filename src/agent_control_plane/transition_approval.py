@@ -5,7 +5,7 @@ import hmac
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Mapping
+from typing import Mapping, Protocol
 
 from .policy_replay import (
     PolicyDecisionRecord,
@@ -186,6 +186,16 @@ class SignedTransitionApproval:
         )
 
 
+class TransitionApprovalVerifier(Protocol):
+    def verify(
+        self,
+        signed: SignedTransitionApproval,
+        *,
+        now: datetime,
+    ) -> TransitionApproval:
+        ...
+
+
 @dataclass(frozen=True)
 class HMACApprovalVerifier:
     """Reference approval authenticity verifier.
@@ -256,7 +266,7 @@ def authorize_transition_from_approval(
     policy_input: TransitionPolicyInput,
     policy_decision: PolicyDecisionRecord,
     signed_approval: SignedTransitionApproval,
-    approval_verifier: HMACApprovalVerifier,
+    approval_verifier: TransitionApprovalVerifier,
     authorization_expires_at: datetime,
     now: datetime,
 ) -> AuthorizationBinding:
