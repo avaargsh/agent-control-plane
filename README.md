@@ -212,6 +212,20 @@ agent-context-mcp
 
 See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).
 
+## Context-bound transition proposals
+
+The optional cross-agent context path can now seal the exact
+`ContextProjection` seen by a proposing agent into a
+`TransitionProposalBinding`. Its hash is included in the frozen policy input,
+so the existing signed approval chain transitively binds the work version,
+snapshot hash and projection hash.
+
+Freshness is checked before authorization and again before the provider
+execution boundary. Existing `StateTransition/v1` and
+`AuthorizationBinding/v1` hashes are unchanged.
+
+See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).
+
 ## Repository boundary in the broader AI infrastructure stack
 
 This repository is the **primary Agent Infra control-plane product**. Adjacent repositories have narrower roles:

@@ -240,13 +240,71 @@ concurrency and ownership semantics.
 
 The next implementation should remain small:
 
-1. bind a `ContextProjection.projection_hash` into transition proposal
-   provenance so execution can prove which work snapshot the proposer saw;
-2. add projection freshness checks before authorization/execution;
-3. run the opt-in Claude Code -> Codex live handoff on a configured developer
+1. run the opt-in Claude Code -> Codex live handoff on a configured developer
    workstation and retain its state/evidence artifact;
+2. decide whether work freshness needs a narrower authority-generation counter
+   than the current conservative whole-snapshot version;
+3. integrate the context-bound execution validator into the first real
+   provider path rather than relying on an external pre-execution call;
 4. keep semantic memory pluggable rather than making it authoritative.
 
+
+
+## Context-bound transition proposals
+
+A model proposal can now bind the exact authoritative work context it saw
+without changing `StateTransition/v1`.
+
+`TransitionProposalBinding` seals:
+
+- proposer principal
+- `transition_hash`
+- `work_id`
+- monotonic `work_version`
+- `work_snapshot_hash`
+- `projection_hash`
+
+The proposal hash is inserted under a reserved field in the frozen
+`TransitionPolicyInput`. Because a signed `TransitionApproval` already binds
+`policy_input_hash`, the existing approval and authorization chain transitively
+binds the exact ContextProjection.
+
+```text
+WorkSnapshot v17
+      |
+ContextProjection
+      |
+projection_hash
+      |
+TransitionProposalBinding
+      |
+proposal_hash
+      |
+TransitionPolicyInput.input_hash
+      |
+Signed TransitionApproval
+      |
+AuthorizationBinding
+```
+
+The context-bound path fails closed twice:
+
+1. before authorization, the current authoritative work version/hash/owner must
+   still match the proposal;
+2. immediately before provider execution, the signed approval, frozen policy
+   input, proposal binding, current work state, and the existing execution
+   fence are re-verified.
+
+This is intentionally conservative: any authoritative work mutation after the
+proposal invalidates the proposal. Later versions may distinguish
+authority-relevant work generation from non-authoritative notes, but v1 does
+not guess.
+
+Run:
+
+```bash
+pytest tests/test_context_transition.py -q
+```
 
 ## Concrete host examples
 
