@@ -254,3 +254,90 @@ def test_tampered_snapshot_fails_verification(tmp_path):
         match="work snapshot digest mismatch",
     ):
         snapshot.verify()
+
+
+def test_projection_rejects_broken_event_version_chain(tmp_path):
+    store = SQLiteWorkContextStore(tmp_path / "context.db")
+    created = _created(store)
+    claimed = store.claim(
+        work_id=created.work_id,
+        expected_version=created.version,
+        agent=CLAUDE,
+        claimed_at=NOW + timedelta(seconds=1),
+    )
+    progressed = store.record_progress(
+        work_id=created.work_id,
+        expected_version=claimed.version,
+        actor=CLAUDE,
+        updated_at=NOW + timedelta(seconds=2),
+        state_patch={"tests": "passing"},
+    )
+    projection = store.project(
+        work_id=created.work_id,
+        consumer=CLAUDE,
+    )
+    broken = list(projection.recent_events)
+    object.__setattr__(
+        broken[-1],
+        "from_version",
+        broken[-1].from_version - 1,
+    )
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="work event versions are not contiguous",
+    ):
+        projection.__class__.seal(
+            consumer=CLAUDE,
+            work=progressed,
+            recent_events=broken,
+        )
+
+
+def test_projection_rejects_event_tail_not_bound_to_current_snapshot(
+    tmp_path,
+):
+    store = SQLiteWorkContextStore(tmp_path / "context.db")
+    created = _created(store)
+    claimed = store.claim(
+        work_id=created.work_id,
+        expected_version=created.version,
+        agent=CLAUDE,
+        claimed_at=NOW + timedelta(seconds=1),
+    )
+    store.record_progress(
+        work_id=created.work_id,
+        expected_version=claimed.version,
+        actor=CLAUDE,
+        updated_at=NOW + timedelta(seconds=2),
+        state_patch={"tests": "passing"},
+    )
+    current = store.get(created.work_id)
+    events = store.changes_since(created.work_id, 0)
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="tail does not reach current snapshot version",
+    ):
+        current_projection = events[:-1]
+        from agent_control_plane.work_context import ContextProjection
+
+        ContextProjection.seal(
+            consumer=CLAUDE,
+            work=current,
+            recent_events=current_projection,
+        )
+
+
+def test_changes_since_rejects_version_newer_than_current(tmp_path):
+    store = SQLiteWorkContextStore(tmp_path / "context.db")
+    created = _created(store)
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="newer than current work version",
+    ):
+        store.changes_since(
+            created.work_id,
+            created.version + 1,
+        )
