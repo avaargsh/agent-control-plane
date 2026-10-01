@@ -180,6 +180,32 @@ and resourceVersion boundary.
 - AgentAuthorityEnvelope + Fleet/Agent authority inventory
 - deployment-time authority drift admission
 
+## Cross-agent work context proof
+
+The repository now includes a narrow cross-agent continuity proof: a versioned
+`WorkSnapshot`, append-only `WorkEvent` log, optimistic CAS, explicit ownership
+handoff, evidence references, and content-addressed `ContextProjection`.
+
+The important boundary is:
+
+```text
+agents share canonical work state, not prompt blobs
+
+Memory  = what may be worth remembering
+State   = what is true now
+Context = what a specific agent should see now
+```
+
+The reference test proves that Claude can hand work to Codex while a stale
+pre-handoff write is rejected by version fencing.
+
+```bash
+pytest tests/test_work_context.py -q
+python examples/cross_agent_context_demo.py
+```
+
+See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).
+
 ## Repository boundary in the broader AI infrastructure stack
 
 This repository is the **primary Agent Infra control-plane product**. Adjacent repositories have narrower roles:
