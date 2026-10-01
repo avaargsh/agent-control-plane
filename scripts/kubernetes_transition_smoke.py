@@ -402,16 +402,14 @@ def main() -> int:
     )
     os.makedirs(os.path.dirname(journal_db) or ".", exist_ok=True)
     execution_journal = SQLiteExecutionJournal(journal_db)
-    execution_context_provenance = execution_context_provenance(
-        proposal
-    )
+    durable_context = build_execution_context_provenance(proposal)
     attempt = execution_journal.prepare(
         transition=transition,
         action=action,
         authorization=authorization,
         fence=fence,
         prepared_at=datetime.now(timezone.utc),
-        context_provenance=execution_context_provenance,
+        context_provenance=durable_context,
     )
 
     context_binding = ContextBoundExecutionContext(
@@ -464,7 +462,7 @@ def main() -> int:
         )
     if (
         committed_attempt.context_provenance_hash
-        != execution_context_provenance.provenance_hash
+        != durable_context.provenance_hash
     ):
         raise RuntimeError(
             "reconciled execution attempt lost context provenance"
@@ -475,7 +473,7 @@ def main() -> int:
     if (
         not isinstance(terminal_context, dict)
         or terminal_context.get("provenance_hash")
-        != execution_context_provenance.provenance_hash
+        != durable_context.provenance_hash
     ):
         raise RuntimeError(
             "terminal execution receipt lost context provenance"
