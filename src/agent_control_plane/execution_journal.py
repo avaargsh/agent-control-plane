@@ -277,7 +277,6 @@ class SQLiteExecutionJournal:
                 WHERE resource_uid = ?
                   AND action_hash = ?
                   AND authorization_hash = ?
-                  AND state = ?
                 ORDER BY prepared_at DESC
                 LIMIT 1
                 """,
@@ -285,12 +284,32 @@ class SQLiteExecutionJournal:
                     transition.subject.resource_uid,
                     action.action_hash,
                     authorization.authorization_hash,
-                    ExecutionAttemptState.PREPARED.value,
                 ),
             ).fetchone()
             if row is not None:
-                connection.execute("COMMIT")
-                return self._attempt(row)
+                existing = self._attempt(row)
+                if existing.state is ExecutionAttemptState.PREPARED:
+                    if (
+                        existing.lease_id != fence.lease_id
+                        or existing.lease_epoch != fence.lease_epoch
+                    ):
+                        connection.execute("ROLLBACK")
+                        raise ProtocolViolation(
+                            "open execution attempt must be reconciled "
+                            "before lease rebinding"
+                        )
+                    connection.execute("COMMIT")
+                    return existing
+                if existing.state is ExecutionAttemptState.COMMITTED:
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "execution action is already committed"
+                    )
+                if existing.state is ExecutionAttemptState.UNKNOWN:
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "execution action has UNKNOWN prior attempt"
+                    )
 
             attempt_id = uuid4().hex
             operation_id = uuid4().hex
