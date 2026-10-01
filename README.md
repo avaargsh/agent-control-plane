@@ -1,8 +1,24 @@
 # Agent Control Plane
 
-A thin, provider-neutral control plane for production Agent systems.
+An evidence-first control plane for safely authorizing, executing, verifying,
+recovering, and replaying AI-initiated state transitions.
 
-It deliberately does **not** become another Agent framework or durable runtime. Instead, it manages desired state, bindings, policy/approval, evidence, release decisions and replay while execution stays in specialized runtimes such as Temporal and Kubernetes sandboxes.
+The core authority object is a **StateTransition**, not a tool call or provider
+command:
+
+```text
+LLM proposes.
+Policy decides.
+Control Plane authorizes.
+Provider executes.
+Evidence proves.
+Verifier closes the loop.
+```
+
+It deliberately does **not** become another Agent framework or durable runtime.
+Instead, it owns state-transition authorization, desired state, bindings,
+policy/approval, evidence, release decisions and replay while execution stays
+in specialized runtimes such as Temporal and Kubernetes sandboxes.
 
 ## Why this exists
 
