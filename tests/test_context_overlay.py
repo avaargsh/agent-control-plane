@@ -205,3 +205,33 @@ def test_context_overlay_requires_existing_work(tmp_path):
             payload={"message": "orphan"},
             created_at=NOW,
         )
+
+
+@pytest.mark.parametrize(
+    "entry_type",
+    (
+        "approval",
+        "evidence",
+        "desired_state",
+        "authorization",
+        "policy_decision",
+    ),
+)
+def test_context_overlay_rejects_authority_shaped_entry_types(
+    tmp_path,
+    entry_type,
+):
+    _, overlay, authoritative = _stores(tmp_path)
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="not non-authoritative",
+    ):
+        overlay.append(
+            work_id=authoritative.work_id,
+            expected_revision=0,
+            actor=CLAUDE,
+            entry_type=entry_type,
+            payload={"value": "must use authoritative work APIs"},
+            created_at=NOW + timedelta(seconds=2),
+        )
