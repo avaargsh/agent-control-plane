@@ -8,6 +8,11 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from agent_control_plane.cli_runtime_transports import KubectlDeploymentApi
+from agent_control_plane.execution_fencing import (
+    KubernetesDeploymentFenceProjector,
+    SQLiteExecutionLeaseStore,
+    acquire_fenced_execution_lease,
+)
 from agent_control_plane.kubernetes_deployment_transition import (
     KubernetesDeploymentObserver,
     KubernetesDeploymentScaleProvider,
@@ -26,7 +31,6 @@ from agent_control_plane.state_transition_protocol import (
     EvidenceBundle,
     EvidenceItem,
     ExecutionFence,
-    ExecutionLease,
     OutcomeCondition,
     OutcomeContract,
     Principal,
@@ -283,13 +287,21 @@ def main() -> int:
         type="controller",
         subject="ci/kind-controller",
     )
-    lease = ExecutionLease(
-        lease_id="kind-live-lease-001",
+    lease_db = os.environ.get(
+        "EXECUTION_LEASE_DB",
+        ".artifacts/kubernetes-transition/execution-leases.db",
+    )
+    os.makedirs(os.path.dirname(lease_db) or ".", exist_ok=True)
+    lease_authority = SQLiteExecutionLeaseStore(lease_db)
+    lease = acquire_fenced_execution_lease(
+        authority=lease_authority,
+        projector=KubernetesDeploymentFenceProjector(api),
         resource_uid=resource.resource_uid,
+        namespace=NAMESPACE,
+        name=DEPLOYMENT,
         holder=holder,
-        epoch=1,
-        acquired_at=started_at,
-        expires_at=started_at + timedelta(minutes=5),
+        now=started_at,
+        ttl_seconds=300,
     )
     fence = ExecutionFence.bind(
         transition=transition,
@@ -298,7 +310,10 @@ def main() -> int:
         lease=lease,
     )
 
-    receipt = KubernetesDeploymentScaleProvider(api).execute(
+    receipt = KubernetesDeploymentScaleProvider(
+        api,
+        lease_authority=lease_authority,
+    ).execute(
         transition=transition,
         evidence=evidence,
         outcome_contract=outcome,
@@ -339,6 +354,8 @@ def main() -> int:
                 "policy_input_hash": policy_input.input_hash,
                 "policy_decision_hash": policy_decision.decision_hash,
                 "authorization_hash": authorization.authorization_hash,
+                "lease_id": lease.lease_id,
+                "lease_epoch": lease.epoch,
                 "evidence_before": evidence.manifest_hash,
                 "evidence_after": (
                     observation.evidence_bundle.manifest_hash
