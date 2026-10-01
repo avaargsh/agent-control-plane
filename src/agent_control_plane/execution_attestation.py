@@ -51,7 +51,7 @@ class ExecutionAttestation:
     verification_hash: str
     verified_at: datetime
     attestation_hash: str
-    attestation_version: str = "execution-attestation/v1"
+    attestation_version: str = "execution-attestation/v2"
 
     @classmethod
     def seal(
