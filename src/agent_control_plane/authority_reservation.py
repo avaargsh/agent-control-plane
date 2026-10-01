@@ -29,6 +29,7 @@ class AuthorityReservationState(str, Enum):
     ACTIVE = "ACTIVE"
     RELEASED = "RELEASED"
     EXPIRED = "EXPIRED"
+    SUPERSEDED = "SUPERSEDED"
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class AuthorityReservation:
     work_id: str
     authority_generation: int
     authority_hash: str
+    resource_uid: str
     lease_id: str
     lease_epoch: int
     holder: Principal
@@ -73,6 +75,7 @@ class AuthorityReservation:
             work_id=work_id,
             authority_generation=authority_generation,
             authority_hash=authority_hash,
+            resource_uid=execution_lease.resource_uid,
             lease_id=execution_lease.lease_id,
             lease_epoch=execution_lease.epoch,
             holder=execution_lease.holder,
@@ -86,6 +89,7 @@ class AuthorityReservation:
             work_id=provisional.work_id,
             authority_generation=provisional.authority_generation,
             authority_hash=provisional.authority_hash,
+            resource_uid=provisional.resource_uid,
             lease_id=provisional.lease_id,
             lease_epoch=provisional.lease_epoch,
             holder=provisional.holder,
@@ -103,7 +107,11 @@ class AuthorityReservation:
             raise ProtocolViolation(
                 "authority reservation id/work/hash are required"
             )
-        if self.authority_generation <= 0 or self.lease_epoch <= 0:
+        if (
+            self.authority_generation <= 0
+            or self.lease_epoch <= 0
+            or not self.resource_uid
+        ):
             raise ProtocolViolation(
                 "authority reservation generation/lease epoch must be positive"
             )
@@ -138,6 +146,10 @@ class AuthorityReservation:
     ) -> None:
         self.verify()
         execution_lease.assert_active(now)
+        if execution_lease.resource_uid != self.resource_uid:
+            raise ProtocolViolation(
+                "authority reservation execution resource mismatch"
+            )
         if execution_lease.lease_id != self.lease_id:
             raise ProtocolViolation(
                 "authority reservation execution lease id mismatch"
@@ -167,6 +179,7 @@ def initialize_authority_reservations(
             authority_generation INTEGER NOT NULL
                 CHECK (authority_generation > 0),
             authority_hash TEXT NOT NULL,
+            resource_uid TEXT NOT NULL,
             lease_id TEXT NOT NULL,
             lease_epoch INTEGER NOT NULL CHECK (lease_epoch > 0),
             holder_type TEXT NOT NULL,
@@ -279,6 +292,7 @@ class SQLiteAuthorityReservationStore:
             work_id=row["work_id"],
             authority_generation=int(row["authority_generation"]),
             authority_hash=row["authority_hash"],
+            resource_uid=row["resource_uid"],
             lease_id=row["lease_id"],
             lease_epoch=int(row["lease_epoch"]),
             holder=Principal(
@@ -362,20 +376,39 @@ class SQLiteAuthorityReservationStore:
                     "authority reservation hash is stale"
                 )
 
-            active = connection.execute(
+            active_row = connection.execute(
                 """
-                SELECT reservation_id
+                SELECT *
                 FROM work_authority_reservations
                 WHERE work_id = ? AND state = ?
+                ORDER BY acquired_at DESC
                 LIMIT 1
                 """,
                 (work_id, AuthorityReservationState.ACTIVE.value),
             ).fetchone()
-            if active is not None:
-                connection.execute("ROLLBACK")
-                raise ProtocolViolation(
-                    "authority is already reserved by another execution"
-                )
+            if active_row is not None:
+                active = self._record(active_row)
+                if (
+                    active.resource_uid == execution_lease.resource_uid
+                    and active.lease_epoch < execution_lease.epoch
+                ):
+                    connection.execute(
+                        """
+                        UPDATE work_authority_reservations
+                        SET state = ?
+                        WHERE reservation_id = ? AND state = ?
+                        """,
+                        (
+                            AuthorityReservationState.SUPERSEDED.value,
+                            active.reservation_id,
+                            AuthorityReservationState.ACTIVE.value,
+                        ),
+                    )
+                else:
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "authority is already reserved by another execution"
+                    )
 
             reservation = AuthorityReservation.seal(
                 reservation_id=reservation_id,
@@ -393,6 +426,7 @@ class SQLiteAuthorityReservationStore:
                     work_id,
                     authority_generation,
                     authority_hash,
+                    resource_uid,
                     lease_id,
                     lease_epoch,
                     holder_type,
@@ -402,13 +436,14 @@ class SQLiteAuthorityReservationStore:
                     state,
                     reservation_hash
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     reservation.reservation_id,
                     reservation.work_id,
                     reservation.authority_generation,
                     reservation.authority_hash,
+                    reservation.resource_uid,
                     reservation.lease_id,
                     reservation.lease_epoch,
                     reservation.holder.type,
