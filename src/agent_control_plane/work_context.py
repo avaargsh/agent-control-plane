@@ -673,21 +673,29 @@ class SQLiteWorkContextStore:
             ) from exc
         return snapshot
 
-    def get(self, work_id: str) -> WorkSnapshot:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT *
-                FROM work_snapshots
-                WHERE work_id = ?
-                """,
-                (work_id,),
-            ).fetchone()
+    @classmethod
+    def _read_snapshot(
+        cls,
+        connection: sqlite3.Connection,
+        work_id: str,
+    ) -> WorkSnapshot:
+        row = connection.execute(
+            """
+            SELECT *
+            FROM work_snapshots
+            WHERE work_id = ?
+            """,
+            (work_id,),
+        ).fetchone()
         if row is None:
             raise ProtocolViolation(
                 f"work item does not exist: {work_id}"
             )
-        return self._snapshot_from_row(row)
+        return cls._snapshot_from_row(row)
+
+    def get(self, work_id: str) -> WorkSnapshot:
+        with self._connect() as connection:
+            return self._read_snapshot(connection, work_id)
 
     def changes_since(
         self,
@@ -697,13 +705,14 @@ class SQLiteWorkContextStore:
         if version < 0:
             raise ProtocolViolation("version cannot be negative")
 
-        work = self.get(work_id)
-        if version > work.version:
-            raise ProtocolViolation(
-                "requested version is newer than current work version"
-            )
-
         with self._connect() as connection:
+            connection.execute("BEGIN")
+            work = self._read_snapshot(connection, work_id)
+            if version > work.version:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "requested version is newer than current work version"
+                )
             rows = connection.execute(
                 """
                 SELECT *
@@ -713,6 +722,7 @@ class SQLiteWorkContextStore:
                 """,
                 (work_id, version),
             ).fetchall()
+            connection.execute("COMMIT")
 
         events = tuple(self._event_from_row(row) for row in rows)
         if version == work.version:
@@ -1031,8 +1041,9 @@ class SQLiteWorkContextStore:
             raise ProtocolViolation(
                 "recent_event_limit must be positive"
             )
-        work = self.get(work_id)
         with self._connect() as connection:
+            connection.execute("BEGIN")
+            work = self._read_snapshot(connection, work_id)
             rows = connection.execute(
                 """
                 SELECT *
@@ -1043,6 +1054,7 @@ class SQLiteWorkContextStore:
                 """,
                 (work_id, recent_event_limit),
             ).fetchall()
+            connection.execute("COMMIT")
         events = tuple(
             reversed(
                 tuple(self._event_from_row(row) for row in rows)
