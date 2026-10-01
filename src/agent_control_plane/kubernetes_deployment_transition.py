@@ -6,10 +6,21 @@ from enum import Enum
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
+from .context_transition import (
+    TransitionProposalBinding,
+    validate_context_binding,
+    validate_context_bound_execution,
+)
+from .policy_replay import TransitionPolicyInput
 from .runtime_clients import (
     RuntimeMutationOwnershipUncertain,
     RuntimeMutationUncertain,
 )
+from .transition_approval import (
+    HMACApprovalVerifier,
+    SignedTransitionApproval,
+)
+from .work_context import SQLiteWorkContextStore
 from .execution_fencing import (
     ExecutionLeaseAuthority,
     _FENCE_EPOCH_ANNOTATION,
@@ -88,6 +99,15 @@ class DeploymentScaleReceipt:
     after_resource_version: str
     before_generation: int
     after_generation: int
+
+
+@dataclass(frozen=True)
+class ContextBoundExecutionContext:
+    policy_input: TransitionPolicyInput
+    proposal: TransitionProposalBinding
+    store: SQLiteWorkContextStore
+    signed_approval: SignedTransitionApproval
+    approval_verifier: HMACApprovalVerifier
 
 
 @dataclass(frozen=True)
@@ -289,6 +309,64 @@ class KubernetesDeploymentScaleProvider:
         now: datetime,
         operation_id: str | None = None,
     ) -> DeploymentScaleReceipt:
+        return self._execute(
+            transition=transition,
+            evidence=evidence,
+            outcome_contract=outcome_contract,
+            action=action,
+            authorization=authorization,
+            fence=fence,
+            active_lease=active_lease,
+            caller=caller,
+            now=now,
+            operation_id=operation_id,
+            context_binding=None,
+        )
+
+    def execute_context_bound(
+        self,
+        *,
+        transition: StateTransition,
+        evidence: EvidenceBundle,
+        outcome_contract: OutcomeContract,
+        action: ActionIntent,
+        authorization: AuthorizationBinding,
+        fence: ExecutionFence,
+        active_lease: ExecutionLease,
+        caller: Principal,
+        now: datetime,
+        context_binding: ContextBoundExecutionContext,
+        operation_id: str | None = None,
+    ) -> DeploymentScaleReceipt:
+        return self._execute(
+            transition=transition,
+            evidence=evidence,
+            outcome_contract=outcome_contract,
+            action=action,
+            authorization=authorization,
+            fence=fence,
+            active_lease=active_lease,
+            caller=caller,
+            now=now,
+            operation_id=operation_id,
+            context_binding=context_binding,
+        )
+
+    def _execute(
+        self,
+        *,
+        transition: StateTransition,
+        evidence: EvidenceBundle,
+        outcome_contract: OutcomeContract,
+        action: ActionIntent,
+        authorization: AuthorizationBinding,
+        fence: ExecutionFence,
+        active_lease: ExecutionLease,
+        caller: Principal,
+        now: datetime,
+        operation_id: str | None,
+        context_binding: ContextBoundExecutionContext | None,
+    ) -> DeploymentScaleReceipt:
         if transition.subject.provider != "kubernetes":
             raise ProtocolViolation("deployment provider requires kubernetes subject")
         if transition.subject.kind != "Deployment":
@@ -353,6 +431,21 @@ class KubernetesDeploymentScaleProvider:
                 caller=caller,
                 now=now,
             )
+            if context_binding is not None:
+                validate_context_binding(
+                    transition=transition,
+                    evidence=evidence,
+                    action=action,
+                    authorization=authorization,
+                    now=now,
+                    policy_input=context_binding.policy_input,
+                    proposal=context_binding.proposal,
+                    store=context_binding.store,
+                    signed_approval=context_binding.signed_approval,
+                    approval_verifier=(
+                        context_binding.approval_verifier
+                    ),
+                )
             observed_operation_id = str(
                 annotations.get(_OPERATION_ID_ANNOTATION, action.action_id)
             )
@@ -389,18 +482,37 @@ class KubernetesDeploymentScaleProvider:
                 after_generation=generation,
             )
 
-        validate_execution(
-            transition=transition,
-            evidence=evidence,
-            outcome_contract=outcome_contract,
-            action=action,
-            authorization=authorization,
-            fence=fence,
-            active_lease=active_lease,
-            current_generation=generation,
-            caller=caller,
-            now=now,
-        )
+        if context_binding is None:
+            validate_execution(
+                transition=transition,
+                evidence=evidence,
+                outcome_contract=outcome_contract,
+                action=action,
+                authorization=authorization,
+                fence=fence,
+                active_lease=active_lease,
+                current_generation=generation,
+                caller=caller,
+                now=now,
+            )
+        else:
+            validate_context_bound_execution(
+                transition=transition,
+                evidence=evidence,
+                outcome_contract=outcome_contract,
+                action=action,
+                authorization=authorization,
+                fence=fence,
+                active_lease=active_lease,
+                current_generation=generation,
+                caller=caller,
+                now=now,
+                policy_input=context_binding.policy_input,
+                proposal=context_binding.proposal,
+                store=context_binding.store,
+                signed_approval=context_binding.signed_approval,
+                approval_verifier=context_binding.approval_verifier,
+            )
 
         expected_before = transition.before.get("replicas")
         if expected_before is not None and live_replicas != expected_before:
