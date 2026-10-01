@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import timedelta
 
 import pytest
@@ -300,3 +301,56 @@ def test_unknown_action_blocks_new_execution_attempt(tmp_path):
         match="UNKNOWN prior attempt",
     ):
         _prepare(journal, fixture)
+
+
+def test_tampered_prepared_attempt_is_rejected_by_digest(tmp_path):
+    path = tmp_path / "execution.db"
+    fixture = build_transition()
+    journal = SQLiteExecutionJournal(path)
+    attempt = _prepare(journal, fixture)
+
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            UPDATE execution_attempts
+            SET operation_id = ?
+            WHERE attempt_id = ?
+            """,
+            ("tampered-operation", attempt.attempt_id),
+        )
+        connection.commit()
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="execution attempt digest mismatch",
+    ):
+        journal.get(attempt.attempt_id)
+
+
+def test_tampered_terminal_result_is_rejected_by_digest(tmp_path):
+    path = tmp_path / "execution.db"
+    fixture = build_transition()
+    journal = SQLiteExecutionJournal(path)
+    attempt = _prepare(journal, fixture)
+    journal.commit(
+        attempt,
+        completed_at=NOW + timedelta(seconds=1),
+        result={"status": "APPLIED", "replicas": 30},
+    )
+
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            UPDATE execution_attempts
+            SET result_json = ?
+            WHERE attempt_id = ?
+            """,
+            ('{"replicas":40,"status":"APPLIED"}', attempt.attempt_id),
+        )
+        connection.commit()
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="execution result digest mismatch",
+    ):
+        journal.get(attempt.attempt_id)
