@@ -15,7 +15,7 @@ spec:
       connector: semantic
       operationId: previewRefund
     - name: refund.execute
-      exposed: false
+      exposed: true
       requiredScope: refund:write
       connector: primary
       operationId: createRefund
