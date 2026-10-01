@@ -96,6 +96,38 @@ make smoke
 
 Normal unit CI does not imply that a live Kubernetes cluster or Temporal server was exercised.
 
+### Live StateTransition proof
+
+The repository also carries a dedicated kind smoke that exercises the
+state-transition protocol against a real Kubernetes API server rather than a
+fake transport:
+
+```text
+live Deployment replicas=20
+    -> freeze live EvidenceBundle
+    -> StateTransition 20 -> 30
+    -> deterministic PolicyDecision
+    -> AuthorizationBinding
+    -> ExecutionFence
+    -> live generation/resourceVersion validation
+    -> kubectl merge PATCH with resourceVersion precondition
+    -> fresh Deployment + Pods + Events observation
+    -> OutcomeContract: readyReplicas == 30
+    -> SUCCEEDED
+```
+
+The CI workflow is `.github/workflows/kubernetes-transition-smoke.yml`. For a
+local kind cluster named `agent-transition`:
+
+```bash
+export KUBE_CONTEXT=kind-agent-transition
+make kind-transition-smoke
+```
+
+The proof emits a JSON artifact containing the transition, action, policy,
+authorization and before/after evidence hashes plus the Kubernetes generation
+and resourceVersion boundary.
+
 ## Architecture
 
 ```text
@@ -317,6 +349,11 @@ Implemented:
 - FrozenEvidence approval/resume path
 - Fleet/Agent AuthorityEnvelope inventory and fail-closed drift admission
 - replay-verifiable ReleaseEvidence
+- evidence-bound StateTransition / Authorization / ExecutionFence protocol
+- Kubernetes Deployment scale provider with generation/resourceVersion fencing
+- independent Deployment + Pods + Events observation and OutcomeContract verification
+- recovery modeled as a newly authorized StateTransition
+- deterministic Policy Replay contract
 - Kubernetes sandbox runtime client
 - Temporal workflow runtime client
 - kubectl and Temporal CLI transports

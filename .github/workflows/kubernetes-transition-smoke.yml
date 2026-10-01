@@ -1,0 +1,76 @@
+name: kubernetes-transition-smoke
+
+on:
+  pull_request:
+    paths:
+      - "src/agent_control_plane/state_transition_protocol.py"
+      - "src/agent_control_plane/kubernetes_deployment_transition.py"
+      - "src/agent_control_plane/policy_replay.py"
+      - "src/agent_control_plane/cli_runtime_transports.py"
+      - "scripts/kubernetes_transition_smoke.py"
+      - ".github/workflows/kubernetes-transition-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/agent_control_plane/state_transition_protocol.py"
+      - "src/agent_control_plane/kubernetes_deployment_transition.py"
+      - "src/agent_control_plane/policy_replay.py"
+      - "src/agent_control_plane/cli_runtime_transports.py"
+      - "scripts/kubernetes_transition_smoke.py"
+      - ".github/workflows/kubernetes-transition-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-transition:
+    name: kind / Deployment 20 -> 30
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+
+      - uses: azure/setup-kubectl@v4
+
+      - name: Install kind
+        run: |
+          curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+          kind version
+
+      - name: Create kind cluster
+        run: kind create cluster --name agent-transition --wait 120s
+
+      - name: Execute evidence-bound live transition
+        env:
+          KUBE_CONTEXT: kind-agent-transition
+        run: |
+          mkdir -p .artifacts/kubernetes-transition
+          python scripts/kubernetes_transition_smoke.py             | tee .artifacts/kubernetes-transition/summary.json
+
+      - name: Upload transition proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-transition-proof
+          path: .artifacts/kubernetes-transition/
+
+      - name: Dump cluster state on failure
+        if: failure()
+        run: |
+          kubectl --context kind-agent-transition get nodes -o wide || true
+          kubectl --context kind-agent-transition -n agent-transition-smoke get deploy,rs,pods -o wide || true
+          kubectl --context kind-agent-transition -n agent-transition-smoke get events --sort-by=.lastTimestamp || true
+
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name agent-transition || true
