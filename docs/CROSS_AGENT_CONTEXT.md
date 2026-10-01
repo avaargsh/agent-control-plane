@@ -199,6 +199,9 @@ The current tool surface is deliberately small:
 - `create_work`
 - `get_work`
 - `get_changes_since`
+- `append_context`
+- `get_context_overlay`
+- `get_context_changes_since`
 - `claim_work`
 - `record_progress`
 - `handoff_work`
@@ -236,14 +239,62 @@ stale Claude MCP client
 This proves the MCP transport does not weaken the underlying optimistic
 concurrency and ownership semantics.
 
+## Independent context revision overlay
+
+Non-authoritative cross-agent context now has a separate append-only revision
+stream instead of being mixed into `WorkSnapshot.state`.
+
+```text
+Authoritative Work                    Context Overlay
+
+WorkSnapshot.version = 7              context_revision = 31
+owner / status / state                notes / observations / memory hints
+decisions / evidence refs             append-only ContextEntry chain
+        |                                      |
+        +---- authorization freshness          +---- retrieval freshness
+```
+
+`SQLiteContextOverlayStore` shares the same SQLite database but uses separate
+tables and a separate CAS head. A context append therefore changes
+`context_revision` without changing:
+
+- `WorkSnapshot.version`
+- `WorkSnapshot.snapshot_hash`
+- owner/status
+- authoritative state
+- an already sealed v1 transition proposal's freshness
+
+MCP exposes:
+
+- `append_context`
+- `get_context_overlay`
+- `get_context_changes_since`
+
+Every overlay read includes the authoritative work version and snapshot hash
+observed in the same SQLite read transaction. This gives a caller a precise
+cross-check between the context stream and the authority snapshot it was read
+against.
+
+This is deliberately **not** model-selected mutation classification. Agents
+cannot mark an arbitrary `record_progress` write as "context-only". Only the
+separate overlay API has non-authoritative semantics.
+
+Current limitation: `TransitionProposalBinding/v1` still attests the
+authoritative `ContextProjection`, not the overlay contents. Overlay drift is
+therefore allowed without invalidating a v1 proposal, but the exact overlay
+revision seen by the proposer is not yet included in proposal provenance. A
+future v2 proposal should bind both the authority snapshot and the observed
+overlay revision/hash while using only authority drift as the execution
+freshness gate.
+
 ## Next slice
 
 The next implementation should remain small:
 
 1. run the opt-in Claude Code -> Codex live handoff on a configured developer
    workstation and retain its state/evidence artifact;
-2. decide whether work freshness needs a narrower authority-generation counter
-   than the current conservative whole-snapshot version;
+2. introduce a v2 proposal binding that records context revision/hash for
+   provenance while invalidating only on authoritative WorkSnapshot drift;
 3. generalize the attestation producer/consumer interface so additional
    providers can emit the same closure proof without depending on Kubernetes;
 4. keep semantic memory pluggable rather than making it authoritative.
