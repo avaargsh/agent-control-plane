@@ -244,9 +244,8 @@ The next implementation should remain small:
    workstation and retain its state/evidence artifact;
 2. decide whether work freshness needs a narrower authority-generation counter
    than the current conservative whole-snapshot version;
-3. promote the recovered journal provenance into a provider-independent
-   ReleaseEvidence / Attestation object rather than leaving it Kubernetes-smoke
-   specific;
+3. generalize the attestation producer/consumer interface so additional
+   providers can emit the same closure proof without depending on Kubernetes;
 4. keep semantic memory pluggable rather than making it authoritative.
 
 
@@ -419,3 +418,43 @@ digest shape.
 The kind live smoke now reads the work/projection/proposal hashes back from the
 recovered COMMITTED journal record rather than trusting temporary in-process
 objects.
+
+
+## Provider-independent execution attestation
+
+The execution chain now closes with a provider-independent
+`ExecutionAttestation/v1`.
+
+It seals the durable execution receipt to independently observed verification:
+
+```text
+ExecutionAttempt(COMMITTED)
+   + attempt_hash
+   + terminal_result_hash
+   + context_provenance_hash
+          |
+          + OutcomeContract hash
+          + post-execution EvidenceBundle hash
+          + verification status/time
+          |
+          v
+ExecutionAttestation
+          |
+     attestation_hash
+```
+
+The attestation intentionally does not embed Kubernetes-specific fields. It can
+be reused by future providers as long as they produce:
+
+- a COMMITTED durable execution attempt;
+- an independently collected observation/evidence hash;
+- an outcome contract hash;
+- a verification result.
+
+For context-bound attempts, the attestation transitively closes the chain back
+to the exact work snapshot, projection and proposal through
+`context_provenance_hash`.
+
+The live kind transition writes
+`.artifacts/kubernetes-transition/execution-attestation.json`, which is
+uploaded with the rest of the transition proof.
