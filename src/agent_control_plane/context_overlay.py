@@ -21,6 +21,7 @@ _ALLOWED_CONTEXT_ENTRY_TYPES = frozenset(
     {
         "note",
         "review",
+        "review-note",
         "summary",
         "memory_hint",
         "observation",
