@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: refund-agent
+  namespace: support
+  labels:
+    app: refund-agent
+    release: v17
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: refund-agent
+  template:
+    metadata:
+      labels:
+        app: refund-agent
+        release: v17
+      annotations:
+        authority-fixture/version: "17"
+        owner: "security-platform"
+    spec:
+      serviceAccountName: refund-agent
+      containers:
+        - name: agent
+          image: ghcr.io/example/refund-agent:v17
+          env:
+            - name: MCP_GATEWAY
+              value: http://refund-mcp.support.svc.cluster.local
