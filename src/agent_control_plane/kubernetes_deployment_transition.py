@@ -480,6 +480,7 @@ class KubernetesDeploymentScaleProvider:
                 "live replicas do not match transition before state"
             )
 
+        operation_id = operation_id or uuid4().hex
         reservation_store = None
         reservation = None
         if context_binding is None:
@@ -531,6 +532,8 @@ class KubernetesDeploymentScaleProvider:
                     expected_authority_hash=(
                         context_binding.proposal.authority_hash
                     ),
+                    proposal_hash=context_binding.proposal.proposal_hash,
+                    operation_id=operation_id,
                     execution_lease=active_lease,
                     now=now,
                 )
@@ -559,7 +562,6 @@ class KubernetesDeploymentScaleProvider:
                     approval_verifier=context_binding.approval_verifier,
                 )
 
-        operation_id = operation_id or uuid4().hex
         patch = {
             "metadata": {
                 "resourceVersion": resource_version,
