@@ -23,6 +23,7 @@ from .state_transition_protocol import (
 _ACTION_HASH_ANNOTATION = "agent-control-plane.openai.com/action-hash"
 _TRANSITION_HASH_ANNOTATION = "agent-control-plane.openai.com/transition-hash"
 _OPERATION_ID_ANNOTATION = "agent-control-plane.openai.com/operation-id"
+_EXECUTION_CONTEXT_RESULT_KEY = "_execution_context_provenance"
 
 
 def _require_aware(value: datetime, field_name: str) -> None:
@@ -608,8 +609,6 @@ class SQLiteExecutionJournal:
         result: Mapping[str, Any],
     ) -> ExecutionAttempt:
         _require_aware(completed_at, "completed_at")
-        result_json = _json_snapshot(result)
-        result_hash = canonical_digest(json.loads(result_json))
 
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -627,6 +626,30 @@ class SQLiteExecutionJournal:
                     "execution attempt does not exist"
                 )
             current = self._attempt(row)
+            effective_result = dict(result)
+            provenance = current.context_provenance
+            if provenance is not None:
+                reserved = effective_result.get(
+                    _EXECUTION_CONTEXT_RESULT_KEY
+                )
+                expected_reserved = {
+                    "provenance_hash": current.context_provenance_hash,
+                    **dict(provenance),
+                }
+                if (
+                    reserved is not None
+                    and reserved != expected_reserved
+                ):
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "terminal result context provenance mismatch"
+                    )
+                effective_result[
+                    _EXECUTION_CONTEXT_RESULT_KEY
+                ] = expected_reserved
+            result_json = _json_snapshot(effective_result)
+            result_hash = canonical_digest(json.loads(result_json))
+
             if current.operation_id != attempt.operation_id:
                 connection.execute("ROLLBACK")
                 raise ProtocolViolation(
