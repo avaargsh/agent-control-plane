@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 import pytest
@@ -527,3 +528,29 @@ def test_crash_after_projection_before_activation_fences_old_target(
     ] == "2"
     assert api.deployment["metadata"]["generation"] == 7
     assert api.deployment["spec"]["replicas"] == 20
+
+
+def test_concurrent_prepare_allocates_unique_monotonic_epochs(tmp_path):
+    store = SQLiteExecutionLeaseStore(tmp_path / "leases.db")
+    resource_uid = "uid-payment-api"
+
+    def prepare(index):
+        return store.prepare(
+            resource_uid=resource_uid,
+            holder=Principal(
+                type="controller",
+                subject=f"controller-{index}",
+            ),
+            now=NOW + timedelta(milliseconds=index),
+            ttl_seconds=300,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        records = list(pool.map(prepare, range(8)))
+
+    epochs = sorted(record.lease.epoch for record in records)
+    lease_ids = {record.lease.lease_id for record in records}
+
+    assert epochs == list(range(1, 9))
+    assert len(lease_ids) == 8
+    assert store.latest(resource_uid).lease.epoch == 8
