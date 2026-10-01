@@ -279,13 +279,9 @@ This is deliberately **not** model-selected mutation classification. Agents
 cannot mark an arbitrary `record_progress` write as "context-only". Only the
 separate overlay API has non-authoritative semantics.
 
-Current limitation: `TransitionProposalBinding/v1` still attests the
-authoritative `ContextProjection`, not the overlay contents. Overlay drift is
-therefore allowed without invalidating a v1 proposal, but the exact overlay
-revision seen by the proposer is not yet included in proposal provenance. A
-future v2 proposal should bind both the authority snapshot and the observed
-overlay revision/hash while using only authority drift as the execution
-freshness gate.
+`TransitionProposalBinding/v1` remains supported for compatibility. New
+context-aware integrations should use v2 when they need to prove the exact
+overlay observed by the proposer.
 
 ## Next slice
 
@@ -300,6 +296,47 @@ The next implementation should remain small:
 4. keep semantic memory pluggable rather than making it authoritative.
 
 
+
+## Proposal binding v2: provenance without false invalidation
+
+`TransitionProposalBinding/v2` records both the authoritative work snapshot and
+the exact context overlay observed by the proposer:
+
+```text
+WorkSnapshot v7 / hash A
+        +
+ContextOverlay rev30 / head H30 / overlay O30
+        |
+        v
+TransitionProposalBinding/v2
+        |
+        +--> policy input
+        +--> signed approval
+        +--> authorization
+        +--> ExecutionContextProvenance/v2
+```
+
+The freshness rule is intentionally asymmetric:
+
+- authoritative `WorkSnapshot.version/hash/owner/status` drift fails closed;
+- later `context_revision` drift does **not** invalidate an already approved
+  proposal;
+- the original overlay revision/head/hash remains frozen in the proposal,
+  policy input, durable PREPARED attempt, terminal receipt and attestation
+  chain.
+
+This means the system can prove *what context the model saw* without granting
+non-authoritative notes the power to revoke or silently expand execution
+authority.
+
+The proposal constructor also rejects a projection and overlay observed against
+different authority snapshots. Callers must retry the read instead of sealing a
+mixed-time proposal.
+
+The kind live transition intentionally advances the overlay once after
+authorization and before the provider side effect. The real Deployment
+`20 -> 30` transition must still succeed because authoritative work did not
+move.
 
 ## Context-bound transition proposals
 
