@@ -7,7 +7,7 @@ from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from .context_transition import (
-    TransitionProposalBinding,
+    ContextProposalBinding,
     validate_context_binding,
     validate_context_bound_execution,
 )
@@ -104,7 +104,7 @@ class DeploymentScaleReceipt:
 @dataclass(frozen=True)
 class ContextBoundExecutionContext:
     policy_input: TransitionPolicyInput
-    proposal: TransitionProposalBinding
+    proposal: ContextProposalBinding
     store: SQLiteWorkContextStore
     signed_approval: SignedTransitionApproval
     approval_verifier: HMACApprovalVerifier
