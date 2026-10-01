@@ -34,7 +34,7 @@ spec:
     semantic: stripe-production
     test: stripe-production
     delegated: stripe-production
-    recovery: stripe-sandbox
+    recovery: stripe-production
     highvalue: stripe-production
   destinations:
     stripe-sandbox:
