@@ -219,7 +219,8 @@ Key properties:
 - crash recovery preserves the work/projection/proposal provenance in the
   durable journal;
 - the final attestation binds the committed receipt to the exact transition,
-  outcome contract, and independently collected observation evidence.
+  outcome contract, independently collected observation evidence, and a sealed
+  successful verification result.
 
 The local MCP server is optional:
 

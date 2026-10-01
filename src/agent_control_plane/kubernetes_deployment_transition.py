@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from enum import Enum
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
@@ -27,6 +26,11 @@ from .execution_fencing import (
     _FENCE_HOLDER_ANNOTATION,
     _FENCE_LEASE_ID_ANNOTATION,
     assert_target_fence,
+)
+from .execution_verification import (
+    ConditionEvaluation,
+    OutcomeVerificationResult,
+    VerificationStatus,
 )
 from .state_transition_protocol import (
     ActionIntent,
@@ -119,36 +123,6 @@ class DeploymentObservation:
     events: tuple[Mapping[str, Any], ...]
     evidence_items: tuple[EvidenceItem, ...]
     evidence_bundle: EvidenceBundle
-
-
-class VerificationStatus(str, Enum):
-    SUCCEEDED = "SUCCEEDED"
-    DEGRADED = "DEGRADED"
-    TIMED_OUT = "TIMED_OUT"
-    INVARIANT_VIOLATION = "INVARIANT_VIOLATION"
-    UNKNOWN = "UNKNOWN"
-
-
-@dataclass(frozen=True)
-class ConditionEvaluation:
-    source: str
-    expression: str
-    comparator: str
-    expected: str | int | float | bool
-    observed: Any
-    passed: bool | None
-
-
-@dataclass(frozen=True)
-class OutcomeVerificationResult:
-    status: VerificationStatus
-    transition_hash: str
-    outcome_contract_hash: str
-    observation_hash: str
-    checked_at: datetime
-    desired: tuple[ConditionEvaluation, ...]
-    safety: tuple[ConditionEvaluation, ...]
-    reasons: tuple[str, ...]
 
 
 def _metadata(resource: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -832,7 +806,7 @@ def verify_outcome(
     if observation.resource != transition.subject:
         raise ProtocolViolation("observation resource does not match transition")
     if outcome_contract.stabilization_seconds > 0:
-        return OutcomeVerificationResult(
+        return OutcomeVerificationResult.seal(
             status=VerificationStatus.UNKNOWN,
             transition_hash=transition.transition_hash,
             outcome_contract_hash=outcome_contract.contract_hash,
@@ -864,7 +838,7 @@ def verify_outcome(
     )
 
     if any(item.passed is None for item in desired + safety):
-        return OutcomeVerificationResult(
+        return OutcomeVerificationResult.seal(
             status=VerificationStatus.UNKNOWN,
             transition_hash=transition.transition_hash,
             outcome_contract_hash=outcome_contract.contract_hash,
@@ -877,7 +851,7 @@ def verify_outcome(
 
     failed_safety = tuple(item for item in safety if item.passed is False)
     if failed_safety:
-        return OutcomeVerificationResult(
+        return OutcomeVerificationResult.seal(
             status=VerificationStatus.INVARIANT_VIOLATION,
             transition_hash=transition.transition_hash,
             outcome_contract_hash=outcome_contract.contract_hash,
@@ -892,7 +866,7 @@ def verify_outcome(
         )
 
     if all(item.passed is True for item in desired):
-        return OutcomeVerificationResult(
+        return OutcomeVerificationResult.seal(
             status=VerificationStatus.SUCCEEDED,
             transition_hash=transition.transition_hash,
             outcome_contract_hash=outcome_contract.contract_hash,
@@ -913,7 +887,7 @@ def verify_outcome(
         status = VerificationStatus.DEGRADED
         reasons = ("desired state is not yet satisfied",)
 
-    return OutcomeVerificationResult(
+    return OutcomeVerificationResult.seal(
         status=status,
         transition_hash=transition.transition_hash,
         outcome_contract_hash=outcome_contract.contract_hash,

@@ -205,3 +205,68 @@ def test_context_overlay_requires_existing_work(tmp_path):
             payload={"message": "orphan"},
             created_at=NOW,
         )
+
+
+@pytest.mark.parametrize(
+    "entry_type",
+    (
+        "approval",
+        "evidence",
+        "desired_state",
+        "authorization",
+        "policy_decision",
+    ),
+)
+def test_context_overlay_rejects_authority_shaped_entry_types(
+    tmp_path,
+    entry_type,
+):
+    _, overlay, authoritative = _stores(tmp_path)
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="not non-authoritative",
+    ):
+        overlay.append(
+            work_id=authoritative.work_id,
+            expected_revision=0,
+            actor=CLAUDE,
+            entry_type=entry_type,
+            payload={"value": "must use authoritative work APIs"},
+            created_at=NOW + timedelta(seconds=2),
+        )
+
+
+def test_overlay_hash_is_independent_of_recent_entry_window(tmp_path):
+    _, overlay, authoritative = _stores(tmp_path)
+
+    for revision, message in (
+        (0, "one"),
+        (1, "two"),
+        (2, "three"),
+    ):
+        overlay.append(
+            work_id=authoritative.work_id,
+            expected_revision=revision,
+            actor=CLAUDE,
+            entry_type="note",
+            payload={"message": message},
+            created_at=NOW + timedelta(seconds=2 + revision),
+        )
+
+    narrow = overlay.get(
+        work_id=authoritative.work_id,
+        recent_entry_limit=1,
+    )
+    wide = overlay.get(
+        work_id=authoritative.work_id,
+        recent_entry_limit=8,
+    )
+
+    assert narrow.context_revision == wide.context_revision == 3
+    assert narrow.head_hash == wide.head_hash
+    assert narrow.overlay_version == "context-overlay/v2"
+    assert wide.overlay_version == "context-overlay/v2"
+    assert narrow.overlay_hash == wide.overlay_hash
+    assert len(narrow.recent_entries) == 1
+    assert len(wide.recent_entries) == 3

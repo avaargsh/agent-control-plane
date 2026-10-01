@@ -191,8 +191,10 @@ class WorkContextToolset:
         work_id: str,
         version: int,
     ) -> dict[str, Any]:
-        latest = self.store.get(work_id)
-        events = self.store.changes_since(work_id, version)
+        latest, events = self.store.changes_since_with_snapshot(
+            work_id,
+            version,
+        )
         return {
             "work_id": work_id,
             "requested_after_version": version,

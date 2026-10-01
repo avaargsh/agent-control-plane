@@ -349,3 +349,30 @@ def test_changes_since_rejects_version_newer_than_current(tmp_path):
             created.work_id,
             created.version + 1,
         )
+
+
+def test_changes_since_with_snapshot_returns_one_consistent_tail(tmp_path):
+    store = SQLiteWorkContextStore(tmp_path / "context.db")
+    created = _created(store)
+    claimed = store.claim(
+        work_id=created.work_id,
+        expected_version=created.version,
+        agent=CLAUDE,
+        claimed_at=NOW + timedelta(seconds=1),
+    )
+    progressed = store.record_progress(
+        work_id=created.work_id,
+        expected_version=claimed.version,
+        actor=CLAUDE,
+        updated_at=NOW + timedelta(seconds=2),
+        state_patch={"phase": "review"},
+    )
+
+    snapshot, events = store.changes_since_with_snapshot(
+        created.work_id,
+        created.version,
+    )
+
+    assert snapshot == progressed
+    assert events[-1].to_version == snapshot.version
+    assert events[-1].snapshot_hash == snapshot.snapshot_hash

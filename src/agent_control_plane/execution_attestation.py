@@ -8,6 +8,10 @@ from .execution_journal import (
     ExecutionAttempt,
     ExecutionAttemptState,
 )
+from .execution_verification import (
+    OutcomeVerificationResult,
+    VerificationStatus,
+)
 from .state_transition_protocol import (
     EvidenceBundle,
     OutcomeContract,
@@ -43,10 +47,11 @@ class ExecutionAttestation:
     context_provenance_hash: str | None
     outcome_contract_hash: str
     observation_evidence_hash: str
-    verification_status: str
+    verification_status: VerificationStatus
+    verification_hash: str
     verified_at: datetime
     attestation_hash: str
-    attestation_version: str = "execution-attestation/v1"
+    attestation_version: str = "execution-attestation/v2"
 
     @classmethod
     def seal(
@@ -57,19 +62,18 @@ class ExecutionAttestation:
         transition: StateTransition,
         outcome_contract: OutcomeContract,
         observation_evidence: EvidenceBundle,
-        verification_status: str,
-        verified_at: datetime,
+        verification: OutcomeVerificationResult,
     ) -> "ExecutionAttestation":
         if not attestation_id:
             raise ProtocolViolation("attestation_id is required")
-        if not verification_status:
-            raise ProtocolViolation(
-                "attestation verification_status is required"
-            )
-        _require_aware(verified_at, "verified_at")
         transition.verify()
         outcome_contract.verify()
         observation_evidence.verify()
+        verification.verify()
+        if verification.status is not VerificationStatus.SUCCEEDED:
+            raise ProtocolViolation(
+                "execution attestation requires SUCCEEDED verification"
+            )
 
         attempt.verify()
         if attempt.state is not ExecutionAttemptState.COMMITTED:
@@ -96,6 +100,24 @@ class ExecutionAttestation:
             raise ProtocolViolation(
                 "attestation observation resource does not match execution"
             )
+        if verification.transition_hash != transition.transition_hash:
+            raise ProtocolViolation(
+                "attestation verification transition mismatch"
+            )
+        if (
+            verification.outcome_contract_hash
+            != outcome_contract.contract_hash
+        ):
+            raise ProtocolViolation(
+                "attestation verification outcome contract mismatch"
+            )
+        if (
+            verification.observation_hash
+            != observation_evidence.manifest_hash
+        ):
+            raise ProtocolViolation(
+                "attestation verification observation mismatch"
+            )
 
         provisional = cls(
             attestation_id=attestation_id,
@@ -110,8 +132,9 @@ class ExecutionAttestation:
             context_provenance_hash=attempt.context_provenance_hash,
             outcome_contract_hash=outcome_contract.contract_hash,
             observation_evidence_hash=observation_evidence.manifest_hash,
-            verification_status=verification_status,
-            verified_at=verified_at,
+            verification_status=verification.status,
+            verification_hash=verification.verification_hash,
+            verified_at=verification.checked_at,
             attestation_hash="",
         )
         return cls(
@@ -128,6 +151,7 @@ class ExecutionAttestation:
             outcome_contract_hash=provisional.outcome_contract_hash,
             observation_evidence_hash=provisional.observation_evidence_hash,
             verification_status=provisional.verification_status,
+            verification_hash=provisional.verification_hash,
             verified_at=provisional.verified_at,
             attestation_hash=canonical_digest(
                 provisional,
@@ -138,6 +162,10 @@ class ExecutionAttestation:
     def verify(self) -> None:
         if not self.attestation_id:
             raise ProtocolViolation("attestation_id is required")
+        if not isinstance(self.verification_status, VerificationStatus):
+            raise ProtocolViolation(
+                "attestation verification status is invalid"
+            )
         if not all(
             (
                 self.attempt_id,
@@ -150,11 +178,16 @@ class ExecutionAttestation:
                 self.terminal_result_hash,
                 self.outcome_contract_hash,
                 self.observation_evidence_hash,
-                self.verification_status,
+                self.verification_status.value,
+                self.verification_hash,
             )
         ):
             raise ProtocolViolation(
                 "execution attestation binding fields are required"
+            )
+        if self.verification_status is not VerificationStatus.SUCCEEDED:
+            raise ProtocolViolation(
+                "execution attestation requires SUCCEEDED verification"
             )
         _require_aware(self.verified_at, "verified_at")
         actual = canonical_digest(
@@ -206,11 +239,13 @@ class ExecutionAttestation:
         transition: StateTransition,
         outcome_contract: OutcomeContract,
         observation_evidence: EvidenceBundle,
+        verification: OutcomeVerificationResult,
     ) -> None:
         self.verify()
         transition.verify()
         outcome_contract.verify()
         observation_evidence.verify()
+        verification.verify()
         if transition.transition_hash != self.transition_hash:
             raise ProtocolViolation(
                 "execution attestation transition binding mismatch"
@@ -238,6 +273,33 @@ class ExecutionAttestation:
             raise ProtocolViolation(
                 "execution attestation observation execution mismatch"
             )
+        if verification.transition_hash != self.transition_hash:
+            raise ProtocolViolation(
+                "execution attestation verification transition mismatch"
+            )
+        if (
+            verification.outcome_contract_hash
+            != self.outcome_contract_hash
+        ):
+            raise ProtocolViolation(
+                "execution attestation verification outcome mismatch"
+            )
+        if verification.observation_hash != self.observation_evidence_hash:
+            raise ProtocolViolation(
+                "execution attestation verification observation mismatch"
+            )
+        if verification.status is not self.verification_status:
+            raise ProtocolViolation(
+                "execution attestation verification status mismatch"
+            )
+        if verification.verification_hash != self.verification_hash:
+            raise ProtocolViolation(
+                "execution attestation verification hash mismatch"
+            )
+        if verification.checked_at != self.verified_at:
+            raise ProtocolViolation(
+                "execution attestation verification time mismatch"
+            )
 
     def as_mapping(self) -> dict[str, Any]:
         self.verify()
@@ -255,7 +317,8 @@ class ExecutionAttestation:
             "context_provenance_hash": self.context_provenance_hash,
             "outcome_contract_hash": self.outcome_contract_hash,
             "observation_evidence_hash": self.observation_evidence_hash,
-            "verification_status": self.verification_status,
+            "verification_status": self.verification_status.value,
+            "verification_hash": self.verification_hash,
             "verified_at": self.verified_at.isoformat(),
             "attestation_hash": self.attestation_hash,
         }
