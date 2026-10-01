@@ -6,6 +6,9 @@ from agent_control_plane.authority_reservation import (
     AuthorityReservationState,
     SQLiteAuthorityReservationStore,
 )
+from agent_control_plane.kubernetes_deployment_transition import (
+    KubernetesDeploymentScaleProvider,
+)
 from agent_control_plane.state_transition_protocol import (
     ExecutionLease,
     Principal,
@@ -18,6 +21,7 @@ from context_testkit import (
     PROPOSER,
     build_context_bound_execution_v3,
 )
+from kubernetes_testkit import FakeDeploymentApi
 
 
 def test_active_reservation_blocks_authority_mutation_until_release(
@@ -208,3 +212,93 @@ def test_expired_reservation_no_longer_blocks_authority_mutation(
         state_patch={"target": 40},
     )
     assert updated.version == claimed.version + 1
+
+
+class AuthorityRaceApi(FakeDeploymentApi):
+    def __init__(self) -> None:
+        super().__init__()
+        self.before_patch = None
+        self.blocked_error: ProtocolViolation | None = None
+
+    def patch_deployment(self, *, namespace, name, patch):
+        if self.before_patch is not None:
+            callback = self.before_patch
+            self.before_patch = None
+            try:
+                callback()
+            except ProtocolViolation as exc:
+                self.blocked_error = exc
+            else:
+                raise AssertionError(
+                    "authority mutation unexpectedly crossed reservation"
+                )
+        return super().patch_deployment(
+            namespace=namespace,
+            name=name,
+            patch=patch,
+        )
+
+
+def test_provider_holds_authority_reservation_across_patch(tmp_path):
+    api = AuthorityRaceApi()
+    (
+        fixture,
+        store,
+        _,
+        authority,
+        proposal,
+        context,
+    ) = build_context_bound_execution_v3(
+        tmp_path,
+        api=api,
+    )
+
+    def race_authority_mutation():
+        current = store.get(proposal.work_id)
+        store.record_progress(
+            work_id=proposal.work_id,
+            expected_version=current.version,
+            actor=PROPOSER,
+            updated_at=NOW + timedelta(seconds=6),
+            state_patch={"phase": "raced-provider-patch"},
+        )
+
+    api.before_patch = race_authority_mutation
+    receipt = KubernetesDeploymentScaleProvider(
+        fixture["api"],
+    ).execute_context_bound(
+        transition=fixture["transition"],
+        evidence=fixture["evidence"],
+        outcome_contract=fixture["outcome"],
+        action=fixture["action"],
+        authorization=fixture["authorization"],
+        fence=fixture["fence"],
+        active_lease=fixture["lease"],
+        caller=fixture["holder"],
+        now=NOW + timedelta(seconds=5),
+        context_binding=context,
+    )
+
+    assert receipt.changed is True
+    assert receipt.authority_reservation_hash
+    assert api.blocked_error is not None
+    assert "blocked by active execution reservation" in str(api.blocked_error)
+    assert (
+        api.last_patch["metadata"]["annotations"][
+            "agent-control-plane.openai.com/authority-reservation-hash"
+        ]
+        == receipt.authority_reservation_hash
+    )
+    assert store.get_authority_head(proposal.work_id) == authority
+
+    # Successful acknowledgement releases the reservation, so the next
+    # authoritative mutation can proceed immediately.
+    current = store.get(proposal.work_id)
+    updated = store.record_progress(
+        work_id=proposal.work_id,
+        expected_version=current.version,
+        actor=PROPOSER,
+        updated_at=NOW + timedelta(seconds=7),
+        state_patch={"phase": "after-provider-patch"},
+    )
+    assert updated.version == current.version + 1
