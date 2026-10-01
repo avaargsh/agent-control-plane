@@ -11,6 +11,7 @@ quality-context:
 	$(PYTHON) -m ruff check \
 		src/agent_control_plane/work_context.py \
 		src/agent_control_plane/context_mcp.py \
+		src/agent_control_plane/context_overlay.py \
 		src/agent_control_plane/context_transition.py \
 		src/agent_control_plane/execution_provenance.py \
 		src/agent_control_plane/execution_journal.py \
@@ -22,6 +23,7 @@ quality-context:
 		tests/context_testkit.py \
 		tests/test_work_context.py \
 		tests/test_context_mcp.py \
+		tests/test_context_overlay.py \
 		tests/test_context_transition.py \
 		tests/test_context_host_configs.py \
 		tests/test_kubernetes_deployment_transition.py \
