@@ -552,8 +552,7 @@ def main() -> int:
                 transition=transition,
                 outcome_contract=outcome,
                 observation_evidence=observation.evidence_bundle,
-                verification_status=last.status.value,
-                verified_at=checked_at,
+                verification=last,
             )
             attestation.verify_attempt(committed_attempt)
             attestation_path = (
