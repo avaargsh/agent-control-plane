@@ -17,6 +17,28 @@ from .state_transition_protocol import (
 
 _GENESIS_HASH = "GENESIS"
 
+_ALLOWED_CONTEXT_ENTRY_TYPES = frozenset(
+    {
+        "note",
+        "review",
+        "summary",
+        "memory_hint",
+        "observation",
+        "handoff_note",
+    }
+)
+
+
+def _normalize_entry_type(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in _ALLOWED_CONTEXT_ENTRY_TYPES:
+        allowed = ", ".join(sorted(_ALLOWED_CONTEXT_ENTRY_TYPES))
+        raise ProtocolViolation(
+            "context entry type is not non-authoritative: "
+            f"{value!r}; expected one of: {allowed}"
+        )
+    return normalized
+
 
 def _require_aware(value: datetime, field_name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
@@ -68,10 +90,10 @@ class ContextEntry:
         prior_entry_hash: str,
         created_at: datetime,
     ) -> "ContextEntry":
-        normalized_type = entry_type.strip()
-        if not entry_id or not work_id or not normalized_type:
+        normalized_type = _normalize_entry_type(entry_type)
+        if not entry_id or not work_id:
             raise ProtocolViolation(
-                "context entry id, work id and type are required"
+                "context entry id and work id are required"
             )
         if revision <= 0:
             raise ProtocolViolation(
@@ -110,14 +132,13 @@ class ContextEntry:
         )
 
     def verify(self) -> None:
-        if (
-            not self.entry_id
-            or not self.work_id
-            or not self.entry_type
-            or self.entry_type != self.entry_type.strip()
-        ):
+        if not self.entry_id or not self.work_id:
             raise ProtocolViolation(
-                "context entry id, work id and canonical type are required"
+                "context entry id and work id are required"
+            )
+        if _normalize_entry_type(self.entry_type) != self.entry_type:
+            raise ProtocolViolation(
+                "context entry type is not canonical"
             )
         if self.revision <= 0:
             raise ProtocolViolation(
