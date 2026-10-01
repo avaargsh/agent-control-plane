@@ -30,9 +30,16 @@ from agent_control_plane.policy_replay import (
     TransitionPolicyInput,
     evaluate_policy,
 )
+from agent_control_plane.transition_approval import (
+    ApprovalDecision,
+    ApprovalSigningKey,
+    HMACApprovalVerifier,
+    SignedTransitionApproval,
+    TransitionApproval,
+    authorize_transition_from_approval,
+)
 from agent_control_plane.state_transition_protocol import (
     ActionIntent,
-    AuthorizationBinding,
     EvidenceBundle,
     EvidenceItem,
     ExecutionFence,
@@ -41,7 +48,6 @@ from agent_control_plane.state_transition_protocol import (
     Principal,
     ResourceIdentity,
     StateTransition,
-    canonical_digest,
 )
 
 
@@ -269,24 +275,42 @@ def main() -> int:
             f"live scale denied: {policy_decision.reasons}"
         )
 
-    approval_hash = canonical_digest(
-        {
-            "principal": "ci/kind-approver",
-            "transition_hash": transition.transition_hash,
-            "action_hash": action.action_hash,
-            "evidence_hash": evidence.manifest_hash,
-            "policy_version": policy_version,
-            "decision_hash": policy_decision.decision_hash,
-        }
+    approver = Principal(
+        type="human",
+        subject="ci/kind-approver",
     )
-    authorization = AuthorizationBinding.seal(
+    approval_key = ApprovalSigningKey(
+        key_id="kind-live-approval-key-v1",
+        approver=approver,
+        secret=b"kind-live-test-only-approval-secret",
+    )
+    approval = TransitionApproval.seal(
+        approval_id="kind-live-approval-scale-20-30",
+        approver=approver,
+        decision=ApprovalDecision.APPROVE,
         transition=transition,
         action=action,
-        policy_version=policy_version,
-        policy_decision_hash=policy_decision.decision_hash,
-        approval_hash=approval_hash,
-        principal=agent,
+        policy_input=policy_input,
+        policy_decision=policy_decision,
+        issued_at=started_at,
         expires_at=started_at + timedelta(minutes=5),
+        reason="kind live state transition proof",
+    )
+    signed_approval = SignedTransitionApproval.sign(
+        approval,
+        key=approval_key,
+    )
+    authorization = authorize_transition_from_approval(
+        transition=transition,
+        action=action,
+        policy_input=policy_input,
+        policy_decision=policy_decision,
+        signed_approval=signed_approval,
+        approval_verifier=HMACApprovalVerifier(
+            keys={approval_key.key_id: approval_key},
+        ),
+        authorization_expires_at=started_at + timedelta(minutes=4),
+        now=started_at,
     )
     holder = Principal(
         type="controller",
@@ -399,6 +423,10 @@ def main() -> int:
                 "policy_input_hash": policy_input.input_hash,
                 "policy_decision_hash": policy_decision.decision_hash,
                 "authorization_hash": authorization.authorization_hash,
+                "approval_id": approval.approval_id,
+                "approval_hash": approval.approval_hash,
+                "approval_key_id": signed_approval.key_id,
+                "approval_decision": approval.decision.value,
                 "lease_id": lease.lease_id,
                 "lease_epoch": lease.epoch,
                 "execution_attempt_id": attempt.attempt_id,
