@@ -27,7 +27,7 @@ from agent_control_plane.transition_approval import (
     TransitionApproval,
 )
 from agent_control_plane.work_context import SQLiteWorkContextStore
-from test_kubernetes_deployment_transition import NOW, build_transition
+from kubernetes_testkit import NOW, build_transition
 
 
 HUMAN = Principal(type="human", subject="ben")
