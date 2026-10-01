@@ -1,0 +1,17 @@
+apiVersion: auth.example.io/v1
+kind: DelegatedOAuthPolicy
+metadata:
+  name: refund-agent-obo
+spec:
+  directAgentScopes:
+    - refund:read
+    - refund:write
+  delegatedSubjects:
+    support-user:
+      scopes:
+        - refund:read
+    supervisor-user:
+      scopes:
+        - refund:read
+        - refund:write
+  tokenAudience: refund-mcp
