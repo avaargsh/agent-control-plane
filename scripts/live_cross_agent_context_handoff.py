@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -105,9 +106,7 @@ def main() -> int:
             "Codex independently reviews and completes it."
         ),
         actor=human,
-        created_at=__import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ),
+        created_at=datetime.now(timezone.utc),
         state={
             "phase": "implementation",
             "live_smoke": True,
