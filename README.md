@@ -243,6 +243,16 @@ context provenance.
 
 See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).
 
+## Execution attestation
+
+A committed execution can now be closed by
+`ExecutionAttestation/v1`, which binds the durable attempt/result hashes,
+optional cross-agent context provenance, the OutcomeContract, post-execution
+evidence, and verification status into one provider-independent
+`attestation_hash`.
+
+The live kind proof emits this attestation as a standalone uploaded artifact.
+
 ## Repository boundary in the broader AI infrastructure stack
 
 This repository is the **primary Agent Infra control-plane product**. Adjacent repositories have narrower roles:
