@@ -90,7 +90,7 @@ _ALLOWED: Mapping[TransitionPhase, frozenset[TransitionPhase]] = {
         TransitionPhase.FROZEN,
     }),
     TransitionPhase.EXECUTION_NOT_APPLIED: frozenset({
-        TransitionPhase.EXECUTION_PREPARED,
+        TransitionPhase.LEASED,
         TransitionPhase.FROZEN,
     }),
     TransitionPhase.EXECUTED: frozenset({
@@ -416,10 +416,15 @@ class SQLiteTransitionLedger:
             ).fetchone()
             if existing is not None:
                 record = self._record(existing)
+                existing_facts = record.facts
+                initial_facts_match = all(
+                    existing_facts.get(key) == value
+                    for key, value in facts.items()
+                )
                 if (
                     record.transition_id == transition.transition_id
                     and record.transition_hash == transition.transition_hash
-                    and record.facts_json == facts_json
+                    and initial_facts_match
                     and record.parent_transition_hash
                     == parent_transition_hash
                 ):
@@ -808,10 +813,9 @@ class SQLiteTransitionLedger:
             actor=actor,
             occurred_at=occurred_at,
             facts={
-                "lease_id": lease.lease_id,
-                "lease_epoch": lease.epoch,
-                "lease_holder_type": lease.holder.type,
-                "lease_holder_subject": lease.holder.subject,
+                f"lease:{lease.epoch}:id": lease.lease_id,
+                f"lease:{lease.epoch}:holder_type": lease.holder.type,
+                f"lease:{lease.epoch}:holder_subject": lease.holder.subject,
             },
         )
 
@@ -830,6 +834,7 @@ class SQLiteTransitionLedger:
             raise ProtocolViolation(
                 "ledger requires PREPARED execution attempt"
             )
+        lease_id_key = f"lease:{attempt.lease_epoch}:id"
         checks = (
             (attempt.transition_hash, record.transition_hash),
             (attempt.action_hash, record.facts["action_hash"]),
@@ -837,14 +842,14 @@ class SQLiteTransitionLedger:
                 attempt.authorization_hash,
                 record.facts["authorization_hash"],
             ),
-            (attempt.lease_id, record.facts["lease_id"]),
-            (attempt.lease_epoch, record.facts["lease_epoch"]),
+            (attempt.lease_id, record.facts.get(lease_id_key)),
         )
         if any(actual != expected for actual, expected in checks):
             raise ProtocolViolation(
                 "ledger execution attempt binding mismatch"
             )
 
+        prefix = f"execution_attempt:{attempt.attempt_id}"
         return self.advance(
             transition_id=transition_id,
             expected_version=expected_version,
@@ -853,9 +858,9 @@ class SQLiteTransitionLedger:
             actor=actor,
             occurred_at=occurred_at,
             facts={
-                "execution_attempt_id": attempt.attempt_id,
-                "execution_attempt_hash": attempt.attempt_hash,
-                "operation_id": attempt.operation_id,
+                f"{prefix}:hash": attempt.attempt_hash,
+                f"{prefix}:operation_id": attempt.operation_id,
+                f"{prefix}:lease_epoch": attempt.lease_epoch,
             },
         )
 
@@ -887,13 +892,16 @@ class SQLiteTransitionLedger:
     ) -> TransitionLedgerRecord:
         attempt.verify()
         record = self._require(transition_id)
-        if attempt.attempt_id != record.facts["execution_attempt_id"]:
-            raise ProtocolViolation(
-                "ledger execution result attempt mismatch"
-            )
-        if attempt.attempt_hash != record.facts["execution_attempt_hash"]:
+        prefix = f"execution_attempt:{attempt.attempt_id}"
+        if attempt.attempt_hash != record.facts.get(f"{prefix}:hash"):
             raise ProtocolViolation(
                 "ledger execution result digest mismatch"
+            )
+        if attempt.operation_id != record.facts.get(
+            f"{prefix}:operation_id"
+        ):
+            raise ProtocolViolation(
+                "ledger execution result operation mismatch"
             )
 
         if attempt.state is ExecutionAttemptState.COMMITTED:
@@ -918,8 +926,8 @@ class SQLiteTransitionLedger:
             actor=actor,
             occurred_at=occurred_at,
             facts={
-                "execution_terminal_state": attempt.state.value,
-                "execution_result_hash": attempt.result_hash,
+                f"{prefix}:terminal_state": attempt.state.value,
+                f"{prefix}:result_hash": attempt.result_hash,
             },
         )
 
