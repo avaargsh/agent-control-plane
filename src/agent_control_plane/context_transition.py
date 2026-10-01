@@ -22,6 +22,7 @@ from .state_transition_protocol import (
     validate_execution,
 )
 from .transition_approval import (
+    ApprovalDecision,
     HMACApprovalVerifier,
     SignedTransitionApproval,
     authorize_transition_from_approval,
@@ -328,17 +329,12 @@ def authorize_context_bound_transition(
     )
 
 
-def validate_context_bound_execution(
+def validate_context_binding(
     *,
     transition: StateTransition,
     evidence: EvidenceBundle,
-    outcome_contract: OutcomeContract,
     action: ActionIntent,
     authorization: AuthorizationBinding,
-    fence: ExecutionFence,
-    active_lease: ExecutionLease,
-    current_generation: int,
-    caller: Principal,
     now: datetime,
     policy_input: TransitionPolicyInput,
     proposal: TransitionProposalBinding,
@@ -346,13 +342,7 @@ def validate_context_bound_execution(
     signed_approval: SignedTransitionApproval,
     approval_verifier: HMACApprovalVerifier,
 ) -> None:
-    """Re-check proposal provenance and freshness before provider mutation.
-
-    The signed approval binds policy_input.input_hash. The policy input in turn
-    contains the proposal hash, which binds the ContextProjection and exact
-    WorkSnapshot version/hash. Re-verifying the signed approval here prevents a
-    caller from swapping in another proposal after authorization.
-    """
+    """Verify signed proposal provenance and current work freshness."""
 
     proposal.verify()
     verify_policy_binds_proposal(
@@ -364,6 +354,10 @@ def validate_context_bound_execution(
         signed_approval,
         now=now,
     )
+    if approval.decision is not ApprovalDecision.APPROVE:
+        raise ProtocolViolation(
+            "execution transition approval decision is not APPROVE"
+        )
     if authorization.approval_hash != approval.approval_hash:
         raise ProtocolViolation(
             "execution authorization approval binding mismatch"
@@ -404,6 +398,40 @@ def validate_context_bound_execution(
     assert_proposal_fresh(
         proposal=proposal,
         store=store,
+    )
+
+
+def validate_context_bound_execution(
+    *,
+    transition: StateTransition,
+    evidence: EvidenceBundle,
+    outcome_contract: OutcomeContract,
+    action: ActionIntent,
+    authorization: AuthorizationBinding,
+    fence: ExecutionFence,
+    active_lease: ExecutionLease,
+    current_generation: int,
+    caller: Principal,
+    now: datetime,
+    policy_input: TransitionPolicyInput,
+    proposal: TransitionProposalBinding,
+    store: SQLiteWorkContextStore,
+    signed_approval: SignedTransitionApproval,
+    approval_verifier: HMACApprovalVerifier,
+) -> None:
+    """Re-check context provenance, freshness and execution fencing."""
+
+    validate_context_binding(
+        transition=transition,
+        evidence=evidence,
+        action=action,
+        authorization=authorization,
+        now=now,
+        policy_input=policy_input,
+        proposal=proposal,
+        store=store,
+        signed_approval=signed_approval,
+        approval_verifier=approval_verifier,
     )
 
     validate_execution(

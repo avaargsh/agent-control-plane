@@ -244,8 +244,8 @@ The next implementation should remain small:
    workstation and retain its state/evidence artifact;
 2. decide whether work freshness needs a narrower authority-generation counter
    than the current conservative whole-snapshot version;
-3. integrate the context-bound execution validator into the first real
-   provider path rather than relying on an external pre-execution call;
+3. propagate context proposal identity into durable execution receipts and
+   release evidence so replay can prove the same provenance after execution;
 4. keep semantic memory pluggable rather than making it authoritative.
 
 
@@ -322,3 +322,40 @@ make context-live-handoff
 
 It requires local Claude Code and Codex login/configuration and is not part of
 normal CI.
+
+
+## Kubernetes provider integration
+
+The first real provider path now enforces context provenance inside the
+Deployment scale adapter rather than through an external pre-check.
+
+```text
+WorkSnapshot
+  -> ContextProjection
+  -> TransitionProposalBinding
+  -> PolicyInput
+  -> Signed Approval
+  -> Authorization
+  -> ExecutionFence
+  -> provider reads live generation/resourceVersion
+  -> validate_context_bound_execution()
+  -> Kubernetes PATCH
+  -> fresh Observation
+  -> OutcomeContract
+```
+
+The provider keeps the existing plain `execute()` entrypoint for
+non-context-bound callers and adds `execute_context_bound()` for the stronger
+contract. Both first execution and owned replay re-check context freshness.
+
+The kind smoke uses the context-bound path and uploads the SQLite work store
+alongside its JSON summary. The summary includes:
+
+- `work_id`
+- `work_version`
+- `work_snapshot_hash`
+- `context_projection_hash`
+- `transition_proposal_hash`
+
+This makes the live Kubernetes proof traceable back to the exact cross-agent
+work state used by the proposing agent.

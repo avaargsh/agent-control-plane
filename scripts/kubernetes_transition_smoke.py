@@ -8,6 +8,11 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from agent_control_plane.cli_runtime_transports import KubectlDeploymentApi
+from agent_control_plane.context_transition import (
+    TransitionProposalBinding,
+    authorize_context_bound_transition,
+    seal_context_bound_policy_input,
+)
 from agent_control_plane.execution_fencing import (
     KubernetesDeploymentFenceProjector,
     SQLiteExecutionLeaseStore,
@@ -19,6 +24,7 @@ from agent_control_plane.execution_journal import (
     reconcile_deployment_attempt,
 )
 from agent_control_plane.kubernetes_deployment_transition import (
+    ContextBoundExecutionContext,
     KubernetesDeploymentObserver,
     KubernetesDeploymentScaleProvider,
     VerificationStatus,
@@ -27,7 +33,6 @@ from agent_control_plane.kubernetes_deployment_transition import (
 from agent_control_plane.policy_replay import (
     DeploymentScalePolicy,
     PolicyEffect,
-    TransitionPolicyInput,
     evaluate_policy,
 )
 from agent_control_plane.transition_approval import (
@@ -36,8 +41,8 @@ from agent_control_plane.transition_approval import (
     HMACApprovalVerifier,
     SignedTransitionApproval,
     TransitionApproval,
-    authorize_transition_from_approval,
 )
+from agent_control_plane.work_context import SQLiteWorkContextStore
 from agent_control_plane.state_transition_protocol import (
     ActionIntent,
     EvidenceBundle,
@@ -249,8 +254,53 @@ def main() -> int:
         type="agent",
         subject="ci/kind-autoscaler",
     )
+
+    work_db = os.environ.get(
+        "WORK_CONTEXT_DB",
+        ".artifacts/kubernetes-transition/work-context.db",
+    )
+    os.makedirs(os.path.dirname(work_db) or ".", exist_ok=True)
+    work_store = SQLiteWorkContextStore(work_db)
+    work = work_store.create(
+        work_id="kind-live-scale-work-20-30",
+        namespace=f"kubernetes/{NAMESPACE}",
+        goal=(
+            f"Scale Deployment {DEPLOYMENT} from "
+            f"{BEFORE_REPLICAS} to {DESIRED_REPLICAS} replicas"
+        ),
+        actor=Principal(
+            type="human",
+            subject="ci/kind-requester",
+        ),
+        created_at=started_at,
+        state={
+            "deployment": DEPLOYMENT,
+            "namespace": NAMESPACE,
+            "replicas_before": BEFORE_REPLICAS,
+            "replicas_desired": DESIRED_REPLICAS,
+            "evidence_hash": evidence.manifest_hash,
+        },
+    )
+    work = work_store.claim(
+        work_id=work.work_id,
+        expected_version=work.version,
+        agent=agent,
+        claimed_at=started_at + timedelta(milliseconds=1),
+    )
+    projection = work_store.project(
+        work_id=work.work_id,
+        consumer=agent,
+    )
+    proposal = TransitionProposalBinding.seal(
+        proposal_id="kind-live-context-proposal-scale-20-30",
+        proposer=agent,
+        transition=transition,
+        projection=projection,
+        created_at=started_at + timedelta(milliseconds=2),
+    )
+
     policy_version = "kind-live-scale-policy/v1"
-    policy_input = TransitionPolicyInput.seal(
+    policy_input = seal_context_bound_policy_input(
         policy_version=policy_version,
         evidence=evidence,
         transition=transition,
@@ -261,6 +311,8 @@ def main() -> int:
             "namespace": NAMESPACE,
             "replicas": DESIRED_REPLICAS,
         },
+        proposal=proposal,
+        store=work_store,
     )
     policy_decision = evaluate_policy(
         policy_input=policy_input,
@@ -300,17 +352,20 @@ def main() -> int:
         approval,
         key=approval_key,
     )
-    authorization = authorize_transition_from_approval(
+    approval_verifier = HMACApprovalVerifier(
+        keys={approval_key.key_id: approval_key},
+    )
+    authorization = authorize_context_bound_transition(
         transition=transition,
         action=action,
         policy_input=policy_input,
         policy_decision=policy_decision,
+        proposal=proposal,
+        store=work_store,
         signed_approval=signed_approval,
-        approval_verifier=HMACApprovalVerifier(
-            keys={approval_key.key_id: approval_key},
-        ),
+        approval_verifier=approval_verifier,
         authorization_expires_at=started_at + timedelta(minutes=4),
-        now=started_at,
+        now=started_at + timedelta(milliseconds=3),
     )
     holder = Principal(
         type="controller",
@@ -353,10 +408,17 @@ def main() -> int:
         prepared_at=datetime.now(timezone.utc),
     )
 
+    context_binding = ContextBoundExecutionContext(
+        policy_input=policy_input,
+        proposal=proposal,
+        store=work_store,
+        signed_approval=signed_approval,
+        approval_verifier=approval_verifier,
+    )
     receipt = KubernetesDeploymentScaleProvider(
         api,
         lease_authority=lease_authority,
-    ).execute(
+    ).execute_context_bound(
         transition=transition,
         evidence=evidence,
         outcome_contract=outcome,
@@ -367,6 +429,7 @@ def main() -> int:
         caller=holder,
         now=datetime.now(timezone.utc),
         operation_id=attempt.operation_id,
+        context_binding=context_binding,
     )
 
     # Deliberately skip the normal COMMITTED write to exercise the process-
@@ -423,6 +486,11 @@ def main() -> int:
                 "policy_input_hash": policy_input.input_hash,
                 "policy_decision_hash": policy_decision.decision_hash,
                 "authorization_hash": authorization.authorization_hash,
+                "work_id": work.work_id,
+                "work_version": work.version,
+                "work_snapshot_hash": work.snapshot_hash,
+                "context_projection_hash": projection.projection_hash,
+                "transition_proposal_hash": proposal.proposal_hash,
                 "approval_id": approval.approval_id,
                 "approval_hash": approval.approval_hash,
                 "approval_key_id": signed_approval.key_id,
