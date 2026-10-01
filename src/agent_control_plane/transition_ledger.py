@@ -32,7 +32,11 @@ from .state_transition_protocol import (
     StateTransition,
     canonical_digest,
 )
-from .transition_approval import TransitionApproval
+from .transition_approval import (
+    SignedTransitionApproval,
+    TransitionApproval,
+    TransitionApprovalVerifier,
+)
 
 
 class TransitionLedgerConflict(ProtocolViolation):
@@ -485,7 +489,7 @@ class SQLiteTransitionLedger:
             raise ProtocolViolation("registered transition disappeared")
         return record
 
-    def advance(
+    def _advance(
         self,
         *,
         transition_id: str,
@@ -641,7 +645,7 @@ class SQLiteTransitionLedger:
                 "ledger policy version mismatch"
             )
 
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=TransitionPhase.POLICY_EVALUATED,
@@ -676,7 +680,7 @@ class SQLiteTransitionLedger:
             raise ProtocolViolation(
                 "ledger policy effect is missing or invalid"
             )
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=target,
@@ -690,11 +694,17 @@ class SQLiteTransitionLedger:
         *,
         transition_id: str,
         expected_version: int,
-        approval: TransitionApproval,
+        signed_approval: SignedTransitionApproval,
+        approval_verifier: TransitionApprovalVerifier,
         authorization: AuthorizationBinding,
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
+        _require_aware(occurred_at, "occurred_at")
+        approval = approval_verifier.verify(
+            signed_approval,
+            now=occurred_at,
+        )
         approval.verify()
         authorization.verify()
         record = self._require(transition_id)
@@ -747,7 +757,7 @@ class SQLiteTransitionLedger:
                     f"ledger authorization binding mismatch: {name}"
                 )
 
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=TransitionPhase.AUTHORIZED,
@@ -805,7 +815,7 @@ class SQLiteTransitionLedger:
                 "ledger lease/fence ownership mismatch"
             )
 
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=TransitionPhase.LEASED,
@@ -850,7 +860,7 @@ class SQLiteTransitionLedger:
             )
 
         prefix = f"execution_attempt:{attempt.attempt_id}"
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=TransitionPhase.EXECUTION_PREPARED,
@@ -872,7 +882,7 @@ class SQLiteTransitionLedger:
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=TransitionPhase.RECONCILING,
@@ -918,7 +928,7 @@ class SQLiteTransitionLedger:
                 "execution attempt is not terminal"
             )
 
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=target,
@@ -939,7 +949,7 @@ class SQLiteTransitionLedger:
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=TransitionPhase.VERIFYING,
@@ -985,7 +995,7 @@ class SQLiteTransitionLedger:
                 "unsupported verification status"
             )
 
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=target,
@@ -1006,7 +1016,7 @@ class SQLiteTransitionLedger:
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=TransitionPhase.RELEASED,
@@ -1028,7 +1038,7 @@ class SQLiteTransitionLedger:
             raise ProtocolViolation(
                 "recovery transition hash is required"
             )
-        return self.advance(
+        return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
             to_phase=TransitionPhase.RECOVERING,
