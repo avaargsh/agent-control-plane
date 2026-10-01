@@ -113,6 +113,8 @@ def test_reservation_rejects_stale_authority_generation(tmp_path):
             work_id=proposal.work_id,
             expected_authority_generation=authority.generation,
             expected_authority_hash=authority.authority_hash,
+            proposal_hash=proposal.proposal_hash,
+            operation_id="authority-stale-op",
             execution_lease=fixture["lease"],
             now=NOW + timedelta(seconds=6),
         )
