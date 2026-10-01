@@ -188,6 +188,9 @@ def test_mcp_server_registers_only_explicit_work_context_tools(tmp_path):
         "create_work",
         "get_work",
         "get_changes_since",
+        "append_context",
+        "get_context_overlay",
+        "get_context_changes_since",
         "claim_work",
         "record_progress",
         "handoff_work",
@@ -364,3 +367,98 @@ def test_in_process_mcp_clients_share_one_authoritative_store(tmp_path):
             assert stale_result.is_error is True
 
     asyncio.run(scenario())
+
+
+def test_mcp_context_overlay_changes_revision_not_authority(tmp_path):
+    store = SQLiteWorkContextStore(tmp_path / "context.db")
+    human = WorkContextToolset(store, HUMAN, _clock(NOW))
+    claude = WorkContextToolset(
+        store,
+        CLAUDE,
+        _clock(NOW + timedelta(seconds=1)),
+    )
+    codex = WorkContextToolset(
+        store,
+        CODEX,
+        _clock(NOW + timedelta(seconds=2)),
+    )
+
+    created = human.create_work(
+        work_id="shared-context-overlay",
+        namespace="repo/demo",
+        goal="Share context without mutating authority",
+    )
+    claimed = claude.claim_work(
+        work_id="shared-context-overlay",
+        expected_version=created["version"],
+    )
+
+    entry = codex.append_context(
+        work_id="shared-context-overlay",
+        expected_revision=0,
+        entry_type="review-note",
+        payload={"message": "tests look good"},
+    )
+    overlay = claude.get_context_overlay(
+        work_id="shared-context-overlay",
+    )
+    current = claude.get_work(
+        work_id="shared-context-overlay",
+    )
+
+    assert entry["actor"] == {
+        "type": "agent",
+        "subject": "codex",
+    }
+    assert overlay["context_revision"] == 1
+    assert overlay["authority_version"] == claimed["version"]
+    assert current["work"]["version"] == claimed["version"]
+    assert (
+        current["work"]["snapshot_hash"]
+        == claimed["snapshot_hash"]
+    )
+
+    changes = claude.get_context_changes_since(
+        work_id="shared-context-overlay",
+        revision=0,
+    )
+    assert changes["returned_revision"] == 1
+    assert changes["entries"][0]["entry_type"] == "review-note"
+
+
+def test_mcp_context_overlay_rejects_stale_context_revision(tmp_path):
+    store = SQLiteWorkContextStore(tmp_path / "context.db")
+    human = WorkContextToolset(store, HUMAN, _clock(NOW))
+    claude = WorkContextToolset(
+        store,
+        CLAUDE,
+        _clock(NOW + timedelta(seconds=1)),
+    )
+    codex = WorkContextToolset(
+        store,
+        CODEX,
+        _clock(NOW + timedelta(seconds=2)),
+    )
+
+    human.create_work(
+        work_id="shared-context-overlay-stale",
+        namespace="repo/demo",
+        goal="Fence context writers independently",
+    )
+    claude.append_context(
+        work_id="shared-context-overlay-stale",
+        expected_revision=0,
+        entry_type="note",
+        payload={"message": "first"},
+    )
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="stale context revision",
+    ):
+        codex.append_context(
+            work_id="shared-context-overlay-stale",
+            expected_revision=0,
+            entry_type="note",
+            payload={"message": "stale"},
+        )
