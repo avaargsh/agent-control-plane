@@ -1,4 +1,5 @@
 import sqlite3
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -657,3 +658,58 @@ def test_not_applied_attempt_can_retry_without_rewriting_history(tmp_path):
         == 12
     )
     ledger.verify_history(record.transition_id)
+
+
+def test_ledger_rejects_forged_signed_approval_before_authorized_state(tmp_path):
+    fixture = build_transition()
+    (
+        policy_input,
+        decision,
+        approval,
+        signed_approval,
+        approval_verifier,
+        authorization,
+    ) = authority_chain(fixture)
+    ledger = SQLiteTransitionLedger(tmp_path / "ledger.db")
+    record = ledger.register(
+        transition=fixture["transition"],
+        action=fixture["action"],
+        actor=ACTOR,
+        occurred_at=NOW,
+    )
+    record = ledger.record_policy(
+        transition_id=record.transition_id,
+        expected_version=record.state_version,
+        policy_input=policy_input,
+        decision=decision,
+        actor=ACTOR,
+        occurred_at=NOW + timedelta(seconds=1),
+    )
+    record = ledger.route_policy_result(
+        transition_id=record.transition_id,
+        expected_version=record.state_version,
+        actor=ACTOR,
+        occurred_at=NOW + timedelta(seconds=2),
+    )
+    forged = replace(
+        signed_approval,
+        signature="0" * 64,
+    )
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="signature is invalid",
+    ):
+        ledger.record_authorization(
+            transition_id=record.transition_id,
+            expected_version=record.state_version,
+            signed_approval=forged,
+            approval_verifier=approval_verifier,
+            authorization=authorization,
+            actor=approval.approver,
+            occurred_at=NOW + timedelta(seconds=3),
+        )
+
+    persisted = ledger.get(record.transition_id)
+    assert persisted.phase is TransitionPhase.AWAITING_APPROVAL
+    assert "authorization_hash" not in persisted.facts
