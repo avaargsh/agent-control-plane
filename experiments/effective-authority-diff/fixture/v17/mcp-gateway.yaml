@@ -25,7 +25,7 @@ spec:
       connector: test
       operationId: createRefund
     - name: refund.delegated_execute
-      exposed: false
+      exposed: true
       requiredScope: refund:write
       connector: delegated
       operationId: createRefund
