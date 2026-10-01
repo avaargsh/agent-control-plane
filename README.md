@@ -106,10 +106,12 @@ fake transport:
 live Deployment replicas=20
     -> freeze live EvidenceBundle
     -> StateTransition 20 -> 30
+    -> ContextProjection / TransitionProposalBinding
     -> deterministic PolicyDecision
+    -> signed TransitionApproval
     -> AuthorizationBinding
     -> ExecutionFence
-    -> live generation/resourceVersion validation
+    -> context freshness + live generation/resourceVersion validation
     -> kubectl merge PATCH with resourceVersion precondition
     -> fresh Deployment + Pods + Events observation
     -> OutcomeContract: readyReplicas == 30
@@ -124,9 +126,10 @@ export KUBE_CONTEXT=kind-agent-transition
 make kind-transition-smoke
 ```
 
-The proof emits a JSON artifact containing the transition, action, policy,
-authorization and before/after evidence hashes plus the Kubernetes generation
-and resourceVersion boundary.
+The proof emits a JSON artifact containing the work snapshot/projection/proposal
+hashes, transition, action, policy, signed approval, authorization and
+before/after evidence hashes plus the Kubernetes generation and
+resourceVersion boundary.
 
 ## Architecture
 
