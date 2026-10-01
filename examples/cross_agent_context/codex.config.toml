@@ -1,0 +1,18 @@
+[mcp_servers.agent-context]
+command = "agent-context-mcp"
+args = []
+required = true
+enabled_tools = [
+  "create_work",
+  "get_work",
+  "get_changes_since",
+  "claim_work",
+  "record_progress",
+  "handoff_work",
+  "complete_work",
+]
+
+[mcp_servers.agent-context.env]
+AGENT_CONTEXT_DB = "/ABSOLUTE/PATH/TO/shared-context.db"
+AGENT_CONTEXT_PRINCIPAL_TYPE = "agent"
+AGENT_CONTEXT_PRINCIPAL_SUBJECT = "codex"
