@@ -300,13 +300,71 @@ The next implementation should remain small:
 
 1. run the opt-in Claude Code -> Codex live handoff on a configured developer
    workstation and retain its state/evidence artifact;
-2. introduce an explicit AuthorityGeneration protocol only after authority
-   mutation classes are structurally defined;
+2. validate whether any real WorkSnapshot mutation deserves a separate
+   non-authoritative API; do not add one without a concrete workflow;
 3. generalize verification producers so additional providers can emit the same
    sealed OutcomeVerificationResult contract;
 4. keep semantic memory pluggable rather than making it authoritative.
 
 
+
+## Authority generation
+
+The control plane now maintains an explicit `AuthorityHead/v1` beside each
+authoritative WorkSnapshot.
+
+```text
+WorkSnapshot.version       storage / optimistic concurrency
+AuthorityHead.generation   execution-authority freshness
+ContextOverlay.revision    non-authoritative context freshness
+```
+
+`AuthorityHead` binds:
+
+- `authority_generation`
+- an `authority_state_hash` over goal/status/owner/state/decisions/evidence
+- the WorkSnapshot and WorkEvent that last advanced authority
+- a content-addressed `authority_hash`
+
+Creation and every current authoritative Work mutation update the snapshot,
+event and authority head in the **same SQLite transaction**. A mutation that
+would only advance version/timestamp without changing the authority-state digest
+is rejected as a no-op.
+
+ContextOverlay writes never advance AuthorityGeneration.
+
+For existing databases without an authority head, the store backfills
+`generation = current WorkSnapshot.version`. This is intentionally
+conservative because all historical WorkSnapshot mutation APIs were treated as
+authority-relevant.
+
+### Proposal binding v3
+
+`TransitionProposalBinding/v3` freezes:
+
+```text
+Work projection provenance
+        +
+AuthorityHead generation/state/hash
+        +
+ContextOverlay revision/head/hash
+        |
+        v
+Policy -> Approval -> Authorization
+        |
+ExecutionContextProvenance/v3
+```
+
+At execution, v3 freshness checks the **current AuthorityHead and current
+authority-state digest**, not WorkSnapshot.version. Context revision drift is
+still allowed. Work version is retained only as provenance.
+
+Current limitation: the public WorkSnapshot mutation APIs are all
+authority-relevant, so generation currently advances with every real Work
+mutation. There is deliberately no caller-supplied
+`authority_relevant=false` escape hatch. A future non-authoritative Work
+mutation must be introduced as a structurally separate API with fields excluded
+from the authority-state digest.
 
 ## Proposal binding v2: provenance without false invalidation
 
