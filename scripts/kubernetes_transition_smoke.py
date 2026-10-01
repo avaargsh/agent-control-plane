@@ -18,6 +18,10 @@ from agent_control_plane.execution_journal import (
     SQLiteExecutionJournal,
     reconcile_deployment_attempt,
 )
+from agent_control_plane.transition_ledger import (
+    SQLiteTransitionLedger,
+    TransitionPhase,
+)
 from agent_control_plane.kubernetes_deployment_transition import (
     KubernetesDeploymentObserver,
     KubernetesDeploymentScaleProvider,
@@ -249,6 +253,23 @@ def main() -> int:
         type="agent",
         subject="ci/kind-autoscaler",
     )
+    controller = Principal(
+        type="controller",
+        subject="ci/kind-controller",
+    )
+    ledger_db = os.environ.get(
+        "TRANSITION_LEDGER_DB",
+        ".artifacts/kubernetes-transition/transition-ledger.db",
+    )
+    os.makedirs(os.path.dirname(ledger_db) or ".", exist_ok=True)
+    ledger = SQLiteTransitionLedger(ledger_db)
+    ledger_record = ledger.register(
+        transition=transition,
+        action=action,
+        actor=agent,
+        occurred_at=started_at,
+    )
+
     policy_version = "kind-live-scale-policy/v1"
     policy_input = TransitionPolicyInput.seal(
         policy_version=policy_version,
@@ -270,9 +291,33 @@ def main() -> int:
             allowed_namespaces=(NAMESPACE,),
         ),
     )
+    ledger_record = ledger.record_policy(
+        transition_id=ledger_record.transition_id,
+        expected_version=ledger_record.state_version,
+        policy_input=policy_input,
+        decision=policy_decision,
+        actor=Principal(
+            type="service_account",
+            subject="ci/policy-engine",
+        ),
+        occurred_at=datetime.now(timezone.utc),
+    )
+    ledger_record = ledger.route_policy_result(
+        transition_id=ledger_record.transition_id,
+        expected_version=ledger_record.state_version,
+        actor=Principal(
+            type="service_account",
+            subject="ci/policy-engine",
+        ),
+        occurred_at=datetime.now(timezone.utc),
+    )
     if policy_decision.effect is not PolicyEffect.PERMIT:
         raise RuntimeError(
             f"live scale denied: {policy_decision.reasons}"
+        )
+    if ledger_record.phase is not TransitionPhase.AWAITING_APPROVAL:
+        raise RuntimeError(
+            f"unexpected ledger phase after policy: {ledger_record.phase.value}"
         )
 
     approver = Principal(
@@ -312,10 +357,15 @@ def main() -> int:
         authorization_expires_at=started_at + timedelta(minutes=4),
         now=started_at,
     )
-    holder = Principal(
-        type="controller",
-        subject="ci/kind-controller",
+    ledger_record = ledger.record_authorization(
+        transition_id=ledger_record.transition_id,
+        expected_version=ledger_record.state_version,
+        approval=approval,
+        authorization=authorization,
+        actor=approver,
+        occurred_at=datetime.now(timezone.utc),
     )
+    holder = controller
     lease_db = os.environ.get(
         "EXECUTION_LEASE_DB",
         ".artifacts/kubernetes-transition/execution-leases.db",
@@ -338,6 +388,14 @@ def main() -> int:
         authorization=authorization,
         lease=lease,
     )
+    ledger_record = ledger.record_lease(
+        transition_id=ledger_record.transition_id,
+        expected_version=ledger_record.state_version,
+        lease=lease,
+        fence=fence,
+        actor=holder,
+        occurred_at=datetime.now(timezone.utc),
+    )
 
     journal_db = os.environ.get(
         "EXECUTION_JOURNAL_DB",
@@ -351,6 +409,13 @@ def main() -> int:
         authorization=authorization,
         fence=fence,
         prepared_at=datetime.now(timezone.utc),
+    )
+    ledger_record = ledger.record_execution_prepared(
+        transition_id=ledger_record.transition_id,
+        expected_version=ledger_record.state_version,
+        attempt=attempt,
+        actor=holder,
+        occurred_at=datetime.now(timezone.utc),
     )
 
     receipt = KubernetesDeploymentScaleProvider(
@@ -373,6 +438,12 @@ def main() -> int:
     # crash boundary. Reopen the durable journal and reconstruct the exact
     # attempt from live Kubernetes state.
     restarted_journal = SQLiteExecutionJournal(journal_db)
+    ledger_record = ledger.start_reconcile(
+        transition_id=ledger_record.transition_id,
+        expected_version=ledger_record.state_version,
+        actor=holder,
+        occurred_at=datetime.now(timezone.utc),
+    )
     reconciled = reconcile_deployment_attempt(
         api=api,
         journal=restarted_journal,
@@ -393,6 +464,19 @@ def main() -> int:
         raise RuntimeError(
             "reconciled execution attempt was not durably committed"
         )
+    ledger_record = ledger.record_execution_result(
+        transition_id=ledger_record.transition_id,
+        expected_version=ledger_record.state_version,
+        attempt=committed_attempt,
+        actor=holder,
+        occurred_at=datetime.now(timezone.utc),
+    )
+    ledger_record = ledger.start_verification(
+        transition_id=ledger_record.transition_id,
+        expected_version=ledger_record.state_version,
+        actor=holder,
+        occurred_at=datetime.now(timezone.utc),
+    )
 
     observer = KubernetesDeploymentObserver(
         api,
@@ -416,6 +500,20 @@ def main() -> int:
             checked_at=checked_at,
         )
         if last.status is VerificationStatus.SUCCEEDED:
+            ledger_record = ledger.record_verification(
+                transition_id=ledger_record.transition_id,
+                expected_version=ledger_record.state_version,
+                result=last,
+                actor=holder,
+                occurred_at=checked_at,
+            )
+            ledger_record = ledger.release(
+                transition_id=ledger_record.transition_id,
+                expected_version=ledger_record.state_version,
+                actor=holder,
+                occurred_at=datetime.now(timezone.utc),
+            )
+            ledger.verify_history(ledger_record.transition_id)
             summary = {
                 "transition_id": transition.transition_id,
                 "transition_hash": transition.transition_hash,
@@ -433,6 +531,12 @@ def main() -> int:
                 "operation_id": attempt.operation_id,
                 "reconcile_status": reconciled.status.value,
                 "reconciled_result_hash": committed_attempt.result_hash,
+                "ledger_phase": ledger_record.phase.value,
+                "ledger_state_version": ledger_record.state_version,
+                "ledger_last_event_hash": ledger_record.last_event_hash,
+                "ledger_event_count": len(
+                    ledger.events(ledger_record.transition_id)
+                ),
                 "evidence_before": evidence.manifest_hash,
                 "evidence_after": (
                     observation.evidence_bundle.manifest_hash
@@ -466,7 +570,15 @@ def main() -> int:
         if last.status in {
             VerificationStatus.INVARIANT_VIOLATION,
             VerificationStatus.TIMED_OUT,
+            VerificationStatus.UNKNOWN,
         }:
+            ledger_record = ledger.record_verification(
+                transition_id=ledger_record.transition_id,
+                expected_version=ledger_record.state_version,
+                result=last,
+                actor=holder,
+                occurred_at=checked_at,
+            )
             break
         time.sleep(1)
 
