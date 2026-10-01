@@ -12,6 +12,7 @@ from uuid import uuid4
 from .execution_provenance import (
     ExecutionContextProvenance,
     ExecutionContextProvenanceV2,
+    ExecutionContextProvenanceV3,
 )
 from .state_transition_protocol import (
     ActionIntent,
@@ -347,6 +348,7 @@ class SQLiteExecutionJournal:
         context_provenance: (
             ExecutionContextProvenance
             | ExecutionContextProvenanceV2
+            | ExecutionContextProvenanceV3
             | None
         ) = None,
     ) -> ExecutionAttempt:

@@ -193,7 +193,9 @@ WorkSnapshot + WorkEvent
         ↓
 ContextProjection
         ↓
-TransitionProposalBinding
+AuthorityHead + ContextOverlay
+        ↓
+TransitionProposalBinding/v3
         ↓
 Policy / signed approval / authorization
         ↓
@@ -214,8 +216,8 @@ Key properties:
   history;
 - Claude Code, Codex, or another MCP client can share one work store while
   retaining distinct principals;
-- the provider execution boundary rejects stale context before mutation and on
-  owned replay;
+- the provider execution boundary rejects stale authority generation before
+  mutation and on owned replay;
 - crash recovery preserves the work/projection/proposal provenance in the
   durable journal;
 - the final attestation binds the committed receipt to the exact transition,

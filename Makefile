@@ -27,12 +27,14 @@ quality-context:
 		tests/test_context_overlay.py \
 		tests/test_context_transition.py \
 		tests/test_context_transition_v2.py \
+		tests/test_context_transition_v3.py \
 		tests/test_context_host_configs.py \
 		tests/test_kubernetes_deployment_transition.py \
 		tests/test_kubernetes_context_bound_execution.py \
 		tests/test_execution_journal.py \
 		tests/test_execution_context_provenance.py \
 		tests/test_execution_context_provenance_v2.py \
+		tests/test_execution_context_provenance_v3.py \
 		tests/test_execution_verification.py \
 		tests/test_execution_attestation.py
 
