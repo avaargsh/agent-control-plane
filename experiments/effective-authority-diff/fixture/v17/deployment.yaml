@@ -5,7 +5,7 @@ metadata:
   namespace: support
   labels:
     app: refund-agent
-    release: v17
+    release: v23
 spec:
   replicas: 1
   selector:
@@ -15,10 +15,10 @@ spec:
     metadata:
       labels:
         app: refund-agent
-        release: v17
+        release: v23
       annotations:
-        authority-fixture/version: "17"
-        owner: "security-platform"
+        authority-fixture/version: "23"
+        owner: "ai-platform"
     spec:
       serviceAccountName: refund-agent
       containers:
