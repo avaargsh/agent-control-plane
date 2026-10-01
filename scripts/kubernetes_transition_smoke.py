@@ -11,6 +11,7 @@ from agent_control_plane.cli_runtime_transports import KubectlDeploymentApi
 from agent_control_plane.context_transition import (
     TransitionProposalBinding,
     authorize_context_bound_transition,
+    execution_context_provenance,
     seal_context_bound_policy_input,
 )
 from agent_control_plane.execution_attestation import ExecutionAttestation
@@ -20,7 +21,6 @@ from agent_control_plane.execution_fencing import (
     acquire_fenced_execution_lease,
 )
 from agent_control_plane.execution_journal import (
-    ExecutionContextProvenance,
     ReconcileStatus,
     SQLiteExecutionJournal,
     reconcile_deployment_attempt,
@@ -402,8 +402,8 @@ def main() -> int:
     )
     os.makedirs(os.path.dirname(journal_db) or ".", exist_ok=True)
     execution_journal = SQLiteExecutionJournal(journal_db)
-    execution_context_provenance = ExecutionContextProvenance.seal(
-        proposal=proposal,
+    execution_context_provenance = execution_context_provenance(
+        proposal
     )
     attempt = execution_journal.prepare(
         transition=transition,
