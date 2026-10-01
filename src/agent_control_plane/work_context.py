@@ -179,6 +179,136 @@ class WorkSnapshot:
             )
 
 
+def _authority_state_value(snapshot: WorkSnapshot) -> dict[str, Any]:
+    snapshot.verify()
+    return {
+        "work_id": snapshot.work_id,
+        "namespace": snapshot.namespace,
+        "goal": snapshot.goal,
+        "status": snapshot.status.value,
+        "owner": (
+            {
+                "type": snapshot.owner.type,
+                "subject": snapshot.owner.subject,
+            }
+            if snapshot.owner is not None
+            else None
+        ),
+        "state": dict(snapshot.state),
+        "decisions": list(snapshot.decisions),
+        "evidence_refs": list(snapshot.evidence_refs),
+    }
+
+
+def authority_state_hash(snapshot: WorkSnapshot) -> str:
+    """Hash only fields that define execution-relevant work authority."""
+
+    return canonical_digest(_authority_state_value(snapshot))
+
+
+@dataclass(frozen=True)
+class AuthorityHead:
+    work_id: str
+    generation: int
+    authority_state_hash: str
+    work_version: int
+    work_snapshot_hash: str
+    event_hash: str
+    updated_at: datetime
+    authority_hash: str
+    authority_version: str = "authority-head/v1"
+
+    @classmethod
+    def seal(
+        cls,
+        *,
+        snapshot: WorkSnapshot,
+        generation: int,
+        event_hash: str,
+    ) -> "AuthorityHead":
+        snapshot.verify()
+        if generation <= 0:
+            raise ProtocolViolation(
+                "authority generation must be positive"
+            )
+        if not event_hash:
+            raise ProtocolViolation(
+                "authority head event_hash is required"
+            )
+        provisional = cls(
+            work_id=snapshot.work_id,
+            generation=generation,
+            authority_state_hash=authority_state_hash(snapshot),
+            work_version=snapshot.version,
+            work_snapshot_hash=snapshot.snapshot_hash,
+            event_hash=event_hash,
+            updated_at=snapshot.updated_at,
+            authority_hash="",
+        )
+        return cls(
+            work_id=provisional.work_id,
+            generation=provisional.generation,
+            authority_state_hash=provisional.authority_state_hash,
+            work_version=provisional.work_version,
+            work_snapshot_hash=provisional.work_snapshot_hash,
+            event_hash=provisional.event_hash,
+            updated_at=provisional.updated_at,
+            authority_hash=canonical_digest(
+                provisional,
+                exclude=("authority_hash",),
+            ),
+        )
+
+    def verify(self) -> None:
+        if not self.work_id:
+            raise ProtocolViolation(
+                "authority head work_id is required"
+            )
+        if self.generation <= 0 or self.work_version <= 0:
+            raise ProtocolViolation(
+                "authority generation/work_version must be positive"
+            )
+        if not all(
+            (
+                self.authority_state_hash,
+                self.work_snapshot_hash,
+                self.event_hash,
+            )
+        ):
+            raise ProtocolViolation(
+                "authority head binding hashes are required"
+            )
+        _require_aware(self.updated_at, "updated_at")
+        actual = canonical_digest(
+            self,
+            exclude=("authority_hash",),
+        )
+        if actual != self.authority_hash:
+            raise ProtocolViolation(
+                "authority head digest mismatch"
+            )
+
+    def verify_snapshot(self, snapshot: WorkSnapshot) -> None:
+        self.verify()
+        snapshot.verify()
+        if snapshot.work_id != self.work_id:
+            raise ProtocolViolation(
+                "authority head belongs to another work item"
+            )
+        if snapshot.version != self.work_version:
+            raise ProtocolViolation(
+                "authority head work version mismatch"
+            )
+        if snapshot.snapshot_hash != self.work_snapshot_hash:
+            raise ProtocolViolation(
+                "authority head snapshot hash mismatch"
+            )
+        if authority_state_hash(snapshot) != self.authority_state_hash:
+            raise ProtocolViolation(
+                "authority head state hash mismatch"
+            )
+
+
 @dataclass(frozen=True)
 class WorkEvent:
     event_id: str
@@ -446,6 +576,21 @@ class SQLiteWorkContextStore:
                 ON work_events(work_id, to_version)
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS work_authority_heads (
+                    work_id TEXT PRIMARY KEY,
+                    generation INTEGER NOT NULL CHECK (generation > 0),
+                    authority_state_hash TEXT NOT NULL,
+                    work_version INTEGER NOT NULL CHECK (work_version > 0),
+                    work_snapshot_hash TEXT NOT NULL,
+                    event_hash TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    authority_hash TEXT NOT NULL,
+                    FOREIGN KEY(work_id) REFERENCES work_snapshots(work_id)
+                )
+                """
+            )
 
     @staticmethod
     def _parse_time(value: str) -> datetime:
@@ -501,6 +646,133 @@ class SQLiteWorkContextStore:
         )
         event.verify()
         return event
+
+    @classmethod
+    def _authority_from_row(cls, row: sqlite3.Row) -> AuthorityHead:
+        head = AuthorityHead(
+            work_id=row["work_id"],
+            generation=int(row["generation"]),
+            authority_state_hash=row["authority_state_hash"],
+            work_version=int(row["work_version"]),
+            work_snapshot_hash=row["work_snapshot_hash"],
+            event_hash=row["event_hash"],
+            updated_at=cls._parse_time(row["updated_at"]),
+            authority_hash=row["authority_hash"],
+        )
+        head.verify()
+        return head
+
+    @classmethod
+    def _read_authority_head(
+        cls,
+        connection: sqlite3.Connection,
+        work_id: str,
+    ) -> AuthorityHead | None:
+        row = connection.execute(
+            """
+            SELECT *
+            FROM work_authority_heads
+            WHERE work_id = ?
+            """,
+            (work_id,),
+        ).fetchone()
+        return cls._authority_from_row(row) if row is not None else None
+
+    @staticmethod
+    def _write_authority_head(
+        connection: sqlite3.Connection,
+        head: AuthorityHead,
+        *,
+        expected_generation: int | None,
+    ) -> None:
+        head.verify()
+        values = (
+            head.generation,
+            head.authority_state_hash,
+            head.work_version,
+            head.work_snapshot_hash,
+            head.event_hash,
+            head.updated_at.isoformat(),
+            head.authority_hash,
+            head.work_id,
+        )
+        if expected_generation is None:
+            connection.execute(
+                """
+                INSERT INTO work_authority_heads (
+                    generation,
+                    authority_state_hash,
+                    work_version,
+                    work_snapshot_hash,
+                    event_hash,
+                    updated_at,
+                    authority_hash,
+                    work_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+            return
+
+        cursor = connection.execute(
+            """
+            UPDATE work_authority_heads
+            SET generation = ?,
+                authority_state_hash = ?,
+                work_version = ?,
+                work_snapshot_hash = ?,
+                event_hash = ?,
+                updated_at = ?,
+                authority_hash = ?
+            WHERE work_id = ? AND generation = ?
+            """,
+            (*values, expected_generation),
+        )
+        if cursor.rowcount != 1:
+            raise ProtocolViolation(
+                "authority head compare-and-swap failed"
+            )
+
+    @classmethod
+    def _ensure_authority_head(
+        cls,
+        connection: sqlite3.Connection,
+        snapshot: WorkSnapshot,
+    ) -> AuthorityHead:
+        head = cls._read_authority_head(
+            connection,
+            snapshot.work_id,
+        )
+        if head is not None:
+            return head
+
+        event_row = connection.execute(
+            """
+            SELECT event_hash
+            FROM work_events
+            WHERE work_id = ? AND to_version = ?
+            """,
+            (snapshot.work_id, snapshot.version),
+        ).fetchone()
+        if event_row is None:
+            raise ProtocolViolation(
+                "cannot backfill authority head without current work event"
+            )
+        # Existing repositories treated every WorkSnapshot mutation as
+        # authority-relevant. Backfilling generation=version preserves that
+        # conservative historical behavior without rewriting snapshot hashes.
+        head = AuthorityHead.seal(
+            snapshot=snapshot,
+            generation=snapshot.version,
+            event_hash=event_row["event_hash"],
+        )
+        cls._write_authority_head(
+            connection,
+            head,
+            expected_generation=None,
+        )
+        return head
 
     @staticmethod
     def _write_snapshot(
@@ -666,6 +938,15 @@ class SQLiteWorkContextStore:
                     expected_version=None,
                 )
                 self._write_event(connection, event)
+                self._write_authority_head(
+                    connection,
+                    AuthorityHead.seal(
+                        snapshot=snapshot,
+                        generation=1,
+                        event_hash=event.event_hash,
+                    ),
+                    expected_generation=None,
+                )
                 connection.execute("COMMIT")
         except sqlite3.IntegrityError as exc:
             raise ProtocolViolation(
@@ -696,6 +977,17 @@ class SQLiteWorkContextStore:
     def get(self, work_id: str) -> WorkSnapshot:
         with self._connect() as connection:
             return self._read_snapshot(connection, work_id)
+
+    def get_authority_head(self, work_id: str) -> AuthorityHead:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            snapshot = self._read_snapshot(connection, work_id)
+            head = self._ensure_authority_head(
+                connection,
+                snapshot,
+            )
+            connection.execute("COMMIT")
+        return head
 
     def changes_since_with_snapshot(
         self,
@@ -808,6 +1100,11 @@ class SQLiteWorkContextStore:
                     "stale work version: "
                     f"expected {expected_version}, current {current.version}"
                 )
+            authority = self._ensure_authority_head(
+                connection,
+                current,
+            )
+            authority.verify_snapshot(current)
 
             next_state = dict(current.state)
             next_state.update(state_patch_snapshot)
@@ -834,6 +1131,16 @@ class SQLiteWorkContextStore:
                 updated_at=updated_at,
             )
 
+            next_authority_state_hash = authority_state_hash(
+                next_snapshot
+            )
+            if next_authority_state_hash == authority.authority_state_hash:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "authoritative work mutation cannot be a no-op"
+                )
+
+            payload: dict[str, Any] = {
             payload: dict[str, Any] = {
                 "state_patch": state_patch_snapshot,
                 "decisions": list(canonical_decisions),
@@ -870,6 +1177,15 @@ class SQLiteWorkContextStore:
                 expected_version=current.version,
             )
             self._write_event(connection, event)
+            self._write_authority_head(
+                connection,
+                AuthorityHead.seal(
+                    snapshot=next_snapshot,
+                    generation=authority.generation + 1,
+                    event_hash=event.event_hash,
+                ),
+                expected_generation=authority.generation,
+            )
             connection.execute("COMMIT")
         return next_snapshot
 
