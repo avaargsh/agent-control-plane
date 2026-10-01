@@ -38,6 +38,7 @@ def _parse_time(value: str) -> datetime:
 class DurableLeaseState(str, Enum):
     PREPARING = "PREPARING"
     ACTIVE = "ACTIVE"
+    SUPERSEDED = "SUPERSEDED"
     RELEASED = "RELEASED"
 
 
@@ -62,14 +63,14 @@ class ExecutionLeaseAuthority(Protocol):
 class SQLiteExecutionLeaseStore:
     """Durable monotonic lease authority for the reference control plane.
 
-    The store is intentionally small and dependency-free. SQLite is not the
-    production HA recommendation; the contract is the important part:
+    Epoch history is retained instead of overwriting the current owner.
+    PREPARING creates a candidate takeover but does not revoke the existing
+    ACTIVE owner. The old owner is superseded only when the candidate has
+    already fenced the provider target and is then activated.
 
-    - one latest epoch per provider resource UID
-    - epochs only increase
-    - takeover first creates PREPARING epoch N
-    - epoch N is ACTIVE only after the provider target has been fenced
-    - stale lease IDs/epochs/holders fail closed after process restart
+    SQLite proves the protocol without adding a service dependency. Production
+    HA deployments should use a replicated authority with the same state
+    machine and transactional invariants.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -90,17 +91,24 @@ class SQLiteExecutionLeaseStore:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS execution_leases (
-                    resource_uid TEXT PRIMARY KEY,
-                    lease_id TEXT NOT NULL,
+                    resource_uid TEXT NOT NULL,
+                    epoch INTEGER NOT NULL CHECK (epoch > 0),
+                    lease_id TEXT NOT NULL UNIQUE,
                     holder_type TEXT NOT NULL,
                     holder_subject TEXT NOT NULL,
-                    epoch INTEGER NOT NULL CHECK (epoch > 0),
                     acquired_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL,
                     prepared_at TEXT NOT NULL,
                     activated_at TEXT,
-                    state TEXT NOT NULL
+                    state TEXT NOT NULL,
+                    PRIMARY KEY (resource_uid, epoch)
                 )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_execution_leases_resource_state
+                ON execution_leases(resource_uid, state, epoch)
                 """
             )
 
@@ -129,17 +137,46 @@ class SQLiteExecutionLeaseStore:
             activated_at=activated_at,
         )
 
-    def latest(self, resource_uid: str) -> DurableLeaseRecord | None:
+    def _one(
+        self,
+        *,
+        resource_uid: str,
+        epoch: int | None = None,
+        lease_id: str | None = None,
+        state: DurableLeaseState | None = None,
+        newest: bool = False,
+    ) -> DurableLeaseRecord | None:
+        clauses = ["resource_uid = ?"]
+        values: list[Any] = [resource_uid]
+        if epoch is not None:
+            clauses.append("epoch = ?")
+            values.append(epoch)
+        if lease_id is not None:
+            clauses.append("lease_id = ?")
+            values.append(lease_id)
+        if state is not None:
+            clauses.append("state = ?")
+            values.append(state.value)
+        order = " ORDER BY epoch DESC" if newest else ""
         with self._connect() as connection:
             row = connection.execute(
-                """
-                SELECT *
-                FROM execution_leases
-                WHERE resource_uid = ?
-                """,
-                (resource_uid,),
+                "SELECT * FROM execution_leases WHERE "
+                + " AND ".join(clauses)
+                + order
+                + " LIMIT 1",
+                tuple(values),
             ).fetchone()
         return self._record(row) if row is not None else None
+
+    def latest(self, resource_uid: str) -> DurableLeaseRecord | None:
+        return self._one(resource_uid=resource_uid, newest=True)
+
+    def active(self, resource_uid: str) -> DurableLeaseRecord | None:
+        return self._one(
+            resource_uid=resource_uid,
+            state=DurableLeaseState.ACTIVE,
+            newest=True,
+        )
 
     def prepare(
         self,
@@ -162,21 +199,21 @@ class SQLiteExecutionLeaseStore:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
-                SELECT epoch
+                SELECT COALESCE(MAX(epoch), 0) AS max_epoch
                 FROM execution_leases
                 WHERE resource_uid = ?
                 """,
                 (resource_uid,),
             ).fetchone()
-            epoch = (int(row["epoch"]) if row is not None else 0) + 1
+            epoch = int(row["max_epoch"]) + 1
             connection.execute(
                 """
                 INSERT INTO execution_leases (
                     resource_uid,
+                    epoch,
                     lease_id,
                     holder_type,
                     holder_subject,
-                    epoch,
                     acquired_at,
                     expires_at,
                     prepared_at,
@@ -184,23 +221,13 @@ class SQLiteExecutionLeaseStore:
                     state
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
-                ON CONFLICT(resource_uid) DO UPDATE SET
-                    lease_id = excluded.lease_id,
-                    holder_type = excluded.holder_type,
-                    holder_subject = excluded.holder_subject,
-                    epoch = excluded.epoch,
-                    acquired_at = excluded.acquired_at,
-                    expires_at = excluded.expires_at,
-                    prepared_at = excluded.prepared_at,
-                    activated_at = NULL,
-                    state = excluded.state
                 """,
                 (
                     resource_uid,
+                    epoch,
                     lease_id,
                     holder.type,
                     holder.subject,
-                    epoch,
                     now.isoformat(),
                     expires_at.isoformat(),
                     now.isoformat(),
@@ -209,7 +236,11 @@ class SQLiteExecutionLeaseStore:
             )
             connection.execute("COMMIT")
 
-        record = self.latest(resource_uid)
+        record = self._one(
+            resource_uid=resource_uid,
+            epoch=epoch,
+            lease_id=lease_id,
+        )
         if record is None:
             raise ProtocolViolation("prepared lease disappeared")
         return record
@@ -225,36 +256,51 @@ class SQLiteExecutionLeaseStore:
         _require_aware(now, "now")
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
+            latest_row = connection.execute(
                 """
                 SELECT *
                 FROM execution_leases
                 WHERE resource_uid = ?
+                ORDER BY epoch DESC
+                LIMIT 1
                 """,
                 (resource_uid,),
             ).fetchone()
-            if row is None:
+            if latest_row is None:
                 connection.execute("ROLLBACK")
                 raise ProtocolViolation("prepared lease does not exist")
-            current = self._record(row)
+            latest = self._record(latest_row)
             if (
-                current.lease.lease_id != lease_id
-                or current.lease.epoch != epoch
+                latest.lease.lease_id != lease_id
+                or latest.lease.epoch != epoch
             ):
                 connection.execute("ROLLBACK")
                 raise ProtocolViolation(
                     "prepared lease was superseded before activation"
                 )
-            if current.state is not DurableLeaseState.PREPARING:
+            if latest.state is not DurableLeaseState.PREPARING:
                 connection.execute("ROLLBACK")
                 raise ProtocolViolation(
                     "only PREPARING lease may be activated"
                 )
-            if now >= current.lease.expires_at:
+            if now >= latest.lease.expires_at:
                 connection.execute("ROLLBACK")
                 raise ProtocolViolation(
                     "prepared lease expired before activation"
                 )
+
+            connection.execute(
+                """
+                UPDATE execution_leases
+                SET state = ?
+                WHERE resource_uid = ? AND state = ?
+                """,
+                (
+                    DurableLeaseState.SUPERSEDED.value,
+                    resource_uid,
+                    DurableLeaseState.ACTIVE.value,
+                ),
+            )
             connection.execute(
                 """
                 UPDATE execution_leases
@@ -271,7 +317,11 @@ class SQLiteExecutionLeaseStore:
             )
             connection.execute("COMMIT")
 
-        record = self.latest(resource_uid)
+        record = self._one(
+            resource_uid=resource_uid,
+            epoch=epoch,
+            lease_id=lease_id,
+        )
         if record is None:
             raise ProtocolViolation("activated lease disappeared")
         return record
@@ -289,15 +339,22 @@ class SQLiteExecutionLeaseStore:
                 """
                 SELECT *
                 FROM execution_leases
-                WHERE resource_uid = ?
+                WHERE resource_uid = ? AND epoch = ? AND lease_id = ?
                 """,
-                (lease.resource_uid,),
+                (
+                    lease.resource_uid,
+                    lease.epoch,
+                    lease.lease_id,
+                ),
             ).fetchone()
             if row is None:
                 connection.execute("ROLLBACK")
                 raise ProtocolViolation("lease does not exist")
             current = self._record(row)
             self._assert_same(current, lease)
+            if current.state is not DurableLeaseState.ACTIVE:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation("only ACTIVE lease may be released")
             connection.execute(
                 """
                 UPDATE execution_leases
@@ -312,7 +369,11 @@ class SQLiteExecutionLeaseStore:
                 ),
             )
             connection.execute("COMMIT")
-        record = self.latest(lease.resource_uid)
+        record = self._one(
+            resource_uid=lease.resource_uid,
+            epoch=lease.epoch,
+            lease_id=lease.lease_id,
+        )
         if record is None:
             raise ProtocolViolation("released lease disappeared")
         return record
@@ -336,7 +397,11 @@ class SQLiteExecutionLeaseStore:
         now: datetime,
     ) -> DurableLeaseRecord:
         _require_aware(now, "now")
-        current = self.latest(lease.resource_uid)
+        current = self._one(
+            resource_uid=lease.resource_uid,
+            epoch=lease.epoch,
+            lease_id=lease.lease_id,
+        )
         if current is None:
             raise ProtocolViolation("durable lease does not exist")
         self._assert_same(current, lease)
@@ -402,10 +467,10 @@ def assert_target_fence(
 class KubernetesDeploymentFenceProjector:
     """Project a PREPARING durable epoch into the target Deployment.
 
-    This metadata-only CAS write is the bridge between the lease authority and
-    Kubernetes. Once it commits, every stale controller that read the target
-    before takeover holds an obsolete resourceVersion. A controller reading
-    afterwards sees the newer epoch and fails the target-fence check.
+    This metadata-only CAS write is the linearization bridge between the lease
+    authority and Kubernetes. Once it commits, every stale controller that read
+    the target before takeover holds an obsolete resourceVersion. A controller
+    reading afterwards sees the newer epoch and fails the target-fence check.
     """
 
     def __init__(self, api: KubernetesFenceTargetApi) -> None:
@@ -501,7 +566,7 @@ def acquire_fenced_execution_lease(
     now: datetime,
     ttl_seconds: int,
 ) -> ExecutionLease:
-    """Acquire a lease only after its epoch has fenced the provider target."""
+    """Activate a new owner only after its epoch has fenced the target."""
 
     prepared = authority.prepare(
         resource_uid=resource_uid,
