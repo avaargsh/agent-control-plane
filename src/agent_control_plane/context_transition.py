@@ -372,13 +372,29 @@ def validate_context_bound_execution(
         raise ProtocolViolation(
             "execution approval policy input binding mismatch"
         )
+    if approval.policy_decision_hash != authorization.policy_decision_hash:
+        raise ProtocolViolation(
+            "execution approval policy decision binding mismatch"
+        )
+    if approval.execution_principal != authorization.principal:
+        raise ProtocolViolation(
+            "execution approval principal binding mismatch"
+        )
     if approval.transition_hash != transition.transition_hash:
         raise ProtocolViolation(
             "execution approval transition binding mismatch"
         )
+    if approval.evidence_hash != evidence.manifest_hash:
+        raise ProtocolViolation(
+            "execution approval evidence binding mismatch"
+        )
     if approval.action_hash != action.action_hash:
         raise ProtocolViolation(
             "execution approval action binding mismatch"
+        )
+    if approval.generation != transition.expected_generation:
+        raise ProtocolViolation(
+            "execution approval generation binding mismatch"
         )
     if proposal.transition_hash != transition.transition_hash:
         raise ProtocolViolation(
