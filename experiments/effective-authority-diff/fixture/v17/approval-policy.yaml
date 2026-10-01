@@ -1,0 +1,21 @@
+apiVersion: security.example.io/v1
+kind: RefundGuardrails
+metadata:
+  name: refund-guardrails
+spec:
+  tools:
+    refund.execute:
+      maxAmountUSD: 5000
+      approvalRequired: true
+    refund.test_execute:
+      maxAmountUSD: 50
+      approvalRequired: false
+    refund.delegated_execute:
+      maxAmountUSD: 5000
+      approvalRequired: true
+    refund.recovery_execute:
+      maxAmountUSD: 5000
+      approvalRequired: true
+    refund.high_value_execute:
+      maxAmountUSD: 50
+      approvalRequired: true
