@@ -183,75 +183,55 @@ resourceVersion boundary.
 - AgentAuthorityEnvelope + Fleet/Agent authority inventory
 - deployment-time authority drift admission
 
-## Cross-agent work context proof
+## Cross-agent context and execution provenance
 
-The repository now includes a narrow cross-agent continuity proof: a versioned
-`WorkSnapshot`, append-only `WorkEvent` log, optimistic CAS, explicit ownership
-handoff, evidence references, and content-addressed `ContextProjection`.
-
-The important boundary is:
+The optional context path keeps **authoritative work state** separate from
+semantic memory and prompt history:
 
 ```text
-agents share canonical work state, not prompt blobs
-
-Memory  = what may be worth remembering
-State   = what is true now
-Context = what a specific agent should see now
+WorkSnapshot + WorkEvent
+        ↓
+ContextProjection
+        ↓
+TransitionProposalBinding
+        ↓
+Policy / signed approval / authorization
+        ↓
+ExecutionContextProvenance
+        ↓
+PREPARED attempt → provider side effect → reconcile
+        ↓
+COMMITTED result
+        ↓
+fresh observation + OutcomeContract
+        ↓
+ExecutionAttestation
 ```
 
-The reference test proves that Claude can hand work to Codex while a stale
-pre-handoff write is rejected by version fencing. The same contract is exposed
-through an optional principal-bound MCP v2 server.
+Key properties:
+
+- work updates use version/CAS semantics and an append-only hash-linked event
+  history;
+- Claude Code, Codex, or another MCP client can share one work store while
+  retaining distinct principals;
+- the provider execution boundary rejects stale context before mutation and on
+  owned replay;
+- crash recovery preserves the work/projection/proposal provenance in the
+  durable journal;
+- the final attestation binds the committed receipt to the exact transition,
+  outcome contract, and independently collected observation evidence.
+
+The local MCP server is optional:
 
 ```bash
-pytest tests/test_work_context.py tests/test_context_mcp.py -q
-python examples/cross_agent_context_demo.py
-
 pip install -e '.[mcp]'
 export AGENT_CONTEXT_PRINCIPAL_TYPE=agent
 export AGENT_CONTEXT_PRINCIPAL_SUBJECT=claude-code
 agent-context-mcp
 ```
 
-See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).
-
-## Context-bound transition proposals
-
-The optional cross-agent context path can now seal the exact
-`ContextProjection` seen by a proposing agent into a
-`TransitionProposalBinding`. Its hash is included in the frozen policy input,
-so the existing signed approval chain transitively binds the work version,
-snapshot hash and projection hash.
-
-Freshness is checked before authorization and again before the provider
-execution boundary. Existing `StateTransition/v1` and
-`AuthorizationBinding/v1` hashes are unchanged.
-
-See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).
-
-## Durable context provenance across crash recovery
-
-Context-bound execution attempts now persist an
-`ExecutionContextProvenance/v1` in the write-ahead journal before the
-provider mutation. Both the PREPARED `attempt_hash` and terminal
-`result_hash` bind the work version, work snapshot hash, context projection
-hash and transition proposal hash.
-
-The live kind proof deliberately crashes across the receipt boundary and
-reconstructs a COMMITTED attempt whose terminal receipt still carries the same
-context provenance.
-
-See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).
-
-## Execution attestation
-
-A committed execution can now be closed by
-`ExecutionAttestation/v1`, which binds the durable attempt/result hashes,
-optional cross-agent context provenance, the OutcomeContract, post-execution
-evidence, and verification status into one provider-independent
-`attestation_hash`.
-
-The live kind proof emits this attestation as a standalone uploaded artifact.
+See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md) for the protocol,
+host configuration, live handoff, and kind proof.
 
 ## Repository boundary in the broader AI infrastructure stack
 
