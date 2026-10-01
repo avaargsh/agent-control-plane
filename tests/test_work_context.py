@@ -376,3 +376,112 @@ def test_changes_since_with_snapshot_returns_one_consistent_tail(tmp_path):
     assert snapshot == progressed
     assert events[-1].to_version == snapshot.version
     assert events[-1].snapshot_hash == snapshot.snapshot_hash
+
+
+def test_authority_generation_tracks_authoritative_mutations(tmp_path):
+    store = SQLiteWorkContextStore(tmp_path / "context.db")
+    created = _created(store)
+    head1 = store.get_authority_head(created.work_id)
+
+    assert head1.generation == 1
+    assert head1.work_version == created.version
+    assert head1.work_snapshot_hash == created.snapshot_hash
+    head1.verify_snapshot(created)
+
+    claimed = store.claim(
+        work_id=created.work_id,
+        expected_version=created.version,
+        agent=CLAUDE,
+        claimed_at=NOW + timedelta(seconds=1),
+    )
+    head2 = store.get_authority_head(created.work_id)
+
+    assert head2.generation == 2
+    assert head2.work_version == claimed.version
+    assert head2.authority_hash != head1.authority_hash
+    head2.verify_snapshot(claimed)
+
+
+def test_context_overlay_does_not_advance_authority_generation(tmp_path):
+    path = tmp_path / "context.db"
+    store = SQLiteWorkContextStore(path)
+    created = _created(store)
+    claimed = store.claim(
+        work_id=created.work_id,
+        expected_version=created.version,
+        agent=CLAUDE,
+        claimed_at=NOW + timedelta(seconds=1),
+    )
+    before = store.get_authority_head(created.work_id)
+
+    from agent_control_plane.context_overlay import SQLiteContextOverlayStore
+
+    overlay = SQLiteContextOverlayStore(path)
+    overlay.append(
+        work_id=created.work_id,
+        expected_revision=0,
+        actor=CLAUDE,
+        entry_type="note",
+        payload={"message": "non-authoritative"},
+        created_at=NOW + timedelta(seconds=2),
+    )
+
+    after = store.get_authority_head(created.work_id)
+    current = store.get(created.work_id)
+
+    assert after == before
+    assert current == claimed
+
+
+def test_authoritative_noop_progress_is_rejected(tmp_path):
+    store = SQLiteWorkContextStore(tmp_path / "context.db")
+    created = _created(store)
+    claimed = store.claim(
+        work_id=created.work_id,
+        expected_version=created.version,
+        agent=CLAUDE,
+        claimed_at=NOW + timedelta(seconds=1),
+    )
+    head = store.get_authority_head(created.work_id)
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="authoritative work mutation cannot be a no-op",
+    ):
+        store.record_progress(
+            work_id=created.work_id,
+            expected_version=claimed.version,
+            actor=CLAUDE,
+            updated_at=NOW + timedelta(seconds=2),
+            status=claimed.status,
+        )
+
+    assert store.get(created.work_id) == claimed
+    assert store.get_authority_head(created.work_id) == head
+
+
+def test_legacy_work_store_backfills_authority_head_conservatively(tmp_path):
+    path = tmp_path / "context.db"
+    store = SQLiteWorkContextStore(path)
+    created = _created(store)
+    claimed = store.claim(
+        work_id=created.work_id,
+        expected_version=created.version,
+        agent=CLAUDE,
+        claimed_at=NOW + timedelta(seconds=1),
+    )
+
+    import sqlite3
+
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "DELETE FROM work_authority_heads WHERE work_id = ?",
+            (created.work_id,),
+        )
+        connection.commit()
+
+    backfilled = store.get_authority_head(created.work_id)
+
+    assert backfilled.generation == claimed.version
+    assert backfilled.work_version == claimed.version
+    backfilled.verify_snapshot(claimed)
