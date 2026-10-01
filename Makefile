@@ -1,5 +1,6 @@
 PYTHON ?= python3
 ARTIFACTS ?= .artifacts
+CONTEXT_DB ?= $(ARTIFACTS)/cross-agent-context/live-handoff.db
 
 .PHONY: setup test demo mcp-contract-proof context-live-handoff preflight smoke kind-transition-smoke verify-release audit-history clean
 
@@ -17,7 +18,7 @@ mcp-contract-proof:
 	$(PYTHON) experiments/v3_2/mcp_execution_contract.py
 
 context-live-handoff:
-	AGENT_CONTEXT_LIVE_HANDOFF=1 $(PYTHON) scripts/live_cross_agent_context_handoff.py
+	AGENT_CONTEXT_LIVE_HANDOFF=1 $(PYTHON) scripts/live_cross_agent_context_handoff.py --db $(CONTEXT_DB) --cwd $(CURDIR)
 
 preflight:
 	$(PYTHON) scripts/live_smoke_preflight.py
