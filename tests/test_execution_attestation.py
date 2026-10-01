@@ -44,6 +44,7 @@ def test_attestation_binds_committed_execution_and_context_provenance(
     attestation = ExecutionAttestation.seal(
         attestation_id="attestation-001",
         attempt=committed,
+        transition=fixture["transition"],
         outcome_contract=fixture["outcome"],
         observation_evidence=fixture["evidence"],
         verification_status="SUCCEEDED",
@@ -52,6 +53,7 @@ def test_attestation_binds_committed_execution_and_context_provenance(
     attestation.verify()
     attestation.verify_attempt(committed)
     attestation.verify_evidence(
+        transition=fixture["transition"],
         outcome_contract=fixture["outcome"],
         observation_evidence=fixture["evidence"],
     )
@@ -82,6 +84,7 @@ def test_attestation_rejects_prepared_attempt(tmp_path):
         ExecutionAttestation.seal(
             attestation_id="attestation-prepared",
             attempt=attempt,
+            transition=fixture["transition"],
             outcome_contract=fixture["outcome"],
             observation_evidence=fixture["evidence"],
             verification_status="SUCCEEDED",
@@ -134,6 +137,7 @@ def test_attestation_detects_tampering(tmp_path):
     attestation = ExecutionAttestation.seal(
         attestation_id="attestation-tamper",
         attempt=committed,
+        transition=fixture["transition"],
         outcome_contract=fixture["outcome"],
         observation_evidence=fixture["evidence"],
         verification_status="SUCCEEDED",
@@ -157,6 +161,7 @@ def test_attestation_detects_attempt_swap(tmp_path):
     attestation = ExecutionAttestation.seal(
         attestation_id="attestation-swap",
         attempt=committed,
+        transition=fixture["transition"],
         outcome_contract=fixture["outcome"],
         observation_evidence=fixture["evidence"],
         verification_status="SUCCEEDED",
@@ -204,6 +209,7 @@ def test_attestation_supports_non_context_attempt(tmp_path):
     attestation = ExecutionAttestation.seal(
         attestation_id="attestation-plain",
         attempt=committed,
+        transition=fixture["transition"],
         outcome_contract=fixture["outcome"],
         observation_evidence=fixture["evidence"],
         verification_status="SUCCEEDED",
