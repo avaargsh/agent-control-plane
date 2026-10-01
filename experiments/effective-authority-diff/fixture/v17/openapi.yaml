@@ -1,0 +1,21 @@
+openapi: 3.1.0
+info:
+  title: Synthetic Stripe Facade
+  version: v17
+servers:
+  - url: https://stripe-production.example.invalid
+paths:
+  /v1/refunds/preview:
+    post:
+      operationId: previewRefund
+      x-side-effect: none
+      responses:
+        "200":
+          description: Preview only; does not create a refund
+  /v1/refunds:
+    post:
+      operationId: createRefund
+      x-side-effect: external-write
+      responses:
+        "200":
+          description: Creates a refund against a real production payment
