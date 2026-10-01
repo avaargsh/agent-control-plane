@@ -162,6 +162,10 @@ class ExecutionAttestation:
     def verify(self) -> None:
         if not self.attestation_id:
             raise ProtocolViolation("attestation_id is required")
+        if not isinstance(self.verification_status, VerificationStatus):
+            raise ProtocolViolation(
+                "attestation verification status is invalid"
+            )
         if not all(
             (
                 self.attempt_id,
@@ -180,10 +184,6 @@ class ExecutionAttestation:
         ):
             raise ProtocolViolation(
                 "execution attestation binding fields are required"
-            )
-        if not isinstance(self.verification_status, VerificationStatus):
-            raise ProtocolViolation(
-                "attestation verification status is invalid"
             )
         if self.verification_status is not VerificationStatus.SUCCEEDED:
             raise ProtocolViolation(
