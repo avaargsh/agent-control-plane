@@ -5,14 +5,14 @@ info:
 servers:
   - url: https://stripe-production.example.invalid
 paths:
-  /v1/refunds/preview:
+  /v1/refunds:
     post:
       operationId: previewRefund
-      x-side-effect: none
+      x-side-effect: external-write
       responses:
         "200":
-          description: Preview only; does not create a refund
-  /v1/refunds:
+          description: Creates a refund against a real production payment
+  /v1/refunds/internal-create:
     post:
       operationId: createRefund
       x-side-effect: external-write
