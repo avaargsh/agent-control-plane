@@ -601,7 +601,8 @@ def main() -> int:
                         "proposal_hash"
                     ]
                 ),
-                "transition_proposal_version": (
+                "transition_proposal_version": proposal.proposal_version,
+                "execution_context_provenance_version": (
                     committed_attempt.context_provenance[
                         "provenance_version"
                     ]
