@@ -426,3 +426,86 @@ def test_equal_target_epoch_cannot_be_rebound_to_different_lease(tmp_path):
             namespace="prod",
             name="payment-api",
         )
+
+
+def test_crash_after_prepare_before_projection_leaves_no_executable_owner(
+    tmp_path,
+):
+    api = FencedFakeDeploymentApi()
+    fixture = build_transition(api)
+    store = SQLiteExecutionLeaseStore(tmp_path / "leases.db")
+
+    lease_a = _activate(
+        store,
+        api,
+        holder=fixture["holder"],
+        at=NOW,
+    )
+    _bind_fixture(fixture, lease_a)
+
+    prepared_b = store.prepare(
+        resource_uid="uid-payment-api",
+        holder=Principal(type="controller", subject="controller-b"),
+        now=NOW + timedelta(seconds=1),
+        ttl_seconds=300,
+    )
+    assert prepared_b.state is DurableLeaseState.PREPARING
+
+    with pytest.raises(ProtocolViolation):
+        store.assert_active(lease_a, now=NOW + timedelta(seconds=2))
+    with pytest.raises(
+        ProtocolViolation,
+        match="not ACTIVE",
+    ):
+        store.assert_active(
+            prepared_b.lease,
+            now=NOW + timedelta(seconds=2),
+        )
+
+    assert api.deployment["metadata"]["annotations"][
+        "agent-control-plane.openai.com/fence-epoch"
+    ] == "1"
+    assert api.deployment["spec"]["replicas"] == 20
+
+
+def test_crash_after_projection_before_activation_leaves_no_executable_owner(
+    tmp_path,
+):
+    api = FencedFakeDeploymentApi()
+    fixture = build_transition(api)
+    store = SQLiteExecutionLeaseStore(tmp_path / "leases.db")
+
+    lease_a = _activate(
+        store,
+        api,
+        holder=fixture["holder"],
+        at=NOW,
+    )
+    prepared_b = store.prepare(
+        resource_uid="uid-payment-api",
+        holder=Principal(type="controller", subject="controller-b"),
+        now=NOW + timedelta(seconds=1),
+        ttl_seconds=300,
+    )
+    KubernetesDeploymentFenceProjector(api).project(
+        record=prepared_b,
+        namespace="prod",
+        name="payment-api",
+    )
+
+    with pytest.raises(ProtocolViolation):
+        store.assert_active(lease_a, now=NOW + timedelta(seconds=2))
+    with pytest.raises(
+        ProtocolViolation,
+        match="not ACTIVE",
+    ):
+        store.assert_active(
+            prepared_b.lease,
+            now=NOW + timedelta(seconds=2),
+        )
+
+    assert api.deployment["metadata"]["annotations"][
+        "agent-control-plane.openai.com/fence-epoch"
+    ] == "2"
+    assert api.deployment["metadata"]["generation"] == 7
+    assert api.deployment["spec"]["replicas"] == 20
