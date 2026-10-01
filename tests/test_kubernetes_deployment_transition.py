@@ -10,24 +10,13 @@ from agent_control_plane.kubernetes_deployment_transition import (
 )
 from agent_control_plane.runtime_clients import RuntimeMutationOwnershipUncertain
 from agent_control_plane.state_transition_protocol import (
-    ActionIntent,
-    AuthorizationBinding,
-    EvidenceBundle,
-    EvidenceItem,
-    ExecutionFence,
-    ExecutionLease,
-    OutcomeCondition,
     OutcomeContract,
-    Principal,
     ProtocolViolation,
-    ResourceIdentity,
     StateTransition,
 )
 
-
 from kubernetes_testkit import (
     NOW,
-    FakeDeploymentApi,
     LostAckDeploymentApi,
     LostAckOwnedByOtherApi,
     build_transition,
