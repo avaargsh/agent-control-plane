@@ -253,7 +253,7 @@ def test_provider_requires_durable_active_lease_and_target_epoch(tmp_path):
     assert api.spec_patch_calls == 1
 
 
-def test_new_preparing_epoch_immediately_invalidates_old_durable_authority(
+def test_preparing_takeover_preserves_old_active_owner_until_projection(
     tmp_path,
 ):
     api = FencedFakeDeploymentApi()
@@ -265,23 +265,25 @@ def test_new_preparing_epoch_immediately_invalidates_old_durable_authority(
         holder=fixture["holder"],
         at=NOW,
     )
-    _bind_fixture(fixture, lease_a)
 
-    store.prepare(
+    prepared_b = store.prepare(
         resource_uid="uid-payment-api",
         holder=Principal(type="controller", subject="controller-b"),
         now=NOW + timedelta(seconds=1),
         ttl_seconds=300,
     )
 
-    with pytest.raises(
-        ProtocolViolation,
-        match="durable lease id changed",
-    ):
-        _execute(fixture, store)
-
-    assert api.spec_patch_calls == 0
-    assert api.deployment["spec"]["replicas"] == 20
+    active = store.assert_active(
+        lease_a,
+        now=NOW + timedelta(seconds=2),
+    )
+    assert active.state is DurableLeaseState.ACTIVE
+    assert prepared_b.state is DurableLeaseState.PREPARING
+    assert store.latest("uid-payment-api").lease.epoch == 2
+    assert store.active("uid-payment-api").lease.epoch == 1
+    assert api.deployment["metadata"]["annotations"][
+        "agent-control-plane.openai.com/fence-epoch"
+    ] == "1"
 
 
 def test_takeover_between_provider_check_and_patch_fences_stale_controller(
@@ -360,7 +362,7 @@ def test_stale_controller_reading_after_takeover_is_rejected_before_patch(
 
     with pytest.raises(
         ProtocolViolation,
-        match="durable lease id changed",
+        match="not ACTIVE: SUPERSEDED",
     ):
         _execute(fixture, store)
 
@@ -428,7 +430,50 @@ def test_equal_target_epoch_cannot_be_rebound_to_different_lease(tmp_path):
         )
 
 
-def test_crash_after_prepare_before_projection_leaves_no_executable_owner(
+def test_crash_after_prepare_before_projection_keeps_old_owner_valid(
+    tmp_path,
+):
+    api = FencedFakeDeploymentApi()
+    fixture = build_transition(api)
+    store = SQLiteExecutionLeaseStore(tmp_path / "leases.db")
+
+    lease_a = _activate(
+        store,
+        api,
+        holder=fixture["holder"],
+        at=NOW,
+    )
+
+    prepared_b = store.prepare(
+        resource_uid="uid-payment-api",
+        holder=Principal(type="controller", subject="controller-b"),
+        now=NOW + timedelta(seconds=1),
+        ttl_seconds=300,
+    )
+    assert prepared_b.state is DurableLeaseState.PREPARING
+
+    assert (
+        store.assert_active(
+            lease_a,
+            now=NOW + timedelta(seconds=2),
+        ).state
+        is DurableLeaseState.ACTIVE
+    )
+    with pytest.raises(
+        ProtocolViolation,
+        match="not ACTIVE",
+    ):
+        store.assert_active(
+            prepared_b.lease,
+            now=NOW + timedelta(seconds=2),
+        )
+
+    assert api.deployment["metadata"]["annotations"][
+        "agent-control-plane.openai.com/fence-epoch"
+    ] == "1"
+
+
+def test_crash_after_projection_before_activation_fences_old_target(
     tmp_path,
 ):
     api = FencedFakeDeploymentApi()
@@ -442,45 +487,6 @@ def test_crash_after_prepare_before_projection_leaves_no_executable_owner(
         at=NOW,
     )
     _bind_fixture(fixture, lease_a)
-
-    prepared_b = store.prepare(
-        resource_uid="uid-payment-api",
-        holder=Principal(type="controller", subject="controller-b"),
-        now=NOW + timedelta(seconds=1),
-        ttl_seconds=300,
-    )
-    assert prepared_b.state is DurableLeaseState.PREPARING
-
-    with pytest.raises(ProtocolViolation):
-        store.assert_active(lease_a, now=NOW + timedelta(seconds=2))
-    with pytest.raises(
-        ProtocolViolation,
-        match="not ACTIVE",
-    ):
-        store.assert_active(
-            prepared_b.lease,
-            now=NOW + timedelta(seconds=2),
-        )
-
-    assert api.deployment["metadata"]["annotations"][
-        "agent-control-plane.openai.com/fence-epoch"
-    ] == "1"
-    assert api.deployment["spec"]["replicas"] == 20
-
-
-def test_crash_after_projection_before_activation_leaves_no_executable_owner(
-    tmp_path,
-):
-    api = FencedFakeDeploymentApi()
-    fixture = build_transition(api)
-    store = SQLiteExecutionLeaseStore(tmp_path / "leases.db")
-
-    lease_a = _activate(
-        store,
-        api,
-        holder=fixture["holder"],
-        at=NOW,
-    )
     prepared_b = store.prepare(
         resource_uid="uid-payment-api",
         holder=Principal(type="controller", subject="controller-b"),
@@ -493,8 +499,15 @@ def test_crash_after_projection_before_activation_leaves_no_executable_owner(
         name="payment-api",
     )
 
-    with pytest.raises(ProtocolViolation):
-        store.assert_active(lease_a, now=NOW + timedelta(seconds=2))
+    # Durable authority still names A as ACTIVE until activation commits, but
+    # target fencing has already made A unable to mutate this Deployment.
+    assert (
+        store.assert_active(
+            lease_a,
+            now=NOW + timedelta(seconds=2),
+        ).state
+        is DurableLeaseState.ACTIVE
+    )
     with pytest.raises(
         ProtocolViolation,
         match="not ACTIVE",
@@ -503,6 +516,11 @@ def test_crash_after_projection_before_activation_leaves_no_executable_owner(
             prepared_b.lease,
             now=NOW + timedelta(seconds=2),
         )
+    with pytest.raises(
+        ProtocolViolation,
+        match="target fence epoch",
+    ):
+        _execute(fixture, store)
 
     assert api.deployment["metadata"]["annotations"][
         "agent-control-plane.openai.com/fence-epoch"
