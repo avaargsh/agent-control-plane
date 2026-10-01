@@ -11,7 +11,7 @@ from agent_control_plane.cli_runtime_transports import KubectlDeploymentApi
 from agent_control_plane.context_transition import (
     TransitionProposalBinding,
     authorize_context_bound_transition,
-    execution_context_provenance,
+    build_execution_context_provenance,
     seal_context_bound_policy_input,
 )
 from agent_control_plane.execution_attestation import ExecutionAttestation
