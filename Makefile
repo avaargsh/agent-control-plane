@@ -1,7 +1,7 @@
 PYTHON ?= python3
 ARTIFACTS ?= .artifacts
 
-.PHONY: setup test demo mcp-contract-proof preflight smoke kind-transition-smoke verify-release audit-history clean
+.PHONY: setup test demo mcp-contract-proof context-live-handoff preflight smoke kind-transition-smoke verify-release audit-history clean
 
 setup:
 	$(PYTHON) -m pip install -e '.[dev]'
@@ -15,6 +15,9 @@ demo:
 
 mcp-contract-proof:
 	$(PYTHON) experiments/v3_2/mcp_execution_contract.py
+
+context-live-handoff:
+	AGENT_CONTEXT_LIVE_HANDOFF=1 $(PYTHON) scripts/live_cross_agent_context_handoff.py
 
 preflight:
 	$(PYTHON) scripts/live_smoke_preflight.py
