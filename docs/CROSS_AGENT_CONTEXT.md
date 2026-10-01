@@ -270,6 +270,17 @@ MCP exposes:
 - `get_context_overlay`
 - `get_context_changes_since`
 
+`ContextOverlay/v2` separates **state identity** from the retrieval window.
+Its `overlay_hash` binds the observed authority snapshot, context revision and
+context head hash, but not `recent_entries`. Reading the same overlay with
+`recent_entry_limit=1` or `=8` therefore produces the same overlay identity.
+
+The overlay accepts only explicit non-authoritative entry types such as
+`note`, `review`, `review-note`, `summary`, `memory_hint`,
+`observation`, and `handoff_note`. Authority-shaped records such as
+approval, policy decision, desired state or authorization must use the
+authoritative protocol instead.
+
 Every overlay read includes the authoritative work version and snapshot hash
 observed in the same SQLite read transaction. This gives a caller a precise
 cross-check between the context stream and the authority snapshot it was read
@@ -289,10 +300,10 @@ The next implementation should remain small:
 
 1. run the opt-in Claude Code -> Codex live handoff on a configured developer
    workstation and retain its state/evidence artifact;
-2. introduce a v2 proposal binding that records context revision/hash for
-   provenance while invalidating only on authoritative WorkSnapshot drift;
-3. generalize the attestation producer/consumer interface so additional
-   providers can emit the same closure proof without depending on Kubernetes;
+2. introduce an explicit AuthorityGeneration protocol only after authority
+   mutation classes are structurally defined;
+3. generalize verification producers so additional providers can emit the same
+   sealed OutcomeVerificationResult contract;
 4. keep semantic memory pluggable rather than making it authoritative.
 
 
@@ -511,7 +522,7 @@ objects.
 ## Provider-independent execution attestation
 
 The execution chain now closes with a provider-independent
-`ExecutionAttestation/v1`.
+`ExecutionAttestation/v2`.
 
 It seals the durable execution receipt to independently observed verification:
 
@@ -523,10 +534,10 @@ ExecutionAttempt(COMMITTED)
           |
           + OutcomeContract hash
           + post-execution EvidenceBundle hash
-          + verification status/time
+          + OutcomeVerificationResult/v1 hash
           |
           v
-ExecutionAttestation
+ExecutionAttestation/v2
           |
      attestation_hash
 ```
@@ -537,7 +548,7 @@ be reused by future providers as long as they produce:
 - a COMMITTED durable execution attempt;
 - an independently collected observation/evidence hash;
 - an outcome contract hash;
-- a verification result.
+- a hash-sealed `OutcomeVerificationResult/v1` with status `SUCCEEDED`.
 
 For context-bound attempts, the attestation transitively closes the chain back
 to the exact work snapshot, projection and proposal through
