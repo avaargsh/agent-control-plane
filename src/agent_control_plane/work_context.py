@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
 
+from .authority_reservation import (
+    assert_authority_mutation_allowed,
+    initialize_authority_reservations,
+)
 from .state_transition_protocol import (
     Principal,
     ProtocolViolation,
@@ -19,6 +23,13 @@ from .state_transition_protocol import (
 def _require_aware(value: datetime, field_name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ProtocolViolation(f"{field_name} must be timezone-aware")
+
+
+Clock = Callable[[], datetime]
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _snapshot_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -532,8 +543,14 @@ class SQLiteWorkContextStore:
     compaction remain separate context sources.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        clock: Clock = _utc_now,
+    ) -> None:
         self.path = str(path)
+        self.clock = clock
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -609,6 +626,7 @@ class SQLiteWorkContextStore:
                 )
                 """
             )
+            initialize_authority_reservations(connection)
 
     @staticmethod
     def _parse_time(value: str) -> datetime:
@@ -1123,6 +1141,13 @@ class SQLiteWorkContextStore:
                 current,
             )
             authority.verify_snapshot(current)
+            mutation_now = self.clock()
+            _require_aware(mutation_now, "work context clock")
+            assert_authority_mutation_allowed(
+                connection,
+                work_id=work_id,
+                now=mutation_now,
+            )
 
             next_state = dict(current.state)
             next_state.update(state_patch_snapshot)
