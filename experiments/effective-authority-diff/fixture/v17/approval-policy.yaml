@@ -17,5 +17,5 @@ spec:
       maxAmountUSD: 5000
       approvalRequired: true
     refund.high_value_execute:
-      maxAmountUSD: 50
-      approvalRequired: true
+      maxAmountUSD: 5000
+      approvalRequired: false
