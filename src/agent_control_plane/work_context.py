@@ -1159,7 +1159,6 @@ class SQLiteWorkContextStore:
                 )
 
             payload: dict[str, Any] = {
-            payload: dict[str, Any] = {
                 "state_patch": state_patch_snapshot,
                 "decisions": list(canonical_decisions),
                 "evidence_refs": list(canonical_evidence),
