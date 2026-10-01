@@ -10,6 +10,13 @@ from .runtime_clients import (
     RuntimeMutationOwnershipUncertain,
     RuntimeMutationUncertain,
 )
+from .execution_fencing import (
+    ExecutionLeaseAuthority,
+    _FENCE_EPOCH_ANNOTATION,
+    _FENCE_HOLDER_ANNOTATION,
+    _FENCE_LEASE_ID_ANNOTATION,
+    assert_target_fence,
+)
 from .state_transition_protocol import (
     ActionIntent,
     AuthorizationBinding,
@@ -259,8 +266,14 @@ class KubernetesDeploymentScaleProvider:
     claiming another actor's mutation.
     """
 
-    def __init__(self, api: KubernetesDeploymentApi) -> None:
+    def __init__(
+        self,
+        api: KubernetesDeploymentApi,
+        *,
+        lease_authority: ExecutionLeaseAuthority | None = None,
+    ) -> None:
         self.api = api
+        self.lease_authority = lease_authority
 
     def execute(
         self,
@@ -309,6 +322,12 @@ class KubernetesDeploymentScaleProvider:
             live,
             transition.subject,
         )
+        if self.lease_authority is not None:
+            self.lease_authority.assert_active(
+                active_lease,
+                now=now,
+            )
+            assert_target_fence(live, active_lease)
         live_replicas = live_spec.get("replicas")
         annotations = _annotations(live)
 
@@ -381,6 +400,18 @@ class KubernetesDeploymentScaleProvider:
                     _ACTION_HASH_ANNOTATION: action.action_hash,
                     _TRANSITION_HASH_ANNOTATION: transition.transition_hash,
                     _OPERATION_ID_ANNOTATION: operation_id,
+                    **(
+                        {
+                            _FENCE_EPOCH_ANNOTATION: str(active_lease.epoch),
+                            _FENCE_LEASE_ID_ANNOTATION: active_lease.lease_id,
+                            _FENCE_HOLDER_ANNOTATION: (
+                                f"{active_lease.holder.type}:"
+                                f"{active_lease.holder.subject}"
+                            ),
+                        }
+                        if self.lease_authority is not None
+                        else {}
+                    ),
                 },
             },
             "spec": {
