@@ -366,6 +366,62 @@ mutation. There is deliberately no caller-supplied
 mutation must be introduced as a structurally separate API with fields excluded
 from the authority-state digest.
 
+## Authority reservation fence
+
+Proposal v3 freshness is protected across the provider mutation window by
+`AuthorityReservation/v1`.
+
+```text
+ExecutionLease                 AuthorityHead
+ provider ownership            generation/hash
+       |                            |
+       +------------+---------------+
+                    |
+                    v
+          AuthorityReservation
+          proposal_hash
+          operation_id
+          resource_uid
+          lease_id / epoch / holder
+                    |
+            BEGIN IMMEDIATE
+                    |
+        revalidate proposal v3
+                    |
+                    v
+              Provider PATCH
+         + action/transition hash
+         + operation id
+         + reservation hash
+                    |
+          successful ownership proof
+                    |
+                RELEASED
+```
+
+The reservation is stored in the same SQLite database as WorkSnapshot and
+AuthorityHead. Authoritative Work mutation and reservation acquisition both use
+`BEGIN IMMEDIATE`, giving a single linearization point:
+
+- if the authority mutation commits first, reservation acquisition sees a stale
+  generation/hash and fails;
+- if reservation acquisition commits first, authoritative Work mutation sees
+  the ACTIVE reservation and fails;
+- ContextOverlay writes remain independent and are not blocked.
+
+The reservation is not a second execution lease. It is bound to the existing
+ExecutionLease resource UID, lease ID, epoch, holder and expiry. A higher epoch
+for the same resource may supersede an abandoned reservation during controller
+takeover. Expired reservations stop blocking authority mutation.
+
+Successful provider acknowledgement, including a verified lost-ACK recovery,
+releases the reservation. An unresolved mutation-ownership result deliberately
+leaves it ACTIVE until lease expiry or higher-epoch takeover.
+
+The Kubernetes mutation writes the reservation hash into target annotations.
+The independent post-execution observation therefore carries that proof into
+the EvidenceBundle and final ExecutionAttestation/v2.
+
 ## Proposal binding v2: provenance without false invalidation
 
 `TransitionProposalBinding/v2` records both the authoritative work snapshot and
