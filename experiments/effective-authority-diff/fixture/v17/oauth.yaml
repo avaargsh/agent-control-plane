@@ -15,4 +15,6 @@ spec:
       scopes:
         - refund:read
         - refund:write
+  subAgentSessions:
+    scopeMode: inherit-parent
   tokenAudience: refund-mcp
