@@ -197,7 +197,9 @@ def test_legacy_journal_schema_is_migrated_without_invalidating_old_attempt(
     tmp_path,
 ):
     path = tmp_path / "legacy.db"
-    fixture, _, _, _, _, _ = _prepare_context_attempt(tmp_path / "seed")
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    fixture, _, _, _, _, _ = _prepare_context_attempt(seed)
 
     with sqlite3.connect(path) as connection:
         connection.execute(
