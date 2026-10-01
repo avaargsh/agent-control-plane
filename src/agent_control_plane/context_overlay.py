@@ -68,7 +68,8 @@ class ContextEntry:
         prior_entry_hash: str,
         created_at: datetime,
     ) -> "ContextEntry":
-        if not entry_id or not work_id or not entry_type.strip():
+        normalized_type = entry_type.strip()
+        if not entry_id or not work_id or not normalized_type:
             raise ProtocolViolation(
                 "context entry id, work id and type are required"
             )
@@ -87,7 +88,7 @@ class ContextEntry:
             work_id=work_id,
             revision=revision,
             actor=actor,
-            entry_type=entry_type,
+            entry_type=normalized_type,
             payload=payload_snapshot,
             prior_entry_hash=prior_entry_hash,
             created_at=created_at,
@@ -109,9 +110,14 @@ class ContextEntry:
         )
 
     def verify(self) -> None:
-        if not self.entry_id or not self.work_id or not self.entry_type.strip():
+        if (
+            not self.entry_id
+            or not self.work_id
+            or not self.entry_type
+            or self.entry_type != self.entry_type.strip()
+        ):
             raise ProtocolViolation(
-                "context entry id, work id and type are required"
+                "context entry id, work id and canonical type are required"
             )
         if self.revision <= 0:
             raise ProtocolViolation(
