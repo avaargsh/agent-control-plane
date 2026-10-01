@@ -2,10 +2,33 @@ PYTHON ?= python3
 ARTIFACTS ?= .artifacts
 CONTEXT_DB ?= $(ARTIFACTS)/cross-agent-context/live-handoff.db
 
-.PHONY: setup test demo mcp-contract-proof context-live-handoff preflight smoke kind-transition-smoke verify-release audit-history clean
+.PHONY: setup quality-context test demo mcp-contract-proof context-live-handoff preflight smoke kind-transition-smoke verify-release audit-history clean
 
 setup:
 	$(PYTHON) -m pip install -e '.[dev]'
+
+quality-context:
+	$(PYTHON) -m ruff check \
+		src/agent_control_plane/work_context.py \
+		src/agent_control_plane/context_mcp.py \
+		src/agent_control_plane/context_transition.py \
+		src/agent_control_plane/execution_provenance.py \
+		src/agent_control_plane/execution_journal.py \
+		src/agent_control_plane/execution_attestation.py \
+		src/agent_control_plane/kubernetes_deployment_transition.py \
+		scripts/kubernetes_transition_smoke.py \
+		scripts/live_cross_agent_context_handoff.py \
+		tests/kubernetes_testkit.py \
+		tests/context_testkit.py \
+		tests/test_work_context.py \
+		tests/test_context_mcp.py \
+		tests/test_context_transition.py \
+		tests/test_context_host_configs.py \
+		tests/test_kubernetes_deployment_transition.py \
+		tests/test_kubernetes_context_bound_execution.py \
+		tests/test_execution_journal.py \
+		tests/test_execution_context_provenance.py \
+		tests/test_execution_attestation.py
 
 test:
 	$(PYTHON) -m pytest -q

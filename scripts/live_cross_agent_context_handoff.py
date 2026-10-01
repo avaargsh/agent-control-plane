@@ -93,7 +93,6 @@ def main() -> int:
 
     work_id = args.work_id or f"live-context-{uuid4().hex[:12]}"
     human = Principal(type="human", subject="live-smoke")
-    claude = Principal(type="agent", subject="claude-code")
     codex = Principal(type="agent", subject="codex")
 
     store = SQLiteWorkContextStore(db_path)

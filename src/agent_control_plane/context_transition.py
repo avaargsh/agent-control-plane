@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Mapping
 
+from .execution_provenance import ExecutionContextProvenance
 from .policy_replay import (
     PolicyDecisionRecord,
     TransitionPolicyInput,
@@ -166,6 +167,22 @@ class TransitionProposalBinding:
             raise ProtocolViolation(
                 "context projection does not match transition proposal"
             )
+
+
+def build_execution_context_provenance(
+    proposal: TransitionProposalBinding,
+) -> ExecutionContextProvenance:
+    """Project a proposal binding into durable execution provenance."""
+
+    proposal.verify()
+    return ExecutionContextProvenance.seal(
+        work_id=proposal.work_id,
+        work_version=proposal.work_version,
+        work_snapshot_hash=proposal.work_snapshot_hash,
+        projection_hash=proposal.projection_hash,
+        proposal_hash=proposal.proposal_hash,
+        proposer=proposal.proposer,
+    )
 
 
 def assert_proposal_fresh(

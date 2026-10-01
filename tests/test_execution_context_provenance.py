@@ -5,7 +5,6 @@ import pytest
 
 from agent_control_plane.execution_journal import (
     ExecutionAttemptState,
-    ExecutionContextProvenance,
     ReconcileStatus,
     SQLiteExecutionJournal,
     reconcile_deployment_attempt,
@@ -14,25 +13,7 @@ from agent_control_plane.kubernetes_deployment_transition import (
     KubernetesDeploymentScaleProvider,
 )
 from agent_control_plane.state_transition_protocol import ProtocolViolation
-from test_kubernetes_context_bound_execution import (
-    _build_context_bound_execution,
-)
-from test_kubernetes_deployment_transition import NOW
-
-
-def _prepare_context_attempt(tmp_path):
-    fixture, _, proposal, context = _build_context_bound_execution(tmp_path)
-    journal = SQLiteExecutionJournal(tmp_path / "execution.db")
-    provenance = ExecutionContextProvenance.seal(proposal=proposal)
-    attempt = journal.prepare(
-        transition=fixture["transition"],
-        action=fixture["action"],
-        authorization=fixture["authorization"],
-        fence=fixture["fence"],
-        prepared_at=NOW + timedelta(seconds=4),
-        context_provenance=provenance,
-    )
-    return fixture, proposal, context, journal, provenance, attempt
+from context_testkit import NOW, prepare_context_attempt
 
 
 def test_prepared_attempt_persists_context_provenance_across_restart(
@@ -40,12 +21,13 @@ def test_prepared_attempt_persists_context_provenance_across_restart(
 ):
     (
         _,
+        _,
         proposal,
         _,
         journal,
         provenance,
         attempt,
-    ) = _prepare_context_attempt(tmp_path)
+    ) = prepare_context_attempt(tmp_path)
 
     restarted = SQLiteExecutionJournal(journal.path)
     recovered = restarted.get(attempt.attempt_id)
@@ -80,10 +62,11 @@ def test_terminal_receipt_hash_binds_context_provenance(tmp_path):
         _,
         _,
         _,
+        _,
         journal,
         provenance,
         attempt,
-    ) = _prepare_context_attempt(tmp_path)
+    ) = prepare_context_attempt(tmp_path)
 
     committed = journal.commit(
         attempt,
@@ -105,11 +88,12 @@ def test_crash_reconcile_preserves_context_provenance_in_receipt(tmp_path):
     (
         fixture,
         _,
+        _,
         context,
         journal,
         provenance,
         attempt,
-    ) = _prepare_context_attempt(tmp_path)
+    ) = prepare_context_attempt(tmp_path)
 
     receipt = KubernetesDeploymentScaleProvider(
         fixture["api"],
@@ -127,7 +111,10 @@ def test_crash_reconcile_preserves_context_provenance_in_receipt(tmp_path):
         context_binding=context,
     )
     assert receipt.changed is True
-    assert journal.get(attempt.attempt_id).state is ExecutionAttemptState.PREPARED
+    assert (
+        journal.get(attempt.attempt_id).state
+        is ExecutionAttemptState.PREPARED
+    )
 
     restarted = SQLiteExecutionJournal(journal.path)
     reconciled = reconcile_deployment_attempt(
@@ -153,7 +140,15 @@ def test_crash_reconcile_preserves_context_provenance_in_receipt(tmp_path):
 
 
 def test_open_attempt_rejects_different_context_provenance(tmp_path):
-    fixture, _, _, journal, _, _ = _prepare_context_attempt(tmp_path)
+    (
+        fixture,
+        _,
+        _,
+        _,
+        journal,
+        _,
+        _,
+    ) = prepare_context_attempt(tmp_path)
 
     with pytest.raises(
         ProtocolViolation,
@@ -170,7 +165,15 @@ def test_open_attempt_rejects_different_context_provenance(tmp_path):
 
 
 def test_tampered_context_provenance_is_rejected_by_digest(tmp_path):
-    _, _, _, journal, _, attempt = _prepare_context_attempt(tmp_path)
+    (
+        _,
+        _,
+        _,
+        _,
+        journal,
+        _,
+        attempt,
+    ) = prepare_context_attempt(tmp_path)
 
     with sqlite3.connect(journal.path) as connection:
         connection.execute(
@@ -199,7 +202,15 @@ def test_legacy_journal_schema_is_migrated_without_invalidating_old_attempt(
     path = tmp_path / "legacy.db"
     seed = tmp_path / "seed"
     seed.mkdir()
-    fixture, _, _, _, _, _ = _prepare_context_attempt(seed)
+    (
+        fixture,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = prepare_context_attempt(seed)
 
     with sqlite3.connect(path) as connection:
         connection.execute(

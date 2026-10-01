@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
-from .context_transition import TransitionProposalBinding
+from .execution_provenance import ExecutionContextProvenance
 from .state_transition_protocol import (
     ActionIntent,
     AuthorizationBinding,
@@ -59,91 +59,6 @@ class ExecutionAttemptState(str, Enum):
     COMMITTED = "COMMITTED"
     ABORTED = "ABORTED"
     UNKNOWN = "UNKNOWN"
-
-
-@dataclass(frozen=True)
-class ExecutionContextProvenance:
-    work_id: str
-    work_version: int
-    work_snapshot_hash: str
-    projection_hash: str
-    proposal_hash: str
-    proposer_type: str
-    proposer_subject: str
-    provenance_hash: str
-    provenance_version: str = "execution-context-provenance/v1"
-
-    @classmethod
-    def seal(
-        cls,
-        *,
-        proposal: TransitionProposalBinding,
-    ) -> "ExecutionContextProvenance":
-        proposal.verify()
-        provisional = cls(
-            work_id=proposal.work_id,
-            work_version=proposal.work_version,
-            work_snapshot_hash=proposal.work_snapshot_hash,
-            projection_hash=proposal.projection_hash,
-            proposal_hash=proposal.proposal_hash,
-            proposer_type=proposal.proposer.type,
-            proposer_subject=proposal.proposer.subject,
-            provenance_hash="",
-        )
-        return cls(
-            work_id=provisional.work_id,
-            work_version=provisional.work_version,
-            work_snapshot_hash=provisional.work_snapshot_hash,
-            projection_hash=provisional.projection_hash,
-            proposal_hash=provisional.proposal_hash,
-            proposer_type=provisional.proposer_type,
-            proposer_subject=provisional.proposer_subject,
-            provenance_hash=canonical_digest(
-                provisional,
-                exclude=("provenance_hash",),
-            ),
-        )
-
-    def verify(self) -> None:
-        if not self.work_id:
-            raise ProtocolViolation("execution provenance work_id is required")
-        if self.work_version <= 0:
-            raise ProtocolViolation(
-                "execution provenance work_version must be positive"
-            )
-        if not all(
-            (
-                self.work_snapshot_hash,
-                self.projection_hash,
-                self.proposal_hash,
-                self.proposer_type,
-                self.proposer_subject,
-            )
-        ):
-            raise ProtocolViolation(
-                "execution context provenance fields are required"
-            )
-        actual = canonical_digest(
-            self,
-            exclude=("provenance_hash",),
-        )
-        if actual != self.provenance_hash:
-            raise ProtocolViolation(
-                "execution context provenance digest mismatch"
-            )
-
-    def as_mapping(self) -> dict[str, Any]:
-        self.verify()
-        return {
-            "work_id": self.work_id,
-            "work_version": self.work_version,
-            "work_snapshot_hash": self.work_snapshot_hash,
-            "projection_hash": self.projection_hash,
-            "proposal_hash": self.proposal_hash,
-            "proposer_type": self.proposer_type,
-            "proposer_subject": self.proposer_subject,
-            "provenance_version": self.provenance_version,
-        }
 
 
 @dataclass(frozen=True)

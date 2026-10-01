@@ -17,4 +17,5 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -U pip
       - run: pip install -e ".[dev]"
+      - run: make quality-context
       - run: pytest -q

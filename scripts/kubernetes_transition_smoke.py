@@ -11,6 +11,7 @@ from agent_control_plane.cli_runtime_transports import KubectlDeploymentApi
 from agent_control_plane.context_transition import (
     TransitionProposalBinding,
     authorize_context_bound_transition,
+    build_execution_context_provenance,
     seal_context_bound_policy_input,
 )
 from agent_control_plane.execution_attestation import ExecutionAttestation
@@ -20,7 +21,6 @@ from agent_control_plane.execution_fencing import (
     acquire_fenced_execution_lease,
 )
 from agent_control_plane.execution_journal import (
-    ExecutionContextProvenance,
     ReconcileStatus,
     SQLiteExecutionJournal,
     reconcile_deployment_attempt,
@@ -82,7 +82,8 @@ def run(command: list[str], *, input_text: str | None = None) -> str:
 
 
 def bootstrap(context: str) -> None:
-    namespace = run(\n        [
+    namespace = run(
+        [
             "kubectl",
             "--context",
             context,
@@ -402,16 +403,14 @@ def main() -> int:
     )
     os.makedirs(os.path.dirname(journal_db) or ".", exist_ok=True)
     execution_journal = SQLiteExecutionJournal(journal_db)
-    execution_context_provenance = ExecutionContextProvenance.seal(
-        proposal=proposal,
-    )
+    durable_context = build_execution_context_provenance(proposal)
     attempt = execution_journal.prepare(
         transition=transition,
         action=action,
         authorization=authorization,
         fence=fence,
         prepared_at=datetime.now(timezone.utc),
-        context_provenance=execution_context_provenance,
+        context_provenance=durable_context,
     )
 
     context_binding = ContextBoundExecutionContext(
@@ -464,7 +463,7 @@ def main() -> int:
         )
     if (
         committed_attempt.context_provenance_hash
-        != execution_context_provenance.provenance_hash
+        != durable_context.provenance_hash
     ):
         raise RuntimeError(
             "reconciled execution attempt lost context provenance"
@@ -475,7 +474,7 @@ def main() -> int:
     if (
         not isinstance(terminal_context, dict)
         or terminal_context.get("provenance_hash")
-        != execution_context_provenance.provenance_hash
+        != durable_context.provenance_hash
     ):
         raise RuntimeError(
             "terminal execution receipt lost context provenance"
@@ -506,10 +505,9 @@ def main() -> int:
             attestation = ExecutionAttestation.seal(
                 attestation_id="kind-live-execution-attestation-20-30",
                 attempt=committed_attempt,
-                outcome_contract_hash=outcome.contract_hash,
-                observation_evidence_hash=(
-                    observation.evidence_bundle.manifest_hash
-                ),
+                transition=transition,
+                outcome_contract=outcome,
+                observation_evidence=observation.evidence_bundle,
                 verification_status=last.status.value,
                 verified_at=checked_at,
             )
