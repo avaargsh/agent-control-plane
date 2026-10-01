@@ -19,6 +19,7 @@ from agent_control_plane.execution_fencing import (
     acquire_fenced_execution_lease,
 )
 from agent_control_plane.execution_journal import (
+    ExecutionContextProvenance,
     ReconcileStatus,
     SQLiteExecutionJournal,
     reconcile_deployment_attempt,
@@ -400,12 +401,16 @@ def main() -> int:
     )
     os.makedirs(os.path.dirname(journal_db) or ".", exist_ok=True)
     execution_journal = SQLiteExecutionJournal(journal_db)
+    execution_context_provenance = ExecutionContextProvenance.seal(
+        proposal=proposal,
+    )
     attempt = execution_journal.prepare(
         transition=transition,
         action=action,
         authorization=authorization,
         fence=fence,
         prepared_at=datetime.now(timezone.utc),
+        context_provenance=execution_context_provenance,
     )
 
     context_binding = ContextBoundExecutionContext(
@@ -456,6 +461,24 @@ def main() -> int:
         raise RuntimeError(
             "reconciled execution attempt was not durably committed"
         )
+    if (
+        committed_attempt.context_provenance_hash
+        != execution_context_provenance.provenance_hash
+    ):
+        raise RuntimeError(
+            "reconciled execution attempt lost context provenance"
+        )
+    terminal_context = committed_attempt.result.get(
+        "_execution_context_provenance"
+    )
+    if (
+        not isinstance(terminal_context, dict)
+        or terminal_context.get("provenance_hash")
+        != execution_context_provenance.provenance_hash
+    ):
+        raise RuntimeError(
+            "terminal execution receipt lost context provenance"
+        )
 
     observer = KubernetesDeploymentObserver(
         api,
@@ -486,11 +509,30 @@ def main() -> int:
                 "policy_input_hash": policy_input.input_hash,
                 "policy_decision_hash": policy_decision.decision_hash,
                 "authorization_hash": authorization.authorization_hash,
-                "work_id": work.work_id,
-                "work_version": work.version,
-                "work_snapshot_hash": work.snapshot_hash,
-                "context_projection_hash": projection.projection_hash,
-                "transition_proposal_hash": proposal.proposal_hash,
+                "work_id": committed_attempt.context_provenance[
+                    "work_id"
+                ],
+                "work_version": committed_attempt.context_provenance[
+                    "work_version"
+                ],
+                "work_snapshot_hash": (
+                    committed_attempt.context_provenance[
+                        "work_snapshot_hash"
+                    ]
+                ),
+                "context_projection_hash": (
+                    committed_attempt.context_provenance[
+                        "projection_hash"
+                    ]
+                ),
+                "transition_proposal_hash": (
+                    committed_attempt.context_provenance[
+                        "proposal_hash"
+                    ]
+                ),
+                "execution_context_provenance_hash": (
+                    committed_attempt.context_provenance_hash
+                ),
                 "approval_id": approval.approval_id,
                 "approval_hash": approval.approval_hash,
                 "approval_key_id": signed_approval.key_id,
@@ -501,6 +543,9 @@ def main() -> int:
                 "operation_id": attempt.operation_id,
                 "reconcile_status": reconciled.status.value,
                 "reconciled_result_hash": committed_attempt.result_hash,
+                "terminal_context_provenance_hash": terminal_context[
+                    "provenance_hash"
+                ],
                 "evidence_before": evidence.manifest_hash,
                 "evidence_after": (
                     observation.evidence_bundle.manifest_hash

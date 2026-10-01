@@ -229,6 +229,20 @@ execution boundary. Existing `StateTransition/v1` and
 
 See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).
 
+## Durable context provenance across crash recovery
+
+Context-bound execution attempts now persist an
+`ExecutionContextProvenance/v1` in the write-ahead journal before the
+provider mutation. Both the PREPARED `attempt_hash` and terminal
+`result_hash` bind the work version, work snapshot hash, context projection
+hash and transition proposal hash.
+
+The live kind proof deliberately crashes across the receipt boundary and
+reconstructs a COMMITTED attempt whose terminal receipt still carries the same
+context provenance.
+
+See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).
+
 ## Repository boundary in the broader AI infrastructure stack
 
 This repository is the **primary Agent Infra control-plane product**. Adjacent repositories have narrower roles:
