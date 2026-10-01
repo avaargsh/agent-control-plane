@@ -14,6 +14,7 @@ quality-context:
 		src/agent_control_plane/context_overlay.py \
 		src/agent_control_plane/context_transition.py \
 		src/agent_control_plane/execution_provenance.py \
+		src/agent_control_plane/execution_verification.py \
 		src/agent_control_plane/execution_journal.py \
 		src/agent_control_plane/execution_attestation.py \
 		src/agent_control_plane/kubernetes_deployment_transition.py \
