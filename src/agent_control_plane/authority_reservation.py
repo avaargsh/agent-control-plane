@@ -94,7 +94,7 @@ class AuthorityReservation:
             state=provisional.state,
             reservation_hash=canonical_digest(
                 provisional,
-                exclude=("reservation_hash",),
+                exclude=("reservation_hash", "state"),
             ),
         )
 
@@ -123,7 +123,7 @@ class AuthorityReservation:
             )
         actual = canonical_digest(
             self,
-            exclude=("reservation_hash",),
+            exclude=("reservation_hash", "state"),
         )
         if actual != self.reservation_hash:
             raise ProtocolViolation(
@@ -529,29 +529,8 @@ class SQLiteAuthorityReservationStore:
                 "released authority reservation disappeared"
             )
 
-        # State is mutable durable lifecycle metadata. The reservation hash
-        # attests the acquisition binding and therefore intentionally retains
-        # the original ACTIVE-state digest in stored history.
-        released = self._record_without_hash_check(row)
-        return released
-
-    @staticmethod
-    def _record_without_hash_check(
-        row: sqlite3.Row,
-    ) -> AuthorityReservation:
-        return AuthorityReservation(
-            reservation_id=row["reservation_id"],
-            work_id=row["work_id"],
-            authority_generation=int(row["authority_generation"]),
-            authority_hash=row["authority_hash"],
-            lease_id=row["lease_id"],
-            lease_epoch=int(row["lease_epoch"]),
-            holder=Principal(
-                type=row["holder_type"],
-                subject=row["holder_subject"],
-            ),
-            acquired_at=_parse_time(row["acquired_at"]),
-            expires_at=_parse_time(row["expires_at"]),
-            state=AuthorityReservationState(row["state"]),
-            reservation_hash=row["reservation_hash"],
-        )
+        if row is None:
+            raise ProtocolViolation(
+                "released authority reservation disappeared"
+            )
+        return self._record(row)
