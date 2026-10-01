@@ -237,7 +237,7 @@ class ContextOverlay:
     head_hash: str
     recent_entries: tuple[ContextEntry, ...]
     overlay_hash: str
-    overlay_version: str = "context-overlay/v1"
+    overlay_version: str = "context-overlay/v2"
 
     @classmethod
     def seal(
@@ -285,7 +285,7 @@ class ContextOverlay:
             recent_entries=provisional.recent_entries,
             overlay_hash=canonical_digest(
                 provisional,
-                exclude=("overlay_hash",),
+                exclude=("overlay_hash", "recent_entries"),
             ),
         )
 
@@ -308,7 +308,7 @@ class ContextOverlay:
         )
         actual = canonical_digest(
             self,
-            exclude=("overlay_hash",),
+            exclude=("overlay_hash", "recent_entries"),
         )
         if actual != self.overlay_hash:
             raise ProtocolViolation(
