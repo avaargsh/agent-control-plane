@@ -12,6 +12,7 @@ from .state_transition_protocol import (
     EvidenceBundle,
     OutcomeContract,
     ProtocolViolation,
+    StateTransition,
     canonical_digest,
 )
 
@@ -53,6 +54,7 @@ class ExecutionAttestation:
         *,
         attestation_id: str,
         attempt: ExecutionAttempt,
+        transition: StateTransition,
         outcome_contract: OutcomeContract,
         observation_evidence: EvidenceBundle,
         verification_status: str,
@@ -65,6 +67,7 @@ class ExecutionAttestation:
                 "attestation verification_status is required"
             )
         _require_aware(verified_at, "verified_at")
+        transition.verify()
         outcome_contract.verify()
         observation_evidence.verify()
 
@@ -76,6 +79,18 @@ class ExecutionAttestation:
         if attempt.result_hash is None:
             raise ProtocolViolation(
                 "execution attestation requires terminal result hash"
+            )
+        if attempt.transition_hash != transition.transition_hash:
+            raise ProtocolViolation(
+                "attestation transition does not match execution attempt"
+            )
+        if transition.outcome_contract_hash != outcome_contract.contract_hash:
+            raise ProtocolViolation(
+                "attestation outcome contract does not match transition"
+            )
+        if observation_evidence.resource != transition.subject:
+            raise ProtocolViolation(
+                "attestation observation does not match transition resource"
             )
         if observation_evidence.resource.resource_uid != attempt.resource_uid:
             raise ProtocolViolation(
@@ -188,12 +203,22 @@ class ExecutionAttestation:
     def verify_evidence(
         self,
         *,
+        transition: StateTransition,
         outcome_contract: OutcomeContract,
         observation_evidence: EvidenceBundle,
     ) -> None:
         self.verify()
+        transition.verify()
         outcome_contract.verify()
         observation_evidence.verify()
+        if transition.transition_hash != self.transition_hash:
+            raise ProtocolViolation(
+                "execution attestation transition binding mismatch"
+            )
+        if transition.outcome_contract_hash != outcome_contract.contract_hash:
+            raise ProtocolViolation(
+                "execution attestation transition outcome binding mismatch"
+            )
         if outcome_contract.contract_hash != self.outcome_contract_hash:
             raise ProtocolViolation(
                 "execution attestation outcome contract binding mismatch"
@@ -205,9 +230,13 @@ class ExecutionAttestation:
             raise ProtocolViolation(
                 "execution attestation observation evidence binding mismatch"
             )
-        if observation_evidence.resource.resource_uid != self.resource_uid:
+        if observation_evidence.resource != transition.subject:
             raise ProtocolViolation(
                 "execution attestation observation resource mismatch"
+            )
+        if observation_evidence.resource.resource_uid != self.resource_uid:
+            raise ProtocolViolation(
+                "execution attestation observation execution mismatch"
             )
 
     def as_mapping(self) -> dict[str, Any]:
