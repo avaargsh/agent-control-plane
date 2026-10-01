@@ -1,0 +1,15 @@
+{
+  "serviceAccount": "system:serviceaccount:support:refund-agent",
+  "role": "arn:aws:iam::111122223333:role/refund-agent",
+  "trustedSubjects": [
+    "refund-agent"
+  ],
+  "delegatedSessionTags": {
+    "support-user": "support-user",
+    "supervisor-user": "supervisor-user"
+  },
+  "allowedSecretRefs": [
+    "stripe-sandbox-rw",
+    "stripe-prod-rw"
+  ]
+}
