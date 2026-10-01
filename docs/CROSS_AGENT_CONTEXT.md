@@ -157,14 +157,93 @@ If the protocol proves useful independently, the storage/MCP surface should be
 split into its own repository instead of expanding this project into a general
 memory or agent framework.
 
+
+## MCP surface
+
+The reference context plane is now exposed through the official MCP Python SDK
+v2. Local use defaults to stdio. The MCP package remains optional so the core
+control-plane library does not depend on an agent protocol runtime.
+
+Install:
+
+```bash
+pip install -e '.[mcp]'
+```
+
+Each MCP server process is bound to exactly one principal by its environment.
+Mutation tools do not accept an actor parameter.
+
+```bash
+export AGENT_CONTEXT_DB=$PWD/.artifacts/cross-agent-context/context.db
+
+export AGENT_CONTEXT_PRINCIPAL_TYPE=agent
+export AGENT_CONTEXT_PRINCIPAL_SUBJECT=claude-code
+
+agent-context-mcp
+```
+
+A second harness can launch the same command against the same database with a
+different bound identity:
+
+```bash
+export AGENT_CONTEXT_DB=$PWD/.artifacts/cross-agent-context/context.db
+
+export AGENT_CONTEXT_PRINCIPAL_TYPE=agent
+export AGENT_CONTEXT_PRINCIPAL_SUBJECT=codex
+
+agent-context-mcp
+```
+
+The current tool surface is deliberately small:
+
+- `create_work`
+- `get_work`
+- `get_changes_since`
+- `claim_work`
+- `record_progress`
+- `handoff_work`
+- `complete_work`
+
+`get_work` returns a content-addressed `ContextProjection` rather than a raw
+chat transcript. It contains the latest authoritative snapshot plus recent
+work events for the bound consumer.
+
+The environment principal is only a local reference identity boundary. A
+networked deployment must bind principals from authenticated transport/service
+identity rather than trusting caller-supplied environment values.
+
+### MCP handoff contract test
+
+The test suite now drives three in-process MCP clients over the official SDK:
+
+```text
+Human MCP client
+    create_work(v1)
+        |
+Claude MCP client
+    claim(v1) -> v2
+    progress(v2) -> v3
+    handoff(Codex, v3) -> v4
+        |
+Codex MCP client
+    get_work() -> ContextProjection(v4)
+    progress(v4) -> v5
+        |
+stale Claude MCP client
+    progress(v3) -> ERROR
+```
+
+This proves the MCP transport does not weaken the underlying optimistic
+concurrency and ownership semantics.
+
 ## Next slice
 
 The next implementation should remain small:
 
-1. expose `get_work`, `get_changes_since`, `claim_work`, `record_progress`, and
-   `handoff_work` through MCP;
-2. add a real Claude Code -> Codex handoff fixture;
-3. bind a `ContextProjection.projection_hash` into a proposed
+1. add concrete Claude Code and Codex host configuration examples that launch
+   distinct principal-bound MCP server processes over one store;
+2. bind a `ContextProjection.projection_hash` into a proposed
    `StateTransition`, so execution can prove exactly which work snapshot the
    proposing agent saw;
+3. add projection freshness checks before authorization/execution;
 4. keep semantic memory pluggable rather than making it authoritative.
