@@ -9,6 +9,8 @@ from .execution_journal import (
     ExecutionAttemptState,
 )
 from .state_transition_protocol import (
+    EvidenceBundle,
+    OutcomeContract,
     ProtocolViolation,
     canonical_digest,
 )
@@ -51,26 +53,20 @@ class ExecutionAttestation:
         *,
         attestation_id: str,
         attempt: ExecutionAttempt,
-        outcome_contract_hash: str,
-        observation_evidence_hash: str,
+        outcome_contract: OutcomeContract,
+        observation_evidence: EvidenceBundle,
         verification_status: str,
         verified_at: datetime,
     ) -> "ExecutionAttestation":
         if not attestation_id:
             raise ProtocolViolation("attestation_id is required")
-        if not outcome_contract_hash:
-            raise ProtocolViolation(
-                "attestation outcome_contract_hash is required"
-            )
-        if not observation_evidence_hash:
-            raise ProtocolViolation(
-                "attestation observation_evidence_hash is required"
-            )
         if not verification_status:
             raise ProtocolViolation(
                 "attestation verification_status is required"
             )
         _require_aware(verified_at, "verified_at")
+        outcome_contract.verify()
+        observation_evidence.verify()
 
         attempt.verify()
         if attempt.state is not ExecutionAttemptState.COMMITTED:
@@ -80,6 +76,10 @@ class ExecutionAttestation:
         if attempt.result_hash is None:
             raise ProtocolViolation(
                 "execution attestation requires terminal result hash"
+            )
+        if observation_evidence.resource.resource_uid != attempt.resource_uid:
+            raise ProtocolViolation(
+                "attestation observation resource does not match execution"
             )
 
         provisional = cls(
@@ -93,8 +93,8 @@ class ExecutionAttestation:
             attempt_hash=attempt.attempt_hash,
             terminal_result_hash=attempt.result_hash,
             context_provenance_hash=attempt.context_provenance_hash,
-            outcome_contract_hash=outcome_contract_hash,
-            observation_evidence_hash=observation_evidence_hash,
+            outcome_contract_hash=outcome_contract.contract_hash,
+            observation_evidence_hash=observation_evidence.manifest_hash,
             verification_status=verification_status,
             verified_at=verified_at,
             attestation_hash="",
@@ -183,6 +183,31 @@ class ExecutionAttestation:
         if actual != expected:
             raise ProtocolViolation(
                 "execution attestation attempt binding mismatch"
+            )
+
+    def verify_evidence(
+        self,
+        *,
+        outcome_contract: OutcomeContract,
+        observation_evidence: EvidenceBundle,
+    ) -> None:
+        self.verify()
+        outcome_contract.verify()
+        observation_evidence.verify()
+        if outcome_contract.contract_hash != self.outcome_contract_hash:
+            raise ProtocolViolation(
+                "execution attestation outcome contract binding mismatch"
+            )
+        if (
+            observation_evidence.manifest_hash
+            != self.observation_evidence_hash
+        ):
+            raise ProtocolViolation(
+                "execution attestation observation evidence binding mismatch"
+            )
+        if observation_evidence.resource.resource_uid != self.resource_uid:
+            raise ProtocolViolation(
+                "execution attestation observation resource mismatch"
             )
 
     def as_mapping(self) -> dict[str, Any]:
