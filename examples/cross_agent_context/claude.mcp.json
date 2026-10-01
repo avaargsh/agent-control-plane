@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "agent-context": {
+      "type": "stdio",
+      "command": "agent-context-mcp",
+      "args": [],
+      "env": {
+        "AGENT_CONTEXT_DB": "/ABSOLUTE/PATH/TO/shared-context.db",
+        "AGENT_CONTEXT_PRINCIPAL_TYPE": "agent",
+        "AGENT_CONTEXT_PRINCIPAL_SUBJECT": "claude-code"
+      }
+    }
+  }
+}
