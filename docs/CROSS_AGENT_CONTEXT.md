@@ -240,10 +240,27 @@ concurrency and ownership semantics.
 
 The next implementation should remain small:
 
-1. add concrete Claude Code and Codex host configuration examples that launch
-   distinct principal-bound MCP server processes over one store;
-2. bind a `ContextProjection.projection_hash` into a proposed
-   `StateTransition`, so execution can prove exactly which work snapshot the
-   proposing agent saw;
-3. add projection freshness checks before authorization/execution;
+1. bind a `ContextProjection.projection_hash` into transition proposal
+   provenance so execution can prove which work snapshot the proposer saw;
+2. add projection freshness checks before authorization/execution;
+3. run the opt-in Claude Code -> Codex live handoff on a configured developer
+   workstation and retain its state/evidence artifact;
 4. keep semantic memory pluggable rather than making it authoritative.
+
+
+## Concrete host examples
+
+Ready-to-copy host examples live under
+[`examples/cross_agent_context/`](../examples/cross_agent_context/README.md).
+
+They deliberately bind Claude Code to `agent:claude-code` and Codex to
+`agent:codex` while pointing both at the same authoritative database.
+
+The repository also carries an opt-in live smoke:
+
+```bash
+make context-live-handoff
+```
+
+It requires local Claude Code and Codex login/configuration and is not part of
+normal CI.
