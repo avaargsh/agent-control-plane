@@ -6,6 +6,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from .context_overlay import (
+    ContextEntry,
+    ContextOverlay,
+    SQLiteContextOverlayStore,
+)
 from .state_transition_protocol import Principal, ProtocolViolation
 from .work_context import (
     ContextProjection,
@@ -82,6 +87,41 @@ def _projection_dict(projection: ContextProjection) -> dict[str, Any]:
     }
 
 
+def _context_entry_dict(entry: ContextEntry) -> dict[str, Any]:
+    entry.verify()
+    return {
+        "entry_id": entry.entry_id,
+        "work_id": entry.work_id,
+        "revision": entry.revision,
+        "actor": _principal_dict(entry.actor),
+        "entry_type": entry.entry_type,
+        "payload": dict(entry.payload),
+        "prior_entry_hash": entry.prior_entry_hash,
+        "created_at": entry.created_at.isoformat(),
+        "entry_hash": entry.entry_hash,
+        "entry_version": entry.entry_version,
+    }
+
+
+def _context_overlay_dict(
+    overlay: ContextOverlay,
+) -> dict[str, Any]:
+    overlay.verify()
+    return {
+        "work_id": overlay.work_id,
+        "authority_version": overlay.authority_version,
+        "authority_snapshot_hash": overlay.authority_snapshot_hash,
+        "context_revision": overlay.context_revision,
+        "head_hash": overlay.head_hash,
+        "recent_entries": [
+            _context_entry_dict(entry)
+            for entry in overlay.recent_entries
+        ],
+        "overlay_hash": overlay.overlay_hash,
+        "overlay_version": overlay.overlay_version,
+    }
+
+
 def _parse_status(value: str | None) -> WorkStatus | None:
     if value is None:
         return None
@@ -107,6 +147,12 @@ class WorkContextToolset:
     store: SQLiteWorkContextStore
     principal: Principal
     clock: Clock = _utc_now
+    overlay_store: SQLiteContextOverlayStore | None = None
+
+    def _overlay_store(self) -> SQLiteContextOverlayStore:
+        if self.overlay_store is not None:
+            return self.overlay_store
+        return SQLiteContextOverlayStore(self.store.path)
 
     def create_work(
         self,
@@ -153,6 +199,61 @@ class WorkContextToolset:
             "current_version": latest.version,
             "current_snapshot_hash": latest.snapshot_hash,
             "events": [_event_dict(event) for event in events],
+        }
+
+    def append_context(
+        self,
+        *,
+        work_id: str,
+        expected_revision: int,
+        entry_type: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        entry = self._overlay_store().append(
+            work_id=work_id,
+            expected_revision=expected_revision,
+            actor=self.principal,
+            entry_type=entry_type,
+            payload=payload,
+            created_at=self.clock(),
+        )
+        return _context_entry_dict(entry)
+
+    def get_context_overlay(
+        self,
+        *,
+        work_id: str,
+        recent_entry_limit: int = 8,
+    ) -> dict[str, Any]:
+        overlay = self._overlay_store().get(
+            work_id=work_id,
+            recent_entry_limit=recent_entry_limit,
+        )
+        return _context_overlay_dict(overlay)
+
+    def get_context_changes_since(
+        self,
+        *,
+        work_id: str,
+        revision: int,
+    ) -> dict[str, Any]:
+        entries = self._overlay_store().changes_since(
+            work_id=work_id,
+            revision=revision,
+        )
+        returned_revision = (
+            entries[-1].revision
+            if entries
+            else revision
+        )
+        return {
+            "work_id": work_id,
+            "requested_after_revision": revision,
+            "returned_revision": returned_revision,
+            "entries": [
+                _context_entry_dict(entry)
+                for entry in entries
+            ],
         }
 
     def claim_work(
@@ -257,6 +358,7 @@ def build_mcp_server(
         store=store,
         principal=principal,
         clock=clock,
+        overlay_store=SQLiteContextOverlayStore(store.path),
     )
     server = MCPServer("agent-context")
 
@@ -295,6 +397,43 @@ def build_mcp_server(
         return toolset.get_changes_since(
             work_id=work_id,
             version=version,
+        )
+
+    @server.tool()
+    def append_context(
+        work_id: str,
+        expected_revision: int,
+        entry_type: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append non-authoritative context with independent revision CAS."""
+        return toolset.append_context(
+            work_id=work_id,
+            expected_revision=expected_revision,
+            entry_type=entry_type,
+            payload=payload,
+        )
+
+    @server.tool()
+    def get_context_overlay(
+        work_id: str,
+        recent_entry_limit: int = 8,
+    ) -> dict[str, Any]:
+        """Read context revision plus its observed authority snapshot pointer."""
+        return toolset.get_context_overlay(
+            work_id=work_id,
+            recent_entry_limit=recent_entry_limit,
+        )
+
+    @server.tool()
+    def get_context_changes_since(
+        work_id: str,
+        revision: int,
+    ) -> dict[str, Any]:
+        """Read append-only context entries after a known context revision."""
+        return toolset.get_context_changes_since(
+            work_id=work_id,
+            revision=revision,
         )
 
     @server.tool()
