@@ -43,3 +43,7 @@ spec:
       requiredScope: refund:write
       connector: highvalue
       operationId: createRefund
+      delegation:
+        allowSubAgent: true
+        allowedSubjects:
+          - refund-retry-subagent
