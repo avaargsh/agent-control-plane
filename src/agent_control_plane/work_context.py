@@ -697,11 +697,13 @@ class SQLiteWorkContextStore:
         with self._connect() as connection:
             return self._read_snapshot(connection, work_id)
 
-    def changes_since(
+    def changes_since_with_snapshot(
         self,
         work_id: str,
         version: int,
-    ) -> tuple[WorkEvent, ...]:
+    ) -> tuple[WorkSnapshot, tuple[WorkEvent, ...]]:
+        """Read the current snapshot and event suffix from one DB snapshot."""
+
         if version < 0:
             raise ProtocolViolation("version cannot be negative")
 
@@ -730,7 +732,7 @@ class SQLiteWorkContextStore:
                 raise ProtocolViolation(
                     "work event history contains events past current version"
                 )
-            return ()
+            return work, ()
 
         if not events or events[0].from_version != version:
             raise ProtocolViolation(
@@ -739,6 +741,17 @@ class SQLiteWorkContextStore:
         _verify_event_tail(
             work=work,
             events=events,
+        )
+        return work, events
+
+    def changes_since(
+        self,
+        work_id: str,
+        version: int,
+    ) -> tuple[WorkEvent, ...]:
+        _, events = self.changes_since_with_snapshot(
+            work_id,
+            version,
         )
         return events
 
