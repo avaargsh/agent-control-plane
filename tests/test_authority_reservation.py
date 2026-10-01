@@ -49,6 +49,8 @@ def test_active_reservation_blocks_authority_mutation_until_release(
         work_id=proposal.work_id,
         expected_authority_generation=authority.generation,
         expected_authority_hash=authority.authority_hash,
+        proposal_hash=proposal.proposal_hash,
+        operation_id="authority-test-op",
         execution_lease=fixture["lease"],
         now=NOW + timedelta(seconds=5),
     )
@@ -131,6 +133,8 @@ def test_higher_execution_lease_epoch_supersedes_old_reservation(tmp_path):
         work_id=proposal.work_id,
         expected_authority_generation=authority.generation,
         expected_authority_hash=authority.authority_hash,
+        proposal_hash=proposal.proposal_hash,
+        operation_id="authority-test-op",
         execution_lease=fixture["lease"],
         now=NOW + timedelta(seconds=5),
     )
@@ -151,6 +155,8 @@ def test_higher_execution_lease_epoch_supersedes_old_reservation(tmp_path):
         work_id=proposal.work_id,
         expected_authority_generation=authority.generation,
         expected_authority_hash=authority.authority_hash,
+        proposal_hash=proposal.proposal_hash,
+        operation_id="authority-test-op-new",
         execution_lease=newer_lease,
         now=NOW + timedelta(seconds=6),
     )
@@ -205,6 +211,8 @@ def test_expired_reservation_no_longer_blocks_authority_mutation(
         work_id=created.work_id,
         expected_authority_generation=authority.generation,
         expected_authority_hash=authority.authority_hash,
+        proposal_hash="sha256:" + "a" * 64,
+        operation_id="authority-expiry-op",
         execution_lease=lease,
         now=NOW + timedelta(seconds=2),
     )
