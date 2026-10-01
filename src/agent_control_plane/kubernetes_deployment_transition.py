@@ -287,6 +287,7 @@ class KubernetesDeploymentScaleProvider:
         active_lease: ExecutionLease,
         caller: Principal,
         now: datetime,
+        operation_id: str | None = None,
     ) -> DeploymentScaleReceipt:
         if transition.subject.provider != "kubernetes":
             raise ProtocolViolation("deployment provider requires kubernetes subject")
@@ -352,9 +353,24 @@ class KubernetesDeploymentScaleProvider:
                 caller=caller,
                 now=now,
             )
-            operation_id = str(
+            observed_operation_id = str(
                 annotations.get(_OPERATION_ID_ANNOTATION, action.action_id)
             )
+            if (
+                operation_id is not None
+                and observed_operation_id != operation_id
+            ):
+                raise RuntimeMutationOwnershipUncertain(
+                    "deployment already satisfies the action but belongs to "
+                    "a different execution attempt",
+                    resource_ref=(
+                        f"k8s://{transition.subject.namespace}/deployment/"
+                        f"{transition.subject.name}"
+                    ),
+                    operation_id=operation_id,
+                    observed_operation_id=observed_operation_id,
+                )
+            operation_id = observed_operation_id
             return DeploymentScaleReceipt(
                 resource_ref=(
                     f"k8s://{transition.subject.namespace}/deployment/"
@@ -392,7 +408,7 @@ class KubernetesDeploymentScaleProvider:
                 "live replicas do not match transition before state"
             )
 
-        operation_id = uuid4().hex
+        operation_id = operation_id or uuid4().hex
         patch = {
             "metadata": {
                 "resourceVersion": resource_version,
