@@ -9,6 +9,9 @@ from agent_control_plane.authority_reservation import (
 from agent_control_plane.kubernetes_deployment_transition import (
     KubernetesDeploymentScaleProvider,
 )
+from agent_control_plane.runtime_clients import (
+    RuntimeMutationOwnershipUncertain,
+)
 from agent_control_plane.state_transition_protocol import (
     ExecutionLease,
     Principal,
@@ -21,7 +24,11 @@ from context_testkit import (
     PROPOSER,
     build_context_bound_execution_v3,
 )
-from kubernetes_testkit import FakeDeploymentApi
+from kubernetes_testkit import (
+    FakeDeploymentApi,
+    LostAckDeploymentApi,
+    LostAckOwnedByOtherApi,
+)
 
 
 def test_active_reservation_blocks_authority_mutation_until_release(
@@ -302,3 +309,92 @@ def test_provider_holds_authority_reservation_across_patch(tmp_path):
         state_patch={"phase": "after-provider-patch"},
     )
     assert updated.version == current.version + 1
+
+
+def test_verified_lost_ack_releases_authority_reservation(tmp_path):
+    api = LostAckDeploymentApi()
+    (
+        fixture,
+        store,
+        _,
+        _,
+        proposal,
+        context,
+    ) = build_context_bound_execution_v3(
+        tmp_path,
+        api=api,
+    )
+
+    receipt = KubernetesDeploymentScaleProvider(
+        fixture["api"],
+    ).execute_context_bound(
+        transition=fixture["transition"],
+        evidence=fixture["evidence"],
+        outcome_contract=fixture["outcome"],
+        action=fixture["action"],
+        authorization=fixture["authorization"],
+        fence=fixture["fence"],
+        active_lease=fixture["lease"],
+        caller=fixture["holder"],
+        now=NOW + timedelta(seconds=5),
+        context_binding=context,
+        operation_id="attempt-lost-ack",
+    )
+
+    assert receipt.verified_after_uncertain_mutation is True
+    assert receipt.authority_reservation_hash
+
+    current = store.get(proposal.work_id)
+    updated = store.record_progress(
+        work_id=proposal.work_id,
+        expected_version=current.version,
+        actor=PROPOSER,
+        updated_at=NOW + timedelta(seconds=6),
+        state_patch={"phase": "after-verified-lost-ack"},
+    )
+    assert updated.version == current.version + 1
+
+
+def test_unresolved_mutation_ownership_keeps_authority_frozen(tmp_path):
+    api = LostAckOwnedByOtherApi()
+    (
+        fixture,
+        store,
+        _,
+        _,
+        proposal,
+        context,
+    ) = build_context_bound_execution_v3(
+        tmp_path,
+        api=api,
+    )
+
+    with pytest.raises(RuntimeMutationOwnershipUncertain):
+        KubernetesDeploymentScaleProvider(
+            fixture["api"],
+        ).execute_context_bound(
+            transition=fixture["transition"],
+            evidence=fixture["evidence"],
+            outcome_contract=fixture["outcome"],
+            action=fixture["action"],
+            authorization=fixture["authorization"],
+            fence=fixture["fence"],
+            active_lease=fixture["lease"],
+            caller=fixture["holder"],
+            now=NOW + timedelta(seconds=5),
+            context_binding=context,
+            operation_id="attempt-owned-by-other",
+        )
+
+    current = store.get(proposal.work_id)
+    with pytest.raises(
+        ProtocolViolation,
+        match="blocked by active execution reservation",
+    ):
+        store.record_progress(
+            work_id=proposal.work_id,
+            expected_version=current.version,
+            actor=PROPOSER,
+            updated_at=NOW + timedelta(seconds=6),
+            state_patch={"phase": "must-stay-frozen"},
+        )
