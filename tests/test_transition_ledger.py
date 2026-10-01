@@ -99,6 +99,9 @@ def authority_chain(fixture, *, max_replicas=30):
         approval,
         key=key,
     )
+    verifier = HMACApprovalVerifier(
+        keys={key.key_id: key},
+    )
     authorization = None
     if max_replicas >= 30:
         authorization = authorize_transition_from_approval(
@@ -107,13 +110,18 @@ def authority_chain(fixture, *, max_replicas=30):
             policy_input=policy_input,
             policy_decision=decision,
             signed_approval=signed,
-            approval_verifier=HMACApprovalVerifier(
-                keys={key.key_id: key},
-            ),
+            approval_verifier=verifier,
             authorization_expires_at=NOW + timedelta(minutes=5),
             now=NOW + timedelta(seconds=1),
         )
-    return policy_input, decision, approval, authorization
+    return (
+        policy_input,
+        decision,
+        approval,
+        signed,
+        verifier,
+        authorization,
+    )
 
 
 def lease_and_fence(fixture, authorization, *, epoch=11):
@@ -138,9 +146,14 @@ def lease_and_fence(fixture, authorization, *, epoch=11):
 def test_full_authority_execution_verification_lifecycle_is_durable(tmp_path):
     api = FakeDeploymentApi()
     fixture = build_transition(api)
-    policy_input, decision, approval, authorization = authority_chain(
-        fixture
-    )
+    (
+        policy_input,
+        decision,
+        approval,
+        signed_approval,
+        approval_verifier,
+        authorization,
+    ) = authority_chain(fixture)
     lease, fence = lease_and_fence(
         fixture,
         authorization,
@@ -177,7 +190,8 @@ def test_full_authority_execution_verification_lifecycle_is_durable(tmp_path):
     record = ledger.record_authorization(
         transition_id=record.transition_id,
         expected_version=record.state_version,
-        approval=approval,
+        signed_approval=signed_approval,
+        approval_verifier=approval_verifier,
         authorization=authorization,
         actor=ACTOR,
         occurred_at=NOW + timedelta(seconds=3),
@@ -304,7 +318,7 @@ def test_full_authority_execution_verification_lifecycle_is_durable(tmp_path):
 
 def test_policy_deny_is_terminal_and_cannot_skip_to_authorized(tmp_path):
     fixture = build_transition()
-    policy_input, decision, _, _ = authority_chain(
+    policy_input, decision, _, _, _, _ = authority_chain(
         fixture,
         max_replicas=20,
     )
@@ -335,11 +349,9 @@ def test_policy_deny_is_terminal_and_cannot_skip_to_authorized(tmp_path):
         ProtocolViolation,
         match="illegal transition phase change",
     ):
-        ledger.advance(
+        ledger.release(
             transition_id=record.transition_id,
             expected_version=record.state_version,
-            to_phase=TransitionPhase.AUTHORIZED,
-            event_type="BYPASS",
             actor=ACTOR,
             occurred_at=NOW + timedelta(seconds=3),
         )
@@ -355,30 +367,44 @@ def test_transition_phase_cannot_skip_authority_gates(tmp_path):
         occurred_at=NOW,
     )
 
-    for forbidden in (
-        TransitionPhase.AUTHORIZED,
-        TransitionPhase.LEASED,
-        TransitionPhase.EXECUTION_PREPARED,
-        TransitionPhase.EXECUTED,
-        TransitionPhase.SUCCEEDED,
-    ):
+    typed_bypasses = (
+        lambda: ledger.record_lease(
+            transition_id=record.transition_id,
+            expected_version=record.state_version,
+            lease=fixture["lease"],
+            fence=fixture["fence"],
+            actor=ACTOR,
+            occurred_at=NOW + timedelta(seconds=1),
+        ),
+        lambda: ledger.start_reconcile(
+            transition_id=record.transition_id,
+            expected_version=record.state_version,
+            actor=ACTOR,
+            occurred_at=NOW + timedelta(seconds=1),
+        ),
+        lambda: ledger.start_verification(
+            transition_id=record.transition_id,
+            expected_version=record.state_version,
+            actor=ACTOR,
+            occurred_at=NOW + timedelta(seconds=1),
+        ),
+        lambda: ledger.release(
+            transition_id=record.transition_id,
+            expected_version=record.state_version,
+            actor=ACTOR,
+            occurred_at=NOW + timedelta(seconds=1),
+        ),
+    )
+    for bypass in typed_bypasses:
         with pytest.raises(
             ProtocolViolation,
             match="illegal transition phase change",
         ):
-            ledger.advance(
-                transition_id=record.transition_id,
-                expected_version=record.state_version,
-                to_phase=forbidden,
-                event_type="BYPASS",
-                actor=ACTOR,
-                occurred_at=NOW + timedelta(seconds=1),
-            )
-
+            bypass()
 
 def test_stale_controller_state_version_is_rejected_by_cas(tmp_path):
     fixture = build_transition()
-    policy_input, decision, _, _ = authority_chain(fixture)
+    policy_input, decision, _, _, _, _ = authority_chain(fixture)
     ledger = SQLiteTransitionLedger(tmp_path / "ledger.db")
     record = ledger.register(
         transition=fixture["transition"],
@@ -413,7 +439,7 @@ def test_stale_controller_state_version_is_rejected_by_cas(tmp_path):
 
 def test_register_is_idempotent_after_lifecycle_has_advanced(tmp_path):
     fixture = build_transition()
-    policy_input, decision, _, _ = authority_chain(fixture)
+    policy_input, decision, _, _, _, _ = authority_chain(fixture)
     ledger = SQLiteTransitionLedger(tmp_path / "ledger.db")
     first = ledger.register(
         transition=fixture["transition"],
@@ -504,9 +530,14 @@ def test_materialized_state_tamper_is_detected_against_event_history(tmp_path):
 
 def test_not_applied_attempt_can_retry_without_rewriting_history(tmp_path):
     fixture = build_transition()
-    policy_input, decision, approval, authorization = authority_chain(
-        fixture
-    )
+    (
+        policy_input,
+        decision,
+        approval,
+        signed_approval,
+        approval_verifier,
+        authorization,
+    ) = authority_chain(fixture)
     ledger = SQLiteTransitionLedger(tmp_path / "ledger.db")
     record = ledger.register(
         transition=fixture["transition"],
@@ -531,7 +562,8 @@ def test_not_applied_attempt_can_retry_without_rewriting_history(tmp_path):
     record = ledger.record_authorization(
         transition_id=record.transition_id,
         expected_version=record.state_version,
-        approval=approval,
+        signed_approval=signed_approval,
+        approval_verifier=approval_verifier,
         authorization=authorization,
         actor=ACTOR,
         occurred_at=NOW + timedelta(seconds=3),
