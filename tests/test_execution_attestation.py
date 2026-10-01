@@ -120,11 +120,12 @@ def test_attestation_rejects_observation_for_other_resource(tmp_path):
 
     with pytest.raises(
         ProtocolViolation,
-        match="observation resource does not match execution",
+        match="observation does not match transition resource",
     ):
         ExecutionAttestation.seal(
             attestation_id="attestation-wrong-resource",
             attempt=committed,
+            transition=fixture["transition"],
             outcome_contract=fixture["outcome"],
             observation_evidence=other_evidence,
             verification_status="SUCCEEDED",
