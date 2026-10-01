@@ -448,3 +448,35 @@ def test_execution_principal_change_after_approval_is_rejected():
             authorization_expires_at=NOW + timedelta(minutes=5),
             now=NOW + timedelta(seconds=1),
         )
+
+
+def test_trusted_registry_key_id_mismatch_is_rejected():
+    fixture, policy_input, policy_decision = build_policy_chain()
+    _, signed, _ = sign_approval(
+        fixture,
+        policy_input,
+        policy_decision,
+    )
+    mismatched = ApprovalSigningKey(
+        key_id="different-internal-key-id",
+        approver=APPROVER,
+        secret=KEY.secret,
+    )
+    verifier = HMACApprovalVerifier(
+        keys={signed.key_id: mismatched},
+    )
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="trusted key id mismatch",
+    ):
+        authorize_transition_from_approval(
+            transition=fixture["transition"],
+            action=fixture["action"],
+            policy_input=policy_input,
+            policy_decision=policy_decision,
+            signed_approval=signed,
+            approval_verifier=verifier,
+            authorization_expires_at=NOW + timedelta(minutes=5),
+            now=NOW + timedelta(seconds=1),
+        )
