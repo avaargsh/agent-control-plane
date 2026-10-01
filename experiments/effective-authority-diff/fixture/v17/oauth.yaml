@@ -10,6 +10,7 @@ spec:
     support-user:
       scopes:
         - refund:read
+        - refund:write
     supervisor-user:
       scopes:
         - refund:read
