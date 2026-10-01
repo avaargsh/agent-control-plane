@@ -149,7 +149,7 @@ def prepare_context_attempt(tmp_path):
         tmp_path
     )
     journal = SQLiteExecutionJournal(tmp_path / "execution.db")
-    provenance = execution_context_provenance(proposal)
+    provenance = build_execution_context_provenance(proposal)
     attempt = journal.prepare(
         transition=fixture["transition"],
         action=fixture["action"],
