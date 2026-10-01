@@ -38,6 +38,8 @@ class AuthorityReservation:
     work_id: str
     authority_generation: int
     authority_hash: str
+    proposal_hash: str
+    operation_id: str
     resource_uid: str
     lease_id: str
     lease_epoch: int
@@ -56,13 +58,22 @@ class AuthorityReservation:
         work_id: str,
         authority_generation: int,
         authority_hash: str,
+        proposal_hash: str,
+        operation_id: str,
         execution_lease: ExecutionLease,
         acquired_at: datetime,
         state: AuthorityReservationState,
     ) -> "AuthorityReservation":
-        if not reservation_id or not work_id or not authority_hash:
+        if (
+            not reservation_id
+            or not work_id
+            or not authority_hash
+            or not proposal_hash
+            or not operation_id
+        ):
             raise ProtocolViolation(
-                "authority reservation id/work/hash are required"
+                "authority reservation id/work/authority/proposal/operation "
+                "bindings are required"
             )
         if authority_generation <= 0:
             raise ProtocolViolation(
@@ -75,6 +86,8 @@ class AuthorityReservation:
             work_id=work_id,
             authority_generation=authority_generation,
             authority_hash=authority_hash,
+            proposal_hash=proposal_hash,
+            operation_id=operation_id,
             resource_uid=execution_lease.resource_uid,
             lease_id=execution_lease.lease_id,
             lease_epoch=execution_lease.epoch,
@@ -89,6 +102,8 @@ class AuthorityReservation:
             work_id=provisional.work_id,
             authority_generation=provisional.authority_generation,
             authority_hash=provisional.authority_hash,
+            proposal_hash=provisional.proposal_hash,
+            operation_id=provisional.operation_id,
             resource_uid=provisional.resource_uid,
             lease_id=provisional.lease_id,
             lease_epoch=provisional.lease_epoch,
@@ -103,9 +118,15 @@ class AuthorityReservation:
         )
 
     def verify(self) -> None:
-        if not self.reservation_id or not self.work_id or not self.authority_hash:
+        if (
+            not self.reservation_id
+            or not self.work_id
+            or not self.authority_hash
+            or not self.proposal_hash
+            or not self.operation_id
+        ):
             raise ProtocolViolation(
-                "authority reservation id/work/hash are required"
+                "authority reservation bindings are required"
             )
         if (
             self.authority_generation <= 0
@@ -179,6 +200,8 @@ def initialize_authority_reservations(
             authority_generation INTEGER NOT NULL
                 CHECK (authority_generation > 0),
             authority_hash TEXT NOT NULL,
+            proposal_hash TEXT NOT NULL,
+            operation_id TEXT NOT NULL,
             resource_uid TEXT NOT NULL,
             lease_id TEXT NOT NULL,
             lease_epoch INTEGER NOT NULL CHECK (lease_epoch > 0),
@@ -303,6 +326,8 @@ class SQLiteAuthorityReservationStore:
             work_id=row["work_id"],
             authority_generation=int(row["authority_generation"]),
             authority_hash=row["authority_hash"],
+            proposal_hash=row["proposal_hash"],
+            operation_id=row["operation_id"],
             resource_uid=row["resource_uid"],
             lease_id=row["lease_id"],
             lease_epoch=int(row["lease_epoch"]),
@@ -340,6 +365,8 @@ class SQLiteAuthorityReservationStore:
         work_id: str,
         expected_authority_generation: int,
         expected_authority_hash: str,
+        proposal_hash: str,
+        operation_id: str,
         execution_lease: ExecutionLease,
         now: datetime,
     ) -> AuthorityReservation:
@@ -426,6 +453,8 @@ class SQLiteAuthorityReservationStore:
                 work_id=work_id,
                 authority_generation=generation,
                 authority_hash=authority_hash,
+                proposal_hash=proposal_hash,
+                operation_id=operation_id,
                 execution_lease=execution_lease,
                 acquired_at=now,
                 state=AuthorityReservationState.ACTIVE,
@@ -437,6 +466,8 @@ class SQLiteAuthorityReservationStore:
                     work_id,
                     authority_generation,
                     authority_hash,
+                    proposal_hash,
+                    operation_id,
                     resource_uid,
                     lease_id,
                     lease_epoch,
@@ -447,13 +478,15 @@ class SQLiteAuthorityReservationStore:
                     state,
                     reservation_hash
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     reservation.reservation_id,
                     reservation.work_id,
                     reservation.authority_generation,
                     reservation.authority_hash,
+                    reservation.proposal_hash,
+                    reservation.operation_id,
                     reservation.resource_uid,
                     reservation.lease_id,
                     reservation.lease_epoch,
