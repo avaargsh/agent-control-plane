@@ -318,6 +318,10 @@ class KubernetesDeploymentScaleProvider:
             and annotations.get(_TRANSITION_HASH_ANNOTATION)
             == transition.transition_hash
         ):
+            if generation != transition.expected_generation + 1:
+                raise ProtocolViolation(
+                    "replay generation does not match owned scale mutation"
+                )
             _verify_replay_binding(
                 transition=transition,
                 evidence=evidence,
