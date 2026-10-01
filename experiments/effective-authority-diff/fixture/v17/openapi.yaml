@@ -8,14 +8,12 @@ paths:
   /v1/refunds/preview:
     post:
       operationId: previewRefund
-      x-side-effect: none
       responses:
         "200":
-          description: Preview only; does not create a refund
+          description: Returns a refund preview representation
   /v1/refunds:
     post:
       operationId: createRefund
-      x-side-effect: external-write
       responses:
         "200":
-          description: Creates a refund against a real production payment
+          description: Refund request accepted
