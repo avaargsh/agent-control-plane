@@ -309,6 +309,24 @@ class AuthorityHead:
             )
 
 
+    def verify_current_authority(
+        self,
+        snapshot: WorkSnapshot,
+    ) -> None:
+        """Verify current work still expresses the same authority state."""
+
+        self.verify()
+        snapshot.verify()
+        if snapshot.work_id != self.work_id:
+            raise ProtocolViolation(
+                "authority head belongs to another work item"
+            )
+        if authority_state_hash(snapshot) != self.authority_state_hash:
+            raise ProtocolViolation(
+                "current work authority state diverged from authority head"
+            )
+
+
 @dataclass(frozen=True)
 class WorkEvent:
     event_id: str
