@@ -13,6 +13,7 @@ from agent_control_plane.context_transition import (
     authorize_context_bound_transition,
     seal_context_bound_policy_input,
 )
+from agent_control_plane.execution_attestation import ExecutionAttestation
 from agent_control_plane.execution_fencing import (
     KubernetesDeploymentFenceProjector,
     SQLiteExecutionLeaseStore,
@@ -502,6 +503,34 @@ def main() -> int:
             checked_at=checked_at,
         )
         if last.status is VerificationStatus.SUCCEEDED:
+            attestation = ExecutionAttestation.seal(
+                attestation_id="kind-live-execution-attestation-20-30",
+                attempt=committed_attempt,
+                outcome_contract_hash=outcome.contract_hash,
+                observation_evidence_hash=(
+                    observation.evidence_bundle.manifest_hash
+                ),
+                verification_status=last.status.value,
+                verified_at=checked_at,
+            )
+            attestation.verify_attempt(committed_attempt)
+            attestation_path = (
+                ".artifacts/kubernetes-transition/"
+                "execution-attestation.json"
+            )
+            with open(
+                attestation_path,
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                json.dump(
+                    attestation.as_mapping(),
+                    handle,
+                    indent=2,
+                    sort_keys=True,
+                )
+                handle.write("\n")
+
             summary = {
                 "transition_id": transition.transition_id,
                 "transition_hash": transition.transition_hash,
@@ -546,6 +575,10 @@ def main() -> int:
                 "terminal_context_provenance_hash": terminal_context[
                     "provenance_hash"
                 ],
+                "execution_attestation_hash": (
+                    attestation.attestation_hash
+                ),
+                "execution_attestation_path": attestation_path,
                 "evidence_before": evidence.manifest_hash,
                 "evidence_after": (
                     observation.evidence_bundle.manifest_hash
