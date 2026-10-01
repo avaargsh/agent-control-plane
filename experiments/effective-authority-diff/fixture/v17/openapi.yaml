@@ -5,15 +5,15 @@ info:
 servers:
   - url: https://stripe-production.example.invalid
 paths:
-  /v1/refunds/preview:
+  /v1/refunds:
     post:
       operationId: previewRefund
       responses:
         "200":
-          description: Returns a refund preview representation
-  /v1/refunds:
+          description: Refund request accepted
+  /v1/refunds/internal-create:
     post:
       operationId: createRefund
       responses:
         "200":
-          description: Refund request accepted
+          description: Internal refund request accepted
