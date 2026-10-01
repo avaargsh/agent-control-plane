@@ -157,6 +157,10 @@ class WorkSnapshot:
     def verify(self) -> None:
         if self.version <= 0:
             raise ProtocolViolation("work version must be positive")
+        if not isinstance(self.status, WorkStatus):
+            raise ProtocolViolation("work status must be a WorkStatus")
+        if self.owner is not None and not isinstance(self.owner, Principal):
+            raise ProtocolViolation("work owner must be a Principal")
         _require_aware(self.updated_at, "updated_at")
         _snapshot_mapping(self.state)
         _canonical_strings(self.decisions, field_name="decisions")
@@ -254,6 +258,8 @@ class WorkEvent:
             raise ProtocolViolation(
                 "work event versions must advance by exactly one"
             )
+        if not isinstance(self.actor, Principal):
+            raise ProtocolViolation("work event actor must be a Principal")
         _require_aware(self.created_at, "created_at")
         _snapshot_mapping(self.payload)
         actual = canonical_digest(
@@ -265,6 +271,56 @@ class WorkEvent:
                 "work event digest mismatch: "
                 f"expected {self.event_hash}, got {actual}"
             )
+
+
+def _verify_event_tail(
+    *,
+    work: WorkSnapshot,
+    events: Sequence[WorkEvent],
+) -> None:
+    """Verify a contiguous event suffix ending at the supplied snapshot."""
+
+    previous: WorkEvent | None = None
+    for event in events:
+        event.verify()
+        if event.work_id != work.work_id:
+            raise ProtocolViolation(
+                "work event belongs to another work item"
+            )
+        if event.to_version > work.version:
+            raise ProtocolViolation(
+                "work event is newer than the current snapshot"
+            )
+        if previous is not None:
+            if event.from_version != previous.to_version:
+                raise ProtocolViolation(
+                    "work event versions are not contiguous"
+                )
+            if event.prior_snapshot_hash != previous.snapshot_hash:
+                raise ProtocolViolation(
+                    "work event snapshot hash chain is broken"
+                )
+        elif (
+            event.from_version == 0
+            and event.prior_snapshot_hash != "GENESIS"
+        ):
+            raise ProtocolViolation(
+                "genesis work event has invalid prior snapshot hash"
+            )
+        previous = event
+
+    if not events:
+        return
+
+    tail = events[-1]
+    if tail.to_version != work.version:
+        raise ProtocolViolation(
+            "work event tail does not reach current snapshot version"
+        )
+    if tail.snapshot_hash != work.snapshot_hash:
+        raise ProtocolViolation(
+            "work event tail snapshot hash does not match current snapshot"
+        )
 
 
 @dataclass(frozen=True)
@@ -285,16 +341,10 @@ class ContextProjection:
     ) -> "ContextProjection":
         work.verify()
         events = tuple(recent_events)
-        for event in events:
-            event.verify()
-            if event.work_id != work.work_id:
-                raise ProtocolViolation(
-                    "context projection event belongs to another work item"
-                )
-            if event.to_version > work.version:
-                raise ProtocolViolation(
-                    "context projection contains future work event"
-                )
+        _verify_event_tail(
+            work=work,
+            events=events,
+        )
         provisional = cls(
             consumer=consumer,
             work=work,
@@ -313,16 +363,10 @@ class ContextProjection:
 
     def verify(self) -> None:
         self.work.verify()
-        for event in self.recent_events:
-            event.verify()
-            if event.work_id != self.work.work_id:
-                raise ProtocolViolation(
-                    "context projection event belongs to another work item"
-                )
-            if event.to_version > self.work.version:
-                raise ProtocolViolation(
-                    "context projection contains future work event"
-                )
+        _verify_event_tail(
+            work=self.work,
+            events=self.recent_events,
+        )
         actual = canonical_digest(
             self,
             exclude=("projection_hash",),
@@ -351,10 +395,13 @@ class SQLiteWorkContextStore:
             timeout=30.0,
         )
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 30000")
         return connection
 
     def _initialize(self) -> None:
         with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode = WAL")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS work_snapshots (
@@ -649,6 +696,13 @@ class SQLiteWorkContextStore:
     ) -> tuple[WorkEvent, ...]:
         if version < 0:
             raise ProtocolViolation("version cannot be negative")
+
+        work = self.get(work_id)
+        if version > work.version:
+            raise ProtocolViolation(
+                "requested version is newer than current work version"
+            )
+
         with self._connect() as connection:
             rows = connection.execute(
                 """
@@ -659,7 +713,24 @@ class SQLiteWorkContextStore:
                 """,
                 (work_id, version),
             ).fetchall()
-        return tuple(self._event_from_row(row) for row in rows)
+
+        events = tuple(self._event_from_row(row) for row in rows)
+        if version == work.version:
+            if events:
+                raise ProtocolViolation(
+                    "work event history contains events past current version"
+                )
+            return ()
+
+        if not events or events[0].from_version != version:
+            raise ProtocolViolation(
+                "work event history does not continue from requested version"
+            )
+        _verify_event_tail(
+            work=work,
+            events=events,
+        )
+        return events
 
     def _commit(
         self,
