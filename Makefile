@@ -1,7 +1,7 @@
 PYTHON ?= python3
 ARTIFACTS ?= .artifacts
 
-.PHONY: setup test demo mcp-contract-proof preflight smoke verify-release audit-history clean
+.PHONY: setup test demo mcp-contract-proof preflight smoke kind-transition-smoke verify-release audit-history clean
 
 setup:
 	$(PYTHON) -m pip install -e '.[dev]'
@@ -22,6 +22,10 @@ preflight:
 smoke: preflight
 	@echo "Live prerequisites are reachable."
 	@echo "Run the opt-in integration profile with: AGENT_STACK_LIVE_SMOKE=1 $(PYTHON) -m pytest -q tests/integration"
+
+kind-transition-smoke:
+	mkdir -p $(ARTIFACTS)/kubernetes-transition
+	KUBE_CONTEXT=${KUBE_CONTEXT:-kind-agent-transition} $(PYTHON) scripts/kubernetes_transition_smoke.py | tee $(ARTIFACTS)/kubernetes-transition/summary.json
 
 verify-release:
 	$(PYTHON) scripts/verify_release.py
