@@ -207,21 +207,32 @@ def _expire_stale(
     now: datetime,
 ) -> None:
     _require_aware(now, "now")
-    connection.execute(
+    rows = connection.execute(
         """
-        UPDATE work_authority_reservations
-        SET state = ?
-        WHERE work_id = ?
-          AND state = ?
-          AND expires_at <= ?
+        SELECT reservation_id, expires_at
+        FROM work_authority_reservations
+        WHERE work_id = ? AND state = ?
         """,
-        (
-            AuthorityReservationState.EXPIRED.value,
-            work_id,
-            AuthorityReservationState.ACTIVE.value,
-            now.isoformat(),
-        ),
-    )
+        (work_id, AuthorityReservationState.ACTIVE.value),
+    ).fetchall()
+    expired_ids = [
+        row["reservation_id"]
+        for row in rows
+        if _parse_time(row["expires_at"]) <= now
+    ]
+    for reservation_id in expired_ids:
+        connection.execute(
+            """
+            UPDATE work_authority_reservations
+            SET state = ?
+            WHERE reservation_id = ? AND state = ?
+            """,
+            (
+                AuthorityReservationState.EXPIRED.value,
+                reservation_id,
+                AuthorityReservationState.ACTIVE.value,
+            ),
+        )
 
 
 def assert_authority_mutation_allowed(
@@ -559,11 +570,6 @@ class SQLiteAuthorityReservationStore:
                 (reservation.reservation_id,),
             ).fetchone()
             connection.execute("COMMIT")
-        if row is None:
-            raise ProtocolViolation(
-                "released authority reservation disappeared"
-            )
-
         if row is None:
             raise ProtocolViolation(
                 "released authority reservation disappeared"
