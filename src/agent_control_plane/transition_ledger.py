@@ -621,9 +621,13 @@ class SQLiteTransitionLedger:
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
+        record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.PROPOSED,
+        )
         policy_input.verify()
         decision.verify()
-        record = self._require(transition_id)
         if policy_input.transition_hash != record.transition_hash:
             raise ProtocolViolation(
                 "ledger policy input transition mismatch"
@@ -669,6 +673,10 @@ class SQLiteTransitionLedger:
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
         record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.POLICY_EVALUATED,
+        )
         effect = record.facts.get("policy_effect")
         if effect == PolicyEffect.PERMIT.value:
             target = TransitionPhase.AWAITING_APPROVAL
@@ -701,13 +709,17 @@ class SQLiteTransitionLedger:
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
         _require_aware(occurred_at, "occurred_at")
+        record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.AWAITING_APPROVAL,
+        )
         approval = approval_verifier.verify(
             signed_approval,
             now=occurred_at,
         )
         approval.verify()
         authorization.verify()
-        record = self._require(transition_id)
 
         checks = {
             "transition_hash": (
@@ -783,6 +795,11 @@ class SQLiteTransitionLedger:
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
         record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.AUTHORIZED,
+            TransitionPhase.EXECUTION_NOT_APPLIED,
+        )
         if fence.transition_hash != record.transition_hash:
             raise ProtocolViolation(
                 "ledger fence transition mismatch"
@@ -838,8 +855,12 @@ class SQLiteTransitionLedger:
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
-        attempt.verify()
         record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.LEASED,
+        )
+        attempt.verify()
         if attempt.state is not ExecutionAttemptState.PREPARED:
             raise ProtocolViolation(
                 "ledger requires PREPARED execution attempt"
@@ -882,6 +903,11 @@ class SQLiteTransitionLedger:
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
+        record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.EXECUTION_PREPARED,
+        )
         return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
@@ -900,8 +926,13 @@ class SQLiteTransitionLedger:
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
-        attempt.verify()
         record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.EXECUTION_PREPARED,
+            TransitionPhase.RECONCILING,
+        )
+        attempt.verify()
         prefix = f"execution_attempt:{attempt.attempt_id}"
         if attempt.attempt_hash != record.facts.get(f"{prefix}:hash"):
             raise ProtocolViolation(
@@ -949,6 +980,11 @@ class SQLiteTransitionLedger:
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
+        record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.EXECUTED,
+        )
         return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
@@ -968,6 +1004,10 @@ class SQLiteTransitionLedger:
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
         record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.VERIFYING,
+        )
         if result.transition_hash != record.transition_hash:
             raise ProtocolViolation(
                 "ledger verification transition mismatch"
@@ -1016,6 +1056,11 @@ class SQLiteTransitionLedger:
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
+        record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.SUCCEEDED,
+        )
         return self._advance(
             transition_id=transition_id,
             expected_version=expected_version,
@@ -1034,6 +1079,11 @@ class SQLiteTransitionLedger:
         actor: Principal,
         occurred_at: datetime,
     ) -> TransitionLedgerRecord:
+        record = self._require(transition_id)
+        self._assert_phase(
+            record,
+            TransitionPhase.RECOVERY_REQUIRED,
+        )
         if not recovery_transition_hash:
             raise ProtocolViolation(
                 "recovery transition hash is required"
@@ -1123,6 +1173,21 @@ class SQLiteTransitionLedger:
                 "transition is not registered in ledger"
             )
         return record
+
+    @staticmethod
+    def _assert_phase(
+        record: TransitionLedgerRecord,
+        *allowed: TransitionPhase,
+    ) -> None:
+        if record.phase not in allowed:
+            expected = ", ".join(
+                phase.value
+                for phase in allowed
+            )
+            raise ProtocolViolation(
+                "illegal transition phase change: "
+                f"current={record.phase.value}, required={expected}"
+            )
 
     @staticmethod
     def _event_hash(
