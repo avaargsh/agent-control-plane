@@ -59,7 +59,10 @@ def _create_claimed_work(
 ]:
     fixture = build_transition()
     path = tmp_path / db_name
-    store = SQLiteWorkContextStore(path)
+    store = SQLiteWorkContextStore(
+        path,
+        clock=lambda: NOW + timedelta(seconds=5),
+    )
     overlay_store = SQLiteContextOverlayStore(path)
 
     created = store.create(
