@@ -345,22 +345,24 @@ def main() -> int:
         approval,
         key=approval_key,
     )
+    approval_verifier = HMACApprovalVerifier(
+        keys={approval_key.key_id: approval_key},
+    )
     authorization = authorize_transition_from_approval(
         transition=transition,
         action=action,
         policy_input=policy_input,
         policy_decision=policy_decision,
         signed_approval=signed_approval,
-        approval_verifier=HMACApprovalVerifier(
-            keys={approval_key.key_id: approval_key},
-        ),
+        approval_verifier=approval_verifier,
         authorization_expires_at=started_at + timedelta(minutes=4),
         now=started_at,
     )
     ledger_record = ledger.record_authorization(
         transition_id=ledger_record.transition_id,
         expected_version=ledger_record.state_version,
-        approval=approval,
+        signed_approval=signed_approval,
+        approval_verifier=approval_verifier,
         authorization=authorization,
         actor=approver,
         occurred_at=datetime.now(timezone.utc),
