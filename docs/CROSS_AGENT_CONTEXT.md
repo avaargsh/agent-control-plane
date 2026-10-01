@@ -244,8 +244,9 @@ The next implementation should remain small:
    workstation and retain its state/evidence artifact;
 2. decide whether work freshness needs a narrower authority-generation counter
    than the current conservative whole-snapshot version;
-3. propagate context proposal identity into durable execution receipts and
-   release evidence so replay can prove the same provenance after execution;
+3. promote the recovered journal provenance into a provider-independent
+   ReleaseEvidence / Attestation object rather than leaving it Kubernetes-smoke
+   specific;
 4. keep semantic memory pluggable rather than making it authoritative.
 
 
@@ -359,3 +360,62 @@ alongside its JSON summary. The summary includes:
 
 This makes the live Kubernetes proof traceable back to the exact cross-agent
 work state used by the proposing agent.
+
+
+## Durable execution context provenance
+
+Context provenance is now persisted before the provider side effect in the
+execution write-ahead journal.
+
+A context-bound attempt carries an
+`ExecutionContextProvenance/v1` containing:
+
+- `work_id`
+- `work_version`
+- `work_snapshot_hash`
+- `projection_hash`
+- `proposal_hash`
+- proposer identity
+- `provenance_hash`
+
+The provenance object is included in the immutable `attempt_hash`. It
+therefore survives controller/process restart as part of the PREPARED record.
+
+When an attempt becomes COMMITTED, ABORTED, or UNKNOWN, the journal
+automatically embeds the same provenance under
+`_execution_context_provenance` in the terminal result before computing
+`result_hash`.
+
+```text
+WorkSnapshot
+   |
+ContextProjection
+   |
+TransitionProposalBinding
+   |
+ExecutionContextProvenance
+   |
+   +--> PREPARED attempt_hash
+   |       |
+   |    provider side effect
+   |       |
+   |    process crash
+   |       |
+   +--> restart / reconcile
+           |
+       COMMITTED result_hash
+           |
+   _execution_context_provenance
+```
+
+This means crash recovery no longer proves only which transition/action owned
+the provider mutation. It also proves which cross-agent work snapshot and
+projection produced the authorized attempt.
+
+The SQLite journal migrates older databases by adding nullable provenance
+columns. Rows without provenance continue to verify using the original attempt
+digest shape.
+
+The kind live smoke now reads the work/projection/proposal hashes back from the
+recovered COMMITTED journal record rather than trusting temporary in-process
+objects.
