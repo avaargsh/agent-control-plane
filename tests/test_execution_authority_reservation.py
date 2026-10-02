@@ -249,3 +249,41 @@ def test_v3_commit_without_durable_reservation_is_rejected(tmp_path):
             completed_at=NOW + timedelta(seconds=5),
             result={"status": "APPLIED"},
         )
+
+
+def test_not_applied_reconcile_releases_terminal_reservation(tmp_path):
+    (
+        fixture,
+        _,
+        _,
+        _,
+        _,
+        context,
+        journal,
+        _,
+        attempt,
+    ) = prepare_context_attempt_v3(tmp_path)
+
+    reservations = SQLiteAuthorityReservationStore(
+        context.store.path
+    )
+    result = reconcile_deployment_attempt(
+        api=fixture["api"],
+        journal=journal,
+        attempt=attempt,
+        transition=fixture["transition"],
+        action=fixture["action"],
+        namespace="prod",
+        name="payment-api",
+        reconciled_at=NOW + timedelta(seconds=7),
+        authority_reservation_store=reservations,
+    )
+
+    assert result.status is ReconcileStatus.NOT_APPLIED
+    aborted = journal.get(attempt.attempt_id)
+    assert aborted is not None
+    assert aborted.state is ExecutionAttemptState.ABORTED
+    terminal = aborted.result["_authority_reservation"]
+    durable = reservations.get(terminal["reservation_id"])
+    assert durable is not None
+    assert durable.state is AuthorityReservationState.RELEASED
