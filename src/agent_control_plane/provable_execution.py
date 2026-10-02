@@ -180,6 +180,54 @@ class TransitionPlan:
             ),
         )
 
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "TransitionPlan":
+        subject_value = value.get("subject")
+        if not isinstance(subject_value, Mapping):
+            raise ProtocolViolation(
+                "transition plan subject mapping is required"
+            )
+        try:
+            created_at = datetime.fromisoformat(
+                str(value["created_at"])
+            )
+            plan = cls(
+                plan_id=str(value["plan_id"]),
+                subject=ResourceIdentity(
+                    provider=str(subject_value["provider"]),
+                    resource_uid=str(subject_value["resource_uid"]),
+                    namespace=str(subject_value["namespace"]),
+                    kind=str(subject_value["kind"]),
+                    name=str(subject_value["name"]),
+                ),
+                observation_hash=str(value["observation_hash"]),
+                before=_snapshot(value["before"]),
+                desired=_snapshot(value["desired"]),
+                provider=str(value["provider"]),
+                operation=str(value["operation"]),
+                parameters=_snapshot(value["parameters"]),
+                preconditions=_snapshot(value["preconditions"]),
+                created_at=created_at,
+                before_hash=str(value["before_hash"]),
+                desired_hash=str(value["desired_hash"]),
+                plan_hash=str(value["plan_hash"]),
+                plan_version=str(
+                    value.get(
+                        "plan_version",
+                        "transition-plan/v1",
+                    )
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProtocolViolation(
+                "invalid transition plan mapping"
+            ) from exc
+        plan.verify()
+        return plan
+
     def verify(
         self,
         observation: ObservationSnapshot | None = None,
@@ -217,6 +265,31 @@ class TransitionPlan:
             raise ProtocolViolation(
                 "transition plan observation binding mismatch"
             )
+
+    def as_mapping(self) -> dict[str, Any]:
+        self.verify()
+        return {
+            "plan_id": self.plan_id,
+            "subject": {
+                "provider": self.subject.provider,
+                "resource_uid": self.subject.resource_uid,
+                "namespace": self.subject.namespace,
+                "kind": self.subject.kind,
+                "name": self.subject.name,
+            },
+            "observation_hash": self.observation_hash,
+            "before": dict(self.before),
+            "desired": dict(self.desired),
+            "provider": self.provider,
+            "operation": self.operation,
+            "parameters": dict(self.parameters),
+            "preconditions": dict(self.preconditions),
+            "created_at": self.created_at.isoformat(),
+            "before_hash": self.before_hash,
+            "desired_hash": self.desired_hash,
+            "plan_hash": self.plan_hash,
+            "plan_version": self.plan_version,
+        }
 
 
 class PolicyDecision(str, Enum):

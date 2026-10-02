@@ -15,6 +15,7 @@ from .context_transition import (
 )
 from .execution_journal import (
     ExecutionAttempt,
+    ExecutionAttemptState,
     SQLiteExecutionJournal,
 )
 from .kubernetes_deployment_transition import (
@@ -22,6 +23,7 @@ from .kubernetes_deployment_transition import (
     DeploymentScaleReceipt,
     KubernetesDeploymentScaleProvider,
 )
+from .provable_execution import TransitionPlan
 from .state_transition_protocol import (
     ActionIntent,
     AuthorizationBinding,
@@ -30,6 +32,7 @@ from .state_transition_protocol import (
     ExecutionLease,
     OutcomeContract,
     Principal,
+    ProtocolViolation,
     StateTransition,
 )
 
@@ -40,6 +43,7 @@ Clock = Callable[[], datetime]
 @dataclass(frozen=True)
 class PreparedDeploymentExecution:
     attempt: ExecutionAttempt
+    plan: TransitionPlan
     reservation: AuthorityReservation | None
     context_binding: ContextBoundExecutionContext
 
@@ -124,12 +128,50 @@ class KubernetesDeploymentExecutionCoordinator:
         provenance = build_execution_context_provenance(
             context_binding.proposal
         )
+        latest = self.journal.latest_for_action(
+            resource_uid=transition.subject.resource_uid,
+            action_hash=action.action_hash,
+            authorization_hash=authorization.authorization_hash,
+        )
+        if (
+            latest is not None
+            and latest.state is ExecutionAttemptState.PREPARED
+        ):
+            stored_plan = latest.transition_plan
+            if stored_plan is None:
+                raise ProtocolViolation(
+                    "open execution attempt has no durable transition plan"
+                )
+            plan = TransitionPlan.from_mapping(stored_plan)
+        elif (
+            latest is not None
+            and latest.state is ExecutionAttemptState.COMMITTED
+        ):
+            raise ProtocolViolation(
+                "execution action is already committed"
+            )
+        elif (
+            latest is not None
+            and latest.state is ExecutionAttemptState.UNKNOWN
+        ):
+            raise ProtocolViolation(
+                "execution action has UNKNOWN prior attempt"
+            )
+        else:
+            plan = self.provider.prepare_plan(
+                transition=transition,
+                action=action,
+                observer=fence.lease_holder,
+                now=self.clock(),
+            )
+
         attempt = self.journal.prepare(
             transition=transition,
             action=action,
             authorization=authorization,
             fence=fence,
             prepared_at=self.clock(),
+            transition_plan=plan,
             context_provenance=provenance,
         )
 
@@ -164,6 +206,7 @@ class KubernetesDeploymentExecutionCoordinator:
 
         return PreparedDeploymentExecution(
             attempt=attempt,
+            plan=plan,
             reservation=reservation,
             context_binding=bound_context,
         )
@@ -203,8 +246,13 @@ class KubernetesDeploymentExecutionCoordinator:
             caller=caller,
             now=self.clock(),
             operation_id=attempt.operation_id,
+            execution_plan=prepared.plan,
             context_binding=prepared.context_binding,
         )
+        if receipt.plan_hash != attempt.transition_plan_hash:
+            raise ProtocolViolation(
+                "provider receipt transition plan does not match PREPARED"
+            )
 
         completed_at = self.clock()
         committed = self.journal.commit(

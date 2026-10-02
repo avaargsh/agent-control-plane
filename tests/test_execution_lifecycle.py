@@ -258,12 +258,19 @@ def test_prepare_recovers_acquire_before_journal_bind_gap(tmp_path):
     # Simulate the first process persisting PREPARED and acquiring the
     # deterministic reservation, then dying before journal.bind_*().
     provenance = build_execution_context_provenance(proposal)
+    plan = coordinator.provider.prepare_plan(
+        transition=fixture["transition"],
+        action=fixture["action"],
+        observer=fixture["holder"],
+        now=NOW + timedelta(seconds=4),
+    )
     attempt = journal.prepare(
         transition=fixture["transition"],
         action=fixture["action"],
         authorization=fixture["authorization"],
         fence=fixture["fence"],
         prepared_at=NOW + timedelta(seconds=5),
+        transition_plan=plan,
         context_provenance=provenance,
     )
     reservation_id = f"execution-attempt:{attempt.attempt_id}"

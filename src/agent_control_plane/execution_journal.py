@@ -13,6 +13,7 @@ from .authority_reservation import (
     AuthorityReservation,
     SQLiteAuthorityReservationStore,
 )
+from .provable_execution import TransitionPlan
 from .execution_provenance import (
     ExecutionContextProvenance,
     ExecutionContextProvenanceV2,
@@ -31,11 +32,13 @@ from .state_transition_protocol import (
 _ACTION_HASH_ANNOTATION = "agent-control-plane.openai.com/action-hash"
 _TRANSITION_HASH_ANNOTATION = "agent-control-plane.openai.com/transition-hash"
 _OPERATION_ID_ANNOTATION = "agent-control-plane.openai.com/operation-id"
+_PLAN_HASH_ANNOTATION = "agent-control-plane.openai.com/plan-hash"
 _AUTHORITY_RESERVATION_HASH_ANNOTATION = (
     "agent-control-plane.openai.com/authority-reservation-hash"
 )
 _EXECUTION_CONTEXT_RESULT_KEY = "_execution_context_provenance"
 _AUTHORITY_RESERVATION_RESULT_KEY = "_authority_reservation"
+_TRANSITION_PLAN_RESULT_KEY = "_transition_plan"
 
 
 def _require_aware(value: datetime, field_name: str) -> None:
@@ -96,6 +99,8 @@ class ExecutionAttempt:
     completed_at: datetime | None
     result_hash: str | None
     result_json: str | None
+    transition_plan_json: str | None = None
+    transition_plan_hash: str | None = None
 
     def verify(self) -> None:
         payload = {
@@ -112,6 +117,51 @@ class ExecutionAttempt:
             "desired": json.loads(self.desired_json),
             "prepared_at": self.prepared_at.isoformat(),
         }
+        if (
+            (self.transition_plan_json is None)
+            != (self.transition_plan_hash is None)
+        ):
+            raise ProtocolViolation(
+                "execution transition plan is only partially populated"
+            )
+        if self.transition_plan_json is not None:
+            transition_plan = json.loads(self.transition_plan_json)
+            if not isinstance(transition_plan, Mapping):
+                raise ProtocolViolation(
+                    "execution transition plan must be an object"
+                )
+            stored_plan_hash = transition_plan.get("plan_hash")
+            if (
+                not isinstance(stored_plan_hash, str)
+                or not stored_plan_hash
+            ):
+                raise ProtocolViolation(
+                    "execution transition plan hash is missing"
+                )
+            if (
+                canonical_digest(
+                    transition_plan,
+                    exclude=("plan_hash",),
+                )
+                != stored_plan_hash
+            ):
+                raise ProtocolViolation(
+                    "execution transition plan digest mismatch"
+                )
+            if stored_plan_hash != self.transition_plan_hash:
+                raise ProtocolViolation(
+                    "execution transition plan binding mismatch"
+                )
+            subject = transition_plan.get("subject")
+            if (
+                not isinstance(subject, Mapping)
+                or subject.get("resource_uid") != self.resource_uid
+            ):
+                raise ProtocolViolation(
+                    "execution transition plan resource mismatch"
+                )
+            payload["transition_plan"] = transition_plan
+
         if (
             (self.context_provenance_json is None)
             != (self.context_provenance_hash is None)
@@ -218,6 +268,14 @@ class ExecutionAttempt:
                 raise ProtocolViolation(
                     "terminal result authority reservation mismatch"
                 )
+        if self.transition_plan_json is not None:
+            expected_plan = self.transition_plan
+            if result_value.get(
+                _TRANSITION_PLAN_RESULT_KEY
+            ) != expected_plan:
+                raise ProtocolViolation(
+                    "terminal result transition plan mismatch"
+                )
 
     @property
     def before(self) -> Mapping[str, Any]:
@@ -231,6 +289,17 @@ class ExecutionAttempt:
         value = json.loads(self.desired_json)
         if not isinstance(value, Mapping):
             raise ProtocolViolation("journal desired state must be an object")
+        return value
+
+    @property
+    def transition_plan(self) -> Mapping[str, Any] | None:
+        if self.transition_plan_json is None:
+            return None
+        value = json.loads(self.transition_plan_json)
+        if not isinstance(value, Mapping):
+            raise ProtocolViolation(
+                "journal transition plan must be an object"
+            )
         return value
 
     @property
@@ -305,6 +374,8 @@ class SQLiteExecutionJournal:
                     expected_generation INTEGER NOT NULL,
                     before_json TEXT NOT NULL,
                     desired_json TEXT NOT NULL,
+                    transition_plan_json TEXT,
+                    transition_plan_hash TEXT,
                     context_provenance_json TEXT,
                     context_provenance_hash TEXT,
                     authority_reservation_json TEXT,
@@ -335,6 +406,16 @@ class SQLiteExecutionJournal:
                     "PRAGMA table_info(execution_attempts)"
                 ).fetchall()
             }
+            if "transition_plan_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_attempts "
+                    "ADD COLUMN transition_plan_json TEXT"
+                )
+            if "transition_plan_hash" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_attempts "
+                    "ADD COLUMN transition_plan_hash TEXT"
+                )
             if "context_provenance_json" not in columns:
                 connection.execute(
                     "ALTER TABLE execution_attempts "
@@ -389,6 +470,8 @@ class SQLiteExecutionJournal:
             completed_at=_parse_time(row["completed_at"]),
             result_hash=row["result_hash"],
             result_json=row["result_json"],
+            transition_plan_json=row["transition_plan_json"],
+            transition_plan_hash=row["transition_plan_hash"],
         )
         attempt.verify()
         return attempt
@@ -433,6 +516,32 @@ class SQLiteExecutionJournal:
             ).fetchone()
         return row is not None
 
+    def latest_for_action(
+        self,
+        *,
+        resource_uid: str,
+        action_hash: str,
+        authorization_hash: str,
+    ) -> ExecutionAttempt | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM execution_attempts
+                WHERE resource_uid = ?
+                  AND action_hash = ?
+                  AND authorization_hash = ?
+                ORDER BY prepared_at DESC
+                LIMIT 1
+                """,
+                (
+                    resource_uid,
+                    action_hash,
+                    authorization_hash,
+                ),
+            ).fetchone()
+        return self._attempt(row) if row is not None else None
+
     def open_for_action(
         self,
         *,
@@ -469,6 +578,7 @@ class SQLiteExecutionJournal:
         authorization: AuthorizationBinding,
         fence: ExecutionFence,
         prepared_at: datetime,
+        transition_plan: TransitionPlan | None = None,
         context_provenance: (
             ExecutionContextProvenance
             | ExecutionContextProvenanceV2
@@ -508,6 +618,39 @@ class SQLiteExecutionJournal:
 
         before_json = _json_snapshot(transition.before)
         desired_json = _json_snapshot(transition.desired)
+        transition_plan_json = None
+        transition_plan_hash = None
+        if transition_plan is not None:
+            transition_plan.verify()
+            if transition_plan.subject != transition.subject:
+                raise ProtocolViolation(
+                    "journal transition plan subject mismatch"
+                )
+            if transition_plan.before != transition.before:
+                raise ProtocolViolation(
+                    "journal transition plan before-state mismatch"
+                )
+            if transition_plan.desired != transition.desired:
+                raise ProtocolViolation(
+                    "journal transition plan desired-state mismatch"
+                )
+            if transition_plan.provider != action.provider:
+                raise ProtocolViolation(
+                    "journal transition plan provider mismatch"
+                )
+            if transition_plan.operation != action.operation:
+                raise ProtocolViolation(
+                    "journal transition plan operation mismatch"
+                )
+            if transition_plan.parameters != action.parameters:
+                raise ProtocolViolation(
+                    "journal transition plan parameters mismatch"
+                )
+            transition_plan_json = _json_snapshot(
+                transition_plan.as_mapping()
+            )
+            transition_plan_hash = transition_plan.plan_hash
+
         context_provenance_json = None
         context_provenance_hash = None
         if context_provenance is not None:
@@ -547,6 +690,15 @@ class SQLiteExecutionJournal:
             if row is not None:
                 existing = self._attempt(row)
                 if existing.state is ExecutionAttemptState.PREPARED:
+                    if (
+                        existing.transition_plan_hash
+                        != transition_plan_hash
+                    ):
+                        connection.execute("ROLLBACK")
+                        raise ProtocolViolation(
+                            "open execution attempt transition plan "
+                            "does not match"
+                        )
                     if (
                         existing.context_provenance_hash
                         != context_provenance_hash
@@ -594,6 +746,10 @@ class SQLiteExecutionJournal:
                 "desired": json.loads(desired_json),
                 "prepared_at": prepared_at.isoformat(),
             }
+            if transition_plan_json is not None:
+                attempt_payload["transition_plan"] = json.loads(
+                    transition_plan_json
+                )
             if context_provenance_json is not None:
                 attempt_payload["context_provenance"] = json.loads(
                     context_provenance_json
@@ -613,6 +769,8 @@ class SQLiteExecutionJournal:
                     expected_generation,
                     before_json,
                     desired_json,
+                    transition_plan_json,
+                    transition_plan_hash,
                     context_provenance_json,
                     context_provenance_hash,
                     authority_reservation_json,
@@ -624,7 +782,7 @@ class SQLiteExecutionJournal:
                     result_hash,
                     result_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, NULL)
                 """,
                 (
                     attempt_id,
@@ -638,6 +796,8 @@ class SQLiteExecutionJournal:
                     transition.expected_generation,
                     before_json,
                     desired_json,
+                    transition_plan_json,
+                    transition_plan_hash,
                     context_provenance_json,
                     context_provenance_hash,
                     attempt_hash,
@@ -813,6 +973,24 @@ class SQLiteExecutionJournal:
                 effective_result[
                     _EXECUTION_CONTEXT_RESULT_KEY
                 ] = expected_reserved
+            transition_plan = current.transition_plan
+            if transition_plan is not None:
+                reserved_plan = effective_result.get(
+                    _TRANSITION_PLAN_RESULT_KEY
+                )
+                expected_plan = dict(transition_plan)
+                if (
+                    reserved_plan is not None
+                    and reserved_plan != expected_plan
+                ):
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "terminal result transition plan mismatch"
+                    )
+                effective_result[
+                    _TRANSITION_PLAN_RESULT_KEY
+                ] = expected_plan
+
             authority_reservation = current.authority_reservation
             if authority_reservation is not None:
                 reserved = effective_result.get(
@@ -1058,6 +1236,7 @@ def reconcile_deployment_attempt(
     observed_reservation_hash = annotations.get(
         _AUTHORITY_RESERVATION_HASH_ANNOTATION
     )
+    observed_plan_hash = annotations.get(_PLAN_HASH_ANNOTATION)
     provenance = current.context_provenance
     requires_reservation = (
         provenance is not None
@@ -1083,6 +1262,10 @@ def reconcile_deployment_attempt(
         == transition.transition_hash
         and annotations.get(_OPERATION_ID_ANNOTATION)
         == current.operation_id
+        and (
+            current.transition_plan_hash is None
+            or observed_plan_hash == current.transition_plan_hash
+        )
         and reservation_matches
     )
 
@@ -1098,6 +1281,7 @@ def reconcile_deployment_attempt(
             "after_resource_version": resource_version,
             "reconstructed_after_crash": True,
             "authority_reservation_hash": observed_reservation_hash,
+            "plan_hash": observed_plan_hash,
         }
         committed = journal.commit(
             current,
@@ -1181,6 +1365,8 @@ def reconcile_deployment_attempt(
         "expected_authority_reservation_hash": (
             current.authority_reservation_hash
         ),
+        "observed_plan_hash": observed_plan_hash,
+        "expected_plan_hash": current.transition_plan_hash,
     }
     journal.mark_unknown(
         current,
