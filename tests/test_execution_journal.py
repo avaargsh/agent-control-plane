@@ -12,6 +12,7 @@ from agent_control_plane.execution_journal import (
 from agent_control_plane.kubernetes_deployment_transition import (
     KubernetesDeploymentScaleProvider,
 )
+from agent_control_plane.provable_execution import TransitionPlan
 from agent_control_plane.runtime_clients import (
     RuntimeMutationOwnershipUncertain,
 )
@@ -29,7 +30,31 @@ def _prepare(journal, fixture):
     )
 
 
+def _prepare_with_plan(journal, fixture):
+    provider = KubernetesDeploymentScaleProvider(fixture["api"])
+    plan = provider.prepare_plan(
+        transition=fixture["transition"],
+        action=fixture["action"],
+        observer=fixture["holder"],
+        now=NOW,
+    )
+    attempt = journal.prepare(
+        transition=fixture["transition"],
+        action=fixture["action"],
+        authorization=fixture["authorization"],
+        fence=fixture["fence"],
+        prepared_at=NOW + timedelta(milliseconds=1),
+        transition_plan=plan,
+    )
+    return attempt, plan
+
+
 def _execute_with_attempt(fixture, attempt):
+    plan = (
+        TransitionPlan.from_mapping(attempt.transition_plan)
+        if attempt.transition_plan is not None
+        else None
+    )
     return KubernetesDeploymentScaleProvider(fixture["api"]).execute(
         transition=fixture["transition"],
         evidence=fixture["evidence"],
@@ -41,6 +66,7 @@ def _execute_with_attempt(fixture, attempt):
         caller=fixture["holder"],
         now=NOW + timedelta(seconds=1),
         operation_id=attempt.operation_id,
+        execution_plan=plan,
     )
 
 
@@ -79,6 +105,102 @@ def test_prepare_is_idempotent_while_same_action_is_open(tmp_path):
 
     assert second.attempt_id == first.attempt_id
     assert second.operation_id == first.operation_id
+
+
+def test_transition_plan_is_durable_before_side_effect(tmp_path):
+    fixture = build_transition()
+    path = tmp_path / "execution-plan.db"
+    journal = SQLiteExecutionJournal(path)
+
+    attempt, plan = _prepare_with_plan(journal, fixture)
+
+    assert attempt.state is ExecutionAttemptState.PREPARED
+    assert attempt.transition_plan_hash == plan.plan_hash
+    assert attempt.transition_plan is not None
+    assert (
+        attempt.transition_plan["observation_hash"]
+        == plan.observation_hash
+    )
+    assert fixture["api"].patch_calls == 0
+
+    restarted = SQLiteExecutionJournal(path)
+    recovered = restarted.get(attempt.attempt_id)
+    assert recovered is not None
+    assert recovered.transition_plan_hash == plan.plan_hash
+    assert TransitionPlan.from_mapping(
+        recovered.transition_plan
+    ).plan_hash == plan.plan_hash
+
+
+def test_reconcile_requires_durable_plan_ownership(tmp_path):
+    fixture = build_transition(FakeDeploymentApi())
+    journal = SQLiteExecutionJournal(tmp_path / "execution-plan.db")
+    attempt, plan = _prepare_with_plan(journal, fixture)
+
+    receipt = _execute_with_attempt(fixture, attempt)
+    assert receipt.plan_hash == plan.plan_hash
+
+    result = reconcile_deployment_attempt(
+        api=fixture["api"],
+        journal=journal,
+        attempt=journal.get(attempt.attempt_id),
+        transition=fixture["transition"],
+        action=fixture["action"],
+        namespace="prod",
+        name="payment-api",
+        reconciled_at=NOW + timedelta(seconds=2),
+    )
+
+    assert result.status is ReconcileStatus.APPLIED
+    committed = journal.get(attempt.attempt_id)
+    assert committed is not None
+    assert committed.transition_plan_hash == plan.plan_hash
+    assert (
+        committed.result["_transition_plan"]["plan_hash"]
+        == plan.plan_hash
+    )
+    assert committed.result["plan_hash"] == plan.plan_hash
+
+
+def test_reconcile_rejects_matching_operation_with_wrong_plan_hash(
+    tmp_path,
+):
+    fixture = build_transition(FakeDeploymentApi())
+    journal = SQLiteExecutionJournal(tmp_path / "execution-plan.db")
+    attempt, plan = _prepare_with_plan(journal, fixture)
+
+    api = fixture["api"]
+    api.deployment["spec"]["replicas"] = 30
+    api.deployment["metadata"]["generation"] = 8
+    api.deployment["metadata"]["resourceVersion"] = "101"
+    api.deployment["metadata"]["annotations"] = {
+        "agent-control-plane.openai.com/action-hash":
+            fixture["action"].action_hash,
+        "agent-control-plane.openai.com/transition-hash":
+            fixture["transition"].transition_hash,
+        "agent-control-plane.openai.com/operation-id":
+            attempt.operation_id,
+        "agent-control-plane.openai.com/plan-hash":
+            "sha256:" + "f" * 64,
+    }
+
+    result = reconcile_deployment_attempt(
+        api=api,
+        journal=journal,
+        attempt=attempt,
+        transition=fixture["transition"],
+        action=fixture["action"],
+        namespace="prod",
+        name="payment-api",
+        reconciled_at=NOW + timedelta(seconds=2),
+    )
+
+    assert result.status is ReconcileStatus.AMBIGUOUS
+    unknown = journal.get(attempt.attempt_id)
+    assert unknown is not None
+    assert unknown.state is ExecutionAttemptState.UNKNOWN
+    assert unknown.transition_plan_hash == plan.plan_hash
+    assert unknown.result["expected_plan_hash"] == plan.plan_hash
 
 
 def test_crash_after_side_effect_before_receipt_reconstructs_exact_attempt(
