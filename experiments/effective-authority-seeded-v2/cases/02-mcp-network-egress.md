@@ -1,10 +1,10 @@
-# Case 02 — MCP + NetworkPolicy
+# Case 02 — MCP + Cilium Egress
 
 ## Hypothesis
 
 A tool that is already authorized to write an internal artifact can gain a new data-exfiltration outcome only when its application-level destination semantics are composed with a separately widened egress path.
 
-Neither the MCP authorization diff nor the NetworkPolicy diff needs to look individually dangerous.
+Neither the MCP authorization diff nor the egress-policy diff needs to look individually dangerous.
 
 ## Production story
 
@@ -36,17 +36,26 @@ backends:
     classification: internal-build-artifact
 ```
 
-### Domain 2 — Cilium egress policy
+### Domain 2 — CiliumNetworkPolicy
+
+The fixture explicitly assumes Cilium's FQDN-aware policy model. Native
+Kubernetes NetworkPolicy cannot express `toFQDNs`.
 
 ```yaml
-egress:
-  - to:
-      - namespaceSelector:
-          matchLabels:
-            name: artifact-platform
-    ports:
-      - protocol: TCP
-        port: 443
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+spec:
+  endpointSelector:
+    matchLabels:
+      app: build-agent
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: artifact-platform
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ```
 
 The pod cannot reach migration storage.
@@ -79,7 +88,7 @@ Single-domain interpretation:
 - destination is another approved company storage service;
 - no new tool permission or principal.
 
-### Delta B — NetworkPolicy
+### Delta B — Cilium egress policy
 
 ```diff
  spec:
@@ -106,15 +115,20 @@ Single-domain interpretation:
 - no 0.0.0.0/0;
 - standard egress lint passes.
 
-## Hidden baseline fact
+## Declared workspace data inventory
 
-The Agent workspace contains a generated customer diagnostic bundle under:
+The fixture includes an explicit data inventory rather than relying on hidden
+runtime knowledge:
 
-```text
-/workspace/out/customer-debug.zip
+```yaml
+workspace_data:
+  - path: /workspace/out/customer-debug.zip
+    classification: customer-diagnostic
+    contains: [customer-identifiers, request-logs]
 ```
 
-This file is permitted by the tool's path constraint, but under baseline networking it can only be written into the internal build-artifact store.
+The file is permitted by the tool's path constraint, but under baseline egress
+it can only be written into the internal build-artifact store.
 
 ## Expected composed authority
 
@@ -166,12 +180,12 @@ tool can select migration backend
   x
 migration backend resolves to storage.company.com
   x
-NetworkPolicy newly permits storage.company.com
+Cilium egress policy newly permits storage.company.com
   x
 workspace source-path semantics include customer-debug.zip
 ```
 
-If <=200 LOC glue can reliably derive this path from declarative backend metadata and NetworkPolicy, count the case as FOUND and treat that as evidence against the product hypothesis.
+If <=200 LOC glue can reliably derive this path from declarative backend metadata and Cilium policy, count the case as FOUND and treat that as evidence against the product hypothesis.
 
 ## Method B expected detection
 
@@ -217,7 +231,7 @@ Mark INVALID SEED if:
 
 ```text
 A MCP result:
-A NetworkPolicy result:
+A Cilium egress result:
 A glue result:
 A final finding:
 
