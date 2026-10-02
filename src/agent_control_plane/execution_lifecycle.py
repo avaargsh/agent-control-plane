@@ -184,15 +184,11 @@ class KubernetesDeploymentExecutionCoordinator:
             lease=active_lease,
         )
 
-        attempt = self.journal.prepare(
-            transition=transition,
-            action=action,
-            authorization=authorization,
-            fence=fence,
+        attempt = self.journal.prepare_plan(
+            plan=plan,
+            authorization=plan_authorization,
+            fence=plan_fence,
             prepared_at=self.clock(),
-            transition_plan=plan,
-            plan_authorization=plan_authorization,
-            plan_fence=plan_fence,
             context_provenance=provenance,
         )
 
