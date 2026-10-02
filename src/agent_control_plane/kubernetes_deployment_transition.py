@@ -15,7 +15,13 @@ from .context_transition import (
     validate_context_binding,
     validate_context_bound_execution,
 )
+from .kubernetes_transition_plan import (
+    build_deployment_scale_plan,
+    capture_deployment_scale_observation,
+    validate_deployment_scale_plan,
+)
 from .policy_replay import TransitionPolicyInput
+from .provable_execution import ObservationSnapshot
 from .runtime_clients import (
     RuntimeMutationOwnershipUncertain,
     RuntimeMutationUncertain,
@@ -57,6 +63,7 @@ from .state_transition_protocol import (
 _ACTION_HASH_ANNOTATION = "agent-control-plane.openai.com/action-hash"
 _TRANSITION_HASH_ANNOTATION = "agent-control-plane.openai.com/transition-hash"
 _OPERATION_ID_ANNOTATION = "agent-control-plane.openai.com/operation-id"
+_PLAN_HASH_ANNOTATION = "agent-control-plane.openai.com/plan-hash"
 _AUTHORITY_RESERVATION_HASH_ANNOTATION = (
     "agent-control-plane.openai.com/authority-reservation-hash"
 )
@@ -111,6 +118,7 @@ class DeploymentScaleReceipt:
     after_resource_version: str
     before_generation: int
     after_generation: int
+    plan_hash: str | None = None
     authority_reservation_hash: str | None = None
 
 
@@ -182,6 +190,7 @@ def _authority_reservation_for_execution(
 class DeploymentObservation:
     resource: ResourceIdentity
     observed_at: datetime
+    snapshot: ObservationSnapshot
     deployment: Mapping[str, Any]
     pods: tuple[Mapping[str, Any], ...]
     events: tuple[Mapping[str, Any], ...]
@@ -544,6 +553,11 @@ class KubernetesDeploymentScaleProvider:
                 after_resource_version=resource_version,
                 before_generation=generation,
                 after_generation=generation,
+                plan_hash=(
+                    str(annotations.get(_PLAN_HASH_ANNOTATION))
+                    if annotations.get(_PLAN_HASH_ANNOTATION) is not None
+                    else None
+                ),
                 authority_reservation_hash=(
                     reservation.reservation_hash
                     if reservation is not None
@@ -567,6 +581,25 @@ class KubernetesDeploymentScaleProvider:
             raise ProtocolViolation(
                 "live replicas do not match transition before state"
             )
+
+        plan_observation = capture_deployment_scale_observation(
+            subject=transition.subject,
+            deployment=live,
+            observer=caller,
+            observed_at=now,
+        )
+        execution_plan = build_deployment_scale_plan(
+            transition=transition,
+            action=action,
+            observation=plan_observation,
+            created_at=now,
+        )
+        validate_deployment_scale_plan(
+            plan=execution_plan,
+            observation=plan_observation,
+            transition=transition,
+            action=action,
+        )
 
         operation_id = operation_id or uuid4().hex
         reservation = None
@@ -637,6 +670,7 @@ class KubernetesDeploymentScaleProvider:
                     _ACTION_HASH_ANNOTATION: action.action_hash,
                     _TRANSITION_HASH_ANNOTATION: transition.transition_hash,
                     _OPERATION_ID_ANNOTATION: operation_id,
+                    _PLAN_HASH_ANNOTATION: execution_plan.plan_hash,
                     **(
                         {
                             _AUTHORITY_RESERVATION_HASH_ANNOTATION: (
@@ -690,6 +724,8 @@ class KubernetesDeploymentScaleProvider:
                 != transition.transition_hash
                 or observed_annotations.get(_OPERATION_ID_ANNOTATION)
                 != operation_id
+                or observed_annotations.get(_PLAN_HASH_ANNOTATION)
+                != execution_plan.plan_hash
                 or (
                     reservation is not None
                     and observed_annotations.get(
@@ -784,6 +820,7 @@ class KubernetesDeploymentScaleProvider:
             after_resource_version=after_resource_version,
             before_generation=generation,
             after_generation=after_generation,
+            plan_hash=execution_plan.plan_hash,
             authority_reservation_hash=(
                 reservation.reservation_hash
                 if reservation is not None
@@ -887,9 +924,16 @@ class KubernetesDeploymentObserver:
             created_at=observed_at,
             items=items,
         )
+        snapshot = capture_deployment_scale_observation(
+            subject=resource,
+            deployment=deployment,
+            observer=principal,
+            observed_at=observed_at,
+        )
         return DeploymentObservation(
             resource=resource,
             observed_at=observed_at,
+            snapshot=snapshot,
             deployment=dict(deployment),
             pods=pods,
             events=events,
