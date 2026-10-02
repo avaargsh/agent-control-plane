@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
+from .authority_reservation import (
+    AuthorityReservation,
+    SQLiteAuthorityReservationStore,
+)
 from .execution_provenance import (
     ExecutionContextProvenance,
     ExecutionContextProvenanceV2,
@@ -27,7 +31,11 @@ from .state_transition_protocol import (
 _ACTION_HASH_ANNOTATION = "agent-control-plane.openai.com/action-hash"
 _TRANSITION_HASH_ANNOTATION = "agent-control-plane.openai.com/transition-hash"
 _OPERATION_ID_ANNOTATION = "agent-control-plane.openai.com/operation-id"
+_AUTHORITY_RESERVATION_HASH_ANNOTATION = (
+    "agent-control-plane.openai.com/authority-reservation-hash"
+)
 _EXECUTION_CONTEXT_RESULT_KEY = "_execution_context_provenance"
+_AUTHORITY_RESERVATION_RESULT_KEY = "_authority_reservation"
 
 
 def _require_aware(value: datetime, field_name: str) -> None:
@@ -80,6 +88,8 @@ class ExecutionAttempt:
     desired_json: str
     context_provenance_json: str | None
     context_provenance_hash: str | None
+    authority_reservation_json: str | None
+    authority_reservation_hash: str | None
     attempt_hash: str
     state: ExecutionAttemptState
     prepared_at: datetime
@@ -121,6 +131,55 @@ class ExecutionAttempt:
                 )
             payload["context_provenance"] = provenance
 
+        if (
+            (self.authority_reservation_json is None)
+            != (self.authority_reservation_hash is None)
+        ):
+            raise ProtocolViolation(
+                "execution authority reservation is only partially populated"
+            )
+        if self.authority_reservation_json is not None:
+            reservation = json.loads(self.authority_reservation_json)
+            if not isinstance(reservation, Mapping):
+                raise ProtocolViolation(
+                    "execution authority reservation must be an object"
+                )
+            AuthorityReservation.verify_binding_mapping(reservation)
+            if (
+                reservation["reservation_hash"]
+                != self.authority_reservation_hash
+            ):
+                raise ProtocolViolation(
+                    "execution authority reservation hash mismatch"
+                )
+            if reservation["operation_id"] != self.operation_id:
+                raise ProtocolViolation(
+                    "execution authority reservation operation mismatch"
+                )
+            if reservation["resource_uid"] != self.resource_uid:
+                raise ProtocolViolation(
+                    "execution authority reservation resource mismatch"
+                )
+            if reservation["lease_id"] != self.lease_id:
+                raise ProtocolViolation(
+                    "execution authority reservation lease id mismatch"
+                )
+            if int(reservation["lease_epoch"]) != self.lease_epoch:
+                raise ProtocolViolation(
+                    "execution authority reservation lease epoch mismatch"
+                )
+            provenance = self.context_provenance
+            if provenance is None:
+                raise ProtocolViolation(
+                    "authority reservation requires context provenance"
+                )
+            if reservation["proposal_hash"] != provenance.get(
+                "proposal_hash"
+            ):
+                raise ProtocolViolation(
+                    "authority reservation proposal mismatch"
+                )
+
         actual = canonical_digest(payload)
         if actual != self.attempt_hash:
             raise ProtocolViolation(
@@ -151,6 +210,14 @@ class ExecutionAttempt:
             raise ProtocolViolation(
                 "execution result digest mismatch"
             )
+        if self.authority_reservation_json is not None:
+            expected = self.authority_reservation
+            if result_value.get(
+                _AUTHORITY_RESERVATION_RESULT_KEY
+            ) != expected:
+                raise ProtocolViolation(
+                    "terminal result authority reservation mismatch"
+                )
 
     @property
     def before(self) -> Mapping[str, Any]:
@@ -174,6 +241,17 @@ class ExecutionAttempt:
         if not isinstance(value, Mapping):
             raise ProtocolViolation(
                 "journal context provenance must be an object"
+            )
+        return value
+
+    @property
+    def authority_reservation(self) -> Mapping[str, Any] | None:
+        if self.authority_reservation_json is None:
+            return None
+        value = json.loads(self.authority_reservation_json)
+        if not isinstance(value, Mapping):
+            raise ProtocolViolation(
+                "journal authority reservation must be an object"
             )
         return value
 
@@ -229,6 +307,8 @@ class SQLiteExecutionJournal:
                     desired_json TEXT NOT NULL,
                     context_provenance_json TEXT,
                     context_provenance_hash TEXT,
+                    authority_reservation_json TEXT,
+                    authority_reservation_hash TEXT,
                     attempt_hash TEXT NOT NULL,
                     state TEXT NOT NULL,
                     prepared_at TEXT NOT NULL,
@@ -265,6 +345,16 @@ class SQLiteExecutionJournal:
                     "ALTER TABLE execution_attempts "
                     "ADD COLUMN context_provenance_hash TEXT"
                 )
+            if "authority_reservation_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_attempts "
+                    "ADD COLUMN authority_reservation_json TEXT"
+                )
+            if "authority_reservation_hash" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_attempts "
+                    "ADD COLUMN authority_reservation_hash TEXT"
+                )
 
     @staticmethod
     def _attempt(row: sqlite3.Row) -> ExecutionAttempt:
@@ -287,6 +377,12 @@ class SQLiteExecutionJournal:
             desired_json=row["desired_json"],
             context_provenance_json=row["context_provenance_json"],
             context_provenance_hash=row["context_provenance_hash"],
+            authority_reservation_json=row[
+                "authority_reservation_json"
+            ],
+            authority_reservation_hash=row[
+                "authority_reservation_hash"
+            ],
             attempt_hash=row["attempt_hash"],
             state=ExecutionAttemptState(row["state"]),
             prepared_at=prepared_at,
@@ -491,6 +587,8 @@ class SQLiteExecutionJournal:
                     desired_json,
                     context_provenance_json,
                     context_provenance_hash,
+                    authority_reservation_json,
+                    authority_reservation_hash,
                     attempt_hash,
                     state,
                     prepared_at,
@@ -498,7 +596,7 @@ class SQLiteExecutionJournal:
                     result_hash,
                     result_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, NULL)
                 """,
                 (
                     attempt_id,
@@ -525,6 +623,108 @@ class SQLiteExecutionJournal:
         if attempt is None:
             raise ProtocolViolation("prepared execution attempt disappeared")
         return attempt
+
+    def bind_authority_reservation(
+        self,
+        attempt: ExecutionAttempt,
+        reservation: AuthorityReservation,
+    ) -> ExecutionAttempt:
+        """Durably attach the reservation before the provider side effect."""
+
+        reservation.verify()
+        binding = reservation.as_binding_mapping()
+        binding_json = _json_snapshot(binding)
+
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT *
+                FROM execution_attempts
+                WHERE attempt_id = ?
+                """,
+                (attempt.attempt_id,),
+            ).fetchone()
+            if row is None:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "execution attempt does not exist"
+                )
+            current = self._attempt(row)
+            if current.state is not ExecutionAttemptState.PREPARED:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "authority reservation can only bind PREPARED attempt"
+                )
+            if reservation.operation_id != current.operation_id:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "authority reservation operation does not match attempt"
+                )
+            if reservation.resource_uid != current.resource_uid:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "authority reservation resource does not match attempt"
+                )
+            if reservation.lease_id != current.lease_id:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "authority reservation lease id does not match attempt"
+                )
+            if reservation.lease_epoch != current.lease_epoch:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "authority reservation lease epoch does not match attempt"
+                )
+            provenance = current.context_provenance
+            if provenance is None:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "authority reservation requires context provenance"
+                )
+            if reservation.proposal_hash != provenance.get(
+                "proposal_hash"
+            ):
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "authority reservation proposal does not match attempt"
+                )
+            if current.authority_reservation_json is not None:
+                if (
+                    current.authority_reservation_hash
+                    == reservation.reservation_hash
+                    and current.authority_reservation_json == binding_json
+                ):
+                    connection.execute("COMMIT")
+                    return current
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "execution attempt already has another authority "
+                    "reservation"
+                )
+
+            connection.execute(
+                """
+                UPDATE execution_attempts
+                SET authority_reservation_json = ?,
+                    authority_reservation_hash = ?
+                WHERE attempt_id = ? AND state = ?
+                """,
+                (
+                    binding_json,
+                    reservation.reservation_hash,
+                    current.attempt_id,
+                    ExecutionAttemptState.PREPARED.value,
+                ),
+            )
+            connection.execute("COMMIT")
+
+        bound = self.get(attempt.attempt_id)
+        if bound is None:
+            raise ProtocolViolation(
+                "reservation-bound execution attempt disappeared"
+            )
+        return bound
 
     def _finish(
         self,
@@ -554,6 +754,18 @@ class SQLiteExecutionJournal:
             current = self._attempt(row)
             effective_result = dict(result)
             provenance = current.context_provenance
+            if (
+                state is ExecutionAttemptState.COMMITTED
+                and provenance is not None
+                and provenance.get("provenance_version")
+                == "execution-context-provenance/v3"
+                and current.authority_reservation_json is None
+            ):
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "committed provenance v3 execution requires durable "
+                    "authority reservation"
+                )
             if provenance is not None:
                 reserved = effective_result.get(
                     _EXECUTION_CONTEXT_RESULT_KEY
@@ -572,6 +784,23 @@ class SQLiteExecutionJournal:
                     )
                 effective_result[
                     _EXECUTION_CONTEXT_RESULT_KEY
+                ] = expected_reserved
+            authority_reservation = current.authority_reservation
+            if authority_reservation is not None:
+                reserved = effective_result.get(
+                    _AUTHORITY_RESERVATION_RESULT_KEY
+                )
+                expected_reserved = dict(authority_reservation)
+                if (
+                    reserved is not None
+                    and reserved != expected_reserved
+                ):
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "terminal result authority reservation mismatch"
+                    )
+                effective_result[
+                    _AUTHORITY_RESERVATION_RESULT_KEY
                 ] = expected_reserved
             result_json = _json_snapshot(effective_result)
             result_hash = canonical_digest(json.loads(result_json))
@@ -795,6 +1024,14 @@ def reconcile_deployment_attempt(
     desired_replicas = action.parameters.get("replicas")
     before_replicas = transition.before.get("replicas")
     live_replicas = spec.get("replicas")
+    observed_reservation_hash = annotations.get(
+        _AUTHORITY_RESERVATION_HASH_ANNOTATION
+    )
+    reservation_matches = (
+        current.authority_reservation_hash is None
+        or observed_reservation_hash
+        == current.authority_reservation_hash
+    )
     owns_postcondition = (
         live_replicas == desired_replicas
         and generation == transition.expected_generation + 1
@@ -803,6 +1040,7 @@ def reconcile_deployment_attempt(
         == transition.transition_hash
         and annotations.get(_OPERATION_ID_ANNOTATION)
         == current.operation_id
+        and reservation_matches
     )
 
     if owns_postcondition:
@@ -816,6 +1054,7 @@ def reconcile_deployment_attempt(
             "after_generation": generation,
             "after_resource_version": resource_version,
             "reconstructed_after_crash": True,
+            "authority_reservation_hash": observed_reservation_hash,
         }
         journal.commit(
             current,
@@ -876,6 +1115,12 @@ def reconcile_deployment_attempt(
         ),
         "observed_transition_hash": annotations.get(
             _TRANSITION_HASH_ANNOTATION
+        ),
+        "observed_authority_reservation_hash": (
+            observed_reservation_hash
+        ),
+        "expected_authority_reservation_hash": (
+            current.authority_reservation_hash
         ),
     }
     journal.mark_unknown(
