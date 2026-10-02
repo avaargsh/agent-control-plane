@@ -38,6 +38,13 @@ Clock = Callable[[], datetime]
 
 
 @dataclass(frozen=True)
+class PreparedDeploymentExecution:
+    attempt: ExecutionAttempt
+    reservation: AuthorityReservation | None
+    context_binding: ContextBoundExecutionContext
+
+
+@dataclass(frozen=True)
 class DurableDeploymentExecution:
     attempt: ExecutionAttempt
     receipt: DeploymentScaleReceipt
@@ -103,19 +110,16 @@ class KubernetesDeploymentExecutionCoordinator:
         self.clock = clock
         self.lease_authority = lease_authority
 
-    def execute(
+    def prepare(
         self,
         *,
         transition: StateTransition,
-        evidence: EvidenceBundle,
-        outcome_contract: OutcomeContract,
         action: ActionIntent,
         authorization: AuthorizationBinding,
         fence: ExecutionFence,
         active_lease: ExecutionLease,
-        caller: Principal,
         context_binding: ContextBoundExecutionContext,
-    ) -> DurableDeploymentExecution:
+    ) -> PreparedDeploymentExecution:
         provenance = build_execution_context_provenance(
             context_binding.proposal
         )
@@ -156,6 +160,36 @@ class KubernetesDeploymentExecutionCoordinator:
                 authority_reservation=reservation,
                 authority_reservation_store=self.reservation_store,
             )
+
+        return PreparedDeploymentExecution(
+            attempt=attempt,
+            reservation=reservation,
+            context_binding=prepared.context_binding,
+        )
+
+    def execute(
+        self,
+        *,
+        transition: StateTransition,
+        evidence: EvidenceBundle,
+        outcome_contract: OutcomeContract,
+        action: ActionIntent,
+        authorization: AuthorizationBinding,
+        fence: ExecutionFence,
+        active_lease: ExecutionLease,
+        caller: Principal,
+        context_binding: ContextBoundExecutionContext,
+    ) -> DurableDeploymentExecution:
+        prepared = self.prepare(
+            transition=transition,
+            action=action,
+            authorization=authorization,
+            fence=fence,
+            active_lease=active_lease,
+            context_binding=context_binding,
+        )
+        attempt = prepared.attempt
+        reservation = prepared.reservation
 
         receipt = self.provider.execute_context_bound(
             transition=transition,
