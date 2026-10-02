@@ -405,6 +405,34 @@ class SQLiteExecutionJournal:
             ).fetchone()
         return self._attempt(row) if row is not None else None
 
+    def has_prepared_reservation_reference(
+        self,
+        *,
+        reservation_hash: str,
+        exclude_attempt_id: str | None = None,
+    ) -> bool:
+        """Check raw PREPARED references without trusting row verification."""
+
+        clauses = [
+            "authority_reservation_hash = ?",
+            "state = ?",
+        ]
+        values: list[Any] = [
+            reservation_hash,
+            ExecutionAttemptState.PREPARED.value,
+        ]
+        if exclude_attempt_id is not None:
+            clauses.append("attempt_id != ?")
+            values.append(exclude_attempt_id)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM execution_attempts WHERE "
+                + " AND ".join(clauses)
+                + " LIMIT 1",
+                tuple(values),
+            ).fetchone()
+        return row is not None
+
     def open_for_action(
         self,
         *,

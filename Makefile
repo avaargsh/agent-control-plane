@@ -18,6 +18,7 @@ quality-context:
 		src/agent_control_plane/execution_verification.py \
 		src/agent_control_plane/execution_journal.py \
 		src/agent_control_plane/execution_lifecycle.py \
+		src/agent_control_plane/terminal_reservation_repair.py \
 		src/agent_control_plane/execution_attestation.py \
 		src/agent_control_plane/kubernetes_deployment_transition.py \
 		scripts/kubernetes_transition_smoke.py \
@@ -40,6 +41,7 @@ quality-context:
 		tests/test_execution_context_provenance_v3.py \
 		tests/test_execution_authority_reservation.py \
 		tests/test_execution_lifecycle.py \
+		tests/test_terminal_reservation_repair.py \
 		tests/test_execution_verification.py \
 		tests/test_execution_attestation.py
 
