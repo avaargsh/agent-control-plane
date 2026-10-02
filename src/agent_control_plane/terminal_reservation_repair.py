@@ -133,6 +133,8 @@ class TerminalReservationRepairEvidence:
             )
         ):
             raise ProtocolViolation("repair evidence bindings are required")
+        if self.repair_version != "terminal-reservation-repair/v1":
+            raise ProtocolViolation("repair evidence version is invalid")
         if self.terminal_state not in {
             ExecutionAttemptState.COMMITTED.value,
             ExecutionAttemptState.ABORTED.value,
@@ -257,6 +259,28 @@ class SQLiteTerminalReservationRepairStore:
                 ).fetchone()
                 if existing_row is not None:
                     existing = self._record(existing_row)
+                    reservation_row = connection.execute(
+                        """
+                        SELECT state, reservation_hash
+                        FROM work_authority_reservations
+                        WHERE reservation_id = ?
+                        """,
+                        (reservation.reservation_id,),
+                    ).fetchone()
+                    if reservation_row is None:
+                        raise ProtocolViolation(
+                            "repaired reservation disappeared"
+                        )
+                    if (
+                        reservation_row["state"]
+                        != AuthorityReservationState.RELEASED.value
+                        or reservation_row["reservation_hash"]
+                        != existing.reservation_hash
+                    ):
+                        raise ProtocolViolation(
+                            "repair evidence exists without matching "
+                            "RELEASED reservation"
+                        )
                     connection.execute("COMMIT")
                     return existing
 
@@ -390,11 +414,26 @@ class TerminalReservationRepair:
                 != attempt.authority_reservation_hash
                 or existing_evidence.terminal_attempt_id
                 != attempt.attempt_id
+                or existing_evidence.terminal_attempt_hash
+                != attempt.attempt_hash
+                or existing_evidence.terminal_state
+                != attempt.state.value
                 or existing_evidence.terminal_result_hash
                 != attempt.result_hash
             ):
                 raise ProtocolViolation(
                     "existing repair evidence conflicts with terminal proof"
+                )
+            repaired = self.reservation_store.get(reservation_id)
+            if (
+                repaired is None
+                or repaired.state is not AuthorityReservationState.RELEASED
+                or repaired.reservation_hash
+                != existing_evidence.reservation_hash
+            ):
+                raise ProtocolViolation(
+                    "repair evidence exists without matching "
+                    "RELEASED reservation"
                 )
             return existing_evidence
 
