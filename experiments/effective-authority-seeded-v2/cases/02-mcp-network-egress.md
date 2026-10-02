@@ -36,7 +36,7 @@ backends:
     classification: internal-build-artifact
 ```
 
-### Domain 2 — Kubernetes NetworkPolicy
+### Domain 2 — Cilium egress policy
 
 ```yaml
 egress:
@@ -82,19 +82,21 @@ Single-domain interpretation:
 ### Delta B — NetworkPolicy
 
 ```diff
- egress:
-   - to:
-       - namespaceSelector:
-           matchLabels:
-             name: artifact-platform
-     ports:
-       - protocol: TCP
-         port: 443
-+  - to:
-+      - fqdn: storage.company.com
-+    ports:
-+      - protocol: TCP
-+        port: 443
+ spec:
+   egress:
+     - toEndpoints:
+         - matchLabels:
+             k8s:io.kubernetes.pod.namespace: artifact-platform
+       toPorts:
+         - ports:
+             - port: "443"
+               protocol: TCP
++    - toFQDNs:
++        - matchName: storage.company.com
++      toPorts:
++        - ports:
++            - port: "443"
++              protocol: TCP
 ```
 
 Single-domain interpretation:
@@ -151,7 +153,7 @@ This case tests outcome reachability without principal expansion.
 Independent checks:
 
 - MCP schema/auth review: PASS if corporate migration backend is approved;
-- NetworkPolicy review: PASS if storage.company.com is an approved destination;
+- Cilium policy review: PASS if storage.company.com is an approved destination;
 - ordinary diff: two bounded changes;
 - generic OPA rules: no wildcard tool, path, role, CIDR, or port expansion.
 
@@ -208,7 +210,7 @@ The test is whether bounded application destination expansion plus bounded netwo
 Mark INVALID SEED if:
 
 - the migration backend itself would already be classified as a prohibited data sink;
-- NetworkPolicy tooling plus <=200 LOC service-to-FQDN glue recovers the end-to-end outcome easily;
+- Cilium/network policy tooling plus <=200 LOC service-to-FQDN glue recovers the end-to-end outcome easily;
 - the risk depends on undocumented assumptions about what files exist under /workspace/out.
 
 ## Manual review worksheet
