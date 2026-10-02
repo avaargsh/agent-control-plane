@@ -926,6 +926,9 @@ def reconcile_deployment_attempt(
     namespace: str,
     name: str,
     reconciled_at: datetime,
+    authority_reservation_store: (
+        SQLiteAuthorityReservationStore | None
+    ) = None,
 ) -> ExecutionReconcileResult:
     """Resolve a PREPARED attempt after a controller/process restart."""
 
@@ -1027,10 +1030,22 @@ def reconcile_deployment_attempt(
     observed_reservation_hash = annotations.get(
         _AUTHORITY_RESERVATION_HASH_ANNOTATION
     )
+    provenance = current.context_provenance
+    requires_reservation = (
+        provenance is not None
+        and provenance.get("provenance_version")
+        == "execution-context-provenance/v3"
+    )
     reservation_matches = (
-        current.authority_reservation_hash is None
-        or observed_reservation_hash
-        == current.authority_reservation_hash
+        (
+            not requires_reservation
+            and current.authority_reservation_hash is None
+        )
+        or (
+            current.authority_reservation_hash is not None
+            and observed_reservation_hash
+            == current.authority_reservation_hash
+        )
     )
     owns_postcondition = (
         live_replicas == desired_replicas
@@ -1056,11 +1071,19 @@ def reconcile_deployment_attempt(
             "reconstructed_after_crash": True,
             "authority_reservation_hash": observed_reservation_hash,
         }
-        journal.commit(
+        committed = journal.commit(
             current,
             completed_at=reconciled_at,
             result=result,
         )
+        if (
+            authority_reservation_store is not None
+            and committed.authority_reservation is not None
+        ):
+            authority_reservation_store.release_after_terminal(
+                committed.authority_reservation,
+                now=reconciled_at,
+            )
         return ExecutionReconcileResult(
             status=ReconcileStatus.APPLIED,
             attempt_id=current.attempt_id,
