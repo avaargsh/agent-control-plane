@@ -21,7 +21,6 @@ from agent_control_plane.kubernetes_deployment_transition import (
 from agent_control_plane.provable_execution import validate_plan_execution
 from agent_control_plane.state_transition_protocol import (
     ExecutionLease,
-    Principal,
     ProtocolViolation,
 )
 from context_testkit import (
