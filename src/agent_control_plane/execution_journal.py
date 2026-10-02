@@ -86,7 +86,6 @@ class ExecutionAttempt:
     authorization_hash: str
     lease_id: str
     lease_epoch: int
-    expected_generation: int
     before_json: str
     desired_json: str
     context_provenance_json: str | None
@@ -101,6 +100,7 @@ class ExecutionAttempt:
     result_json: str | None
     transition_plan_json: str | None = None
     transition_plan_hash: str | None = None
+    legacy_expected_generation: int | None = None
 
     def verify(self) -> None:
         payload = {
@@ -112,11 +112,20 @@ class ExecutionAttempt:
             "authorization_hash": self.authorization_hash,
             "lease_id": self.lease_id,
             "lease_epoch": self.lease_epoch,
-            "expected_generation": self.expected_generation,
             "before": json.loads(self.before_json),
             "desired": json.loads(self.desired_json),
             "prepared_at": self.prepared_at.isoformat(),
         }
+        if (
+            self.transition_plan_json is None
+            and self.legacy_expected_generation is not None
+        ):
+            # Legacy v1 attempt hashes included Kubernetes generation.
+            # Plan-aware attempts deliberately do not.
+            payload["expected_generation"] = (
+                self.legacy_expected_generation
+            )
+
         if (
             (self.transition_plan_json is None)
             != (self.transition_plan_hash is None)
@@ -453,7 +462,6 @@ class SQLiteExecutionJournal:
             authorization_hash=row["authorization_hash"],
             lease_id=row["lease_id"],
             lease_epoch=int(row["lease_epoch"]),
-            expected_generation=int(row["expected_generation"]),
             before_json=row["before_json"],
             desired_json=row["desired_json"],
             context_provenance_json=row["context_provenance_json"],
@@ -472,6 +480,11 @@ class SQLiteExecutionJournal:
             result_json=row["result_json"],
             transition_plan_json=row["transition_plan_json"],
             transition_plan_hash=row["transition_plan_hash"],
+            legacy_expected_generation=(
+                int(row["expected_generation"])
+                if row["expected_generation"] is not None
+                else None
+            ),
         )
         attempt.verify()
         return attempt
@@ -741,7 +754,6 @@ class SQLiteExecutionJournal:
                 "authorization_hash": authorization.authorization_hash,
                 "lease_id": fence.lease_id,
                 "lease_epoch": fence.lease_epoch,
-                "expected_generation": transition.expected_generation,
                 "before": json.loads(before_json),
                 "desired": json.loads(desired_json),
                 "prepared_at": prepared_at.isoformat(),
@@ -749,6 +761,12 @@ class SQLiteExecutionJournal:
             if transition_plan_json is not None:
                 attempt_payload["transition_plan"] = json.loads(
                     transition_plan_json
+                )
+            else:
+                # Preserve the v1 attempt digest for callers that have not
+                # migrated to provider-neutral TransitionPlan yet.
+                attempt_payload["expected_generation"] = (
+                    transition.expected_generation
                 )
             if context_provenance_json is not None:
                 attempt_payload["context_provenance"] = json.loads(
@@ -1231,8 +1249,39 @@ def reconcile_deployment_attempt(
         )
 
     desired_replicas = action.parameters.get("replicas")
-    before_replicas = transition.before.get("replicas")
     live_replicas = spec.get("replicas")
+
+    durable_plan = current.transition_plan
+    if durable_plan is not None:
+        preconditions = durable_plan.get("preconditions")
+        before_state = durable_plan.get("before")
+        desired_state = durable_plan.get("desired")
+        if (
+            not isinstance(preconditions, Mapping)
+            or not isinstance(before_state, Mapping)
+            or not isinstance(desired_state, Mapping)
+        ):
+            raise ProtocolViolation(
+                "durable transition plan is malformed during reconcile"
+            )
+        expected_generation = preconditions.get("generation")
+        before_replicas = before_state.get("replicas")
+        planned_replicas = desired_state.get("replicas")
+        if (
+            isinstance(expected_generation, bool)
+            or not isinstance(expected_generation, int)
+        ):
+            raise ProtocolViolation(
+                "kubernetes transition plan generation precondition is invalid"
+            )
+        if planned_replicas != desired_replicas:
+            raise ProtocolViolation(
+                "durable transition plan desired replicas mismatch"
+            )
+    else:
+        # Compatibility for pre-TransitionPlan journal rows.
+        expected_generation = transition.expected_generation
+        before_replicas = transition.before.get("replicas")
     observed_reservation_hash = annotations.get(
         _AUTHORITY_RESERVATION_HASH_ANNOTATION
     )
@@ -1256,7 +1305,7 @@ def reconcile_deployment_attempt(
     )
     owns_postcondition = (
         live_replicas == desired_replicas
-        and generation == transition.expected_generation + 1
+        and generation == expected_generation + 1
         and annotations.get(_ACTION_HASH_ANNOTATION) == action.action_hash
         and annotations.get(_TRANSITION_HASH_ANNOTATION)
         == transition.transition_hash
@@ -1307,7 +1356,7 @@ def reconcile_deployment_attempt(
         )
 
     safely_not_applied = (
-        generation == transition.expected_generation
+        generation == expected_generation
         and live_replicas == before_replicas
         and annotations.get(_OPERATION_ID_ANNOTATION)
         != current.operation_id

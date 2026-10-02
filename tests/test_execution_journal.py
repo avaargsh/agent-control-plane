@@ -107,6 +107,34 @@ def test_prepare_is_idempotent_while_same_action_is_open(tmp_path):
     assert second.operation_id == first.operation_id
 
 
+def test_plan_aware_attempt_identity_ignores_legacy_generation_column(
+    tmp_path,
+):
+    fixture = build_transition()
+    path = tmp_path / "execution-plan-identity.db"
+    journal = SQLiteExecutionJournal(path)
+    attempt, plan = _prepare_with_plan(journal, fixture)
+
+    original_hash = attempt.attempt_hash
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            UPDATE execution_attempts
+            SET expected_generation = ?
+            WHERE attempt_id = ?
+            """,
+            (999999, attempt.attempt_id),
+        )
+
+    restarted = SQLiteExecutionJournal(path)
+    recovered = restarted.get(attempt.attempt_id)
+
+    assert recovered is not None
+    assert recovered.attempt_hash == original_hash
+    assert recovered.transition_plan_hash == plan.plan_hash
+    assert recovered.legacy_expected_generation == 999999
+
+
 def test_transition_plan_is_durable_before_side_effect(tmp_path):
     fixture = build_transition()
     path = tmp_path / "execution-plan.db"
