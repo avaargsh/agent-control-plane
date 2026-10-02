@@ -15,6 +15,7 @@ from context_testkit import (
     NOW,
     PROPOSER,
     build_context_bound_execution_v3,
+    prepare_context_attempt_v3,
 )
 from kubernetes_testkit import build_transition
 
@@ -32,6 +33,11 @@ def _execute(fixture, context, *, at=None):
         active_lease=fixture["lease"],
         caller=fixture["holder"],
         now=at or NOW + timedelta(seconds=6),
+        operation_id=(
+            context.authority_reservation.operation_id
+            if context.authority_reservation is not None
+            else None
+        ),
         context_binding=context,
     )
 
@@ -77,7 +83,10 @@ def test_proposal_v3_allows_context_drift_without_authority_drift(tmp_path):
         authority,
         proposal,
         context,
-    ) = build_context_bound_execution_v3(tmp_path)
+        _,
+        _,
+        _,
+    ) = prepare_context_attempt_v3(tmp_path)
 
     overlay_store.append(
         work_id=proposal.work_id,

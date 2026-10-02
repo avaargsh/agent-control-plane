@@ -5,7 +5,10 @@ from datetime import datetime, timedelta
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
-from .authority_reservation import SQLiteAuthorityReservationStore
+from .authority_reservation import (
+    AuthorityReservation,
+    SQLiteAuthorityReservationStore,
+)
 from .context_transition import (
     ContextProposalBinding,
     TransitionProposalBindingV3,
@@ -118,6 +121,61 @@ class ContextBoundExecutionContext:
     store: SQLiteWorkContextStore
     signed_approval: SignedTransitionApproval
     approval_verifier: HMACApprovalVerifier
+    authority_reservation: AuthorityReservation | None = None
+    authority_reservation_store: SQLiteAuthorityReservationStore | None = None
+
+
+def _authority_reservation_for_execution(
+    *,
+    context_binding: ContextBoundExecutionContext,
+    active_lease: ExecutionLease,
+    operation_id: str,
+    now: datetime,
+    require_active: bool,
+) -> AuthorityReservation | None:
+    proposal = context_binding.proposal
+    if not isinstance(proposal, TransitionProposalBindingV3):
+        return None
+
+    reservation = context_binding.authority_reservation
+    reservation_store = context_binding.authority_reservation_store
+    if reservation is None or reservation_store is None:
+        raise ProtocolViolation(
+            "proposal v3 execution requires pre-bound authority reservation"
+        )
+
+    reservation.verify()
+    if reservation.work_id != proposal.work_id:
+        raise ProtocolViolation(
+            "authority reservation work does not match proposal v3"
+        )
+    if reservation.authority_generation != proposal.authority_generation:
+        raise ProtocolViolation(
+            "authority reservation generation does not match proposal v3"
+        )
+    if reservation.authority_hash != proposal.authority_hash:
+        raise ProtocolViolation(
+            "authority reservation hash does not match proposal v3"
+        )
+    if reservation.proposal_hash != proposal.proposal_hash:
+        raise ProtocolViolation(
+            "authority reservation proposal hash mismatch"
+        )
+    if reservation.operation_id != operation_id:
+        raise ProtocolViolation(
+            "authority reservation operation does not match execution"
+        )
+    reservation.assert_bound_lease(
+        active_lease,
+        now=now,
+    )
+    if require_active:
+        reservation_store.assert_active(
+            reservation,
+            execution_lease=active_lease,
+            now=now,
+        )
+    return reservation
 
 
 @dataclass(frozen=True)
@@ -444,6 +502,32 @@ class KubernetesDeploymentScaleProvider:
                     observed_operation_id=observed_operation_id,
                 )
             operation_id = observed_operation_id
+            reservation = None
+            if context_binding is not None:
+                reservation = _authority_reservation_for_execution(
+                    context_binding=context_binding,
+                    active_lease=active_lease,
+                    operation_id=operation_id,
+                    now=now,
+                    require_active=False,
+                )
+                if (
+                    reservation is not None
+                    and annotations.get(
+                        _AUTHORITY_RESERVATION_HASH_ANNOTATION
+                    )
+                    != reservation.reservation_hash
+                ):
+                    raise RuntimeMutationOwnershipUncertain(
+                        "deployment replay lost authority reservation "
+                        "ownership proof",
+                        resource_ref=(
+                            f"k8s://{transition.subject.namespace}/deployment/"
+                            f"{transition.subject.name}"
+                        ),
+                        operation_id=operation_id,
+                        observed_operation_id=observed_operation_id,
+                    )
             return DeploymentScaleReceipt(
                 resource_ref=(
                     f"k8s://{transition.subject.namespace}/deployment/"
@@ -461,16 +545,20 @@ class KubernetesDeploymentScaleProvider:
                 before_generation=generation,
                 after_generation=generation,
                 authority_reservation_hash=(
-                    str(
-                        annotations.get(
+                    reservation.reservation_hash
+                    if reservation is not None
+                    else (
+                        str(
+                            annotations.get(
+                                _AUTHORITY_RESERVATION_HASH_ANNOTATION
+                            )
+                        )
+                        if annotations.get(
                             _AUTHORITY_RESERVATION_HASH_ANNOTATION
                         )
+                        is not None
+                        else None
                     )
-                    if annotations.get(
-                        _AUTHORITY_RESERVATION_HASH_ANNOTATION
-                    )
-                    is not None
-                    else None
                 ),
             )
 
@@ -481,7 +569,6 @@ class KubernetesDeploymentScaleProvider:
             )
 
         operation_id = operation_id or uuid4().hex
-        reservation_store = None
         reservation = None
         if context_binding is None:
             validate_execution(
@@ -497,8 +584,6 @@ class KubernetesDeploymentScaleProvider:
                 now=now,
             )
         else:
-            # First validate before acquiring the reservation so deterministic
-            # protocol failures do not leave a needless authority freeze.
             validate_context_bound_execution(
                 transition=transition,
                 evidence=evidence,
@@ -516,34 +601,17 @@ class KubernetesDeploymentScaleProvider:
                 signed_approval=context_binding.signed_approval,
                 approval_verifier=context_binding.approval_verifier,
             )
-            if isinstance(
-                context_binding.proposal,
-                TransitionProposalBindingV3,
-            ):
-                reservation_store = SQLiteAuthorityReservationStore(
-                    context_binding.store.path
-                )
-                reservation = reservation_store.acquire(
-                    reservation_id=uuid4().hex,
-                    work_id=context_binding.proposal.work_id,
-                    expected_authority_generation=(
-                        context_binding.proposal.authority_generation
-                    ),
-                    expected_authority_hash=(
-                        context_binding.proposal.authority_hash
-                    ),
-                    proposal_hash=context_binding.proposal.proposal_hash,
-                    operation_id=operation_id,
-                    execution_lease=active_lease,
-                    now=now,
-                )
-                reservation_store.assert_active(
-                    reservation,
-                    execution_lease=active_lease,
-                    now=now,
-                )
-                # Revalidate under the reservation. From here until release,
-                # authoritative Work mutations are transactionally blocked.
+            reservation = _authority_reservation_for_execution(
+                context_binding=context_binding,
+                active_lease=active_lease,
+                operation_id=operation_id,
+                now=now,
+                require_active=True,
+            )
+            if reservation is not None:
+                # Revalidate while the reservation is ACTIVE. From this point
+                # until terminal journal state, authoritative Work mutations
+                # remain blocked by the shared Context DB.
                 validate_context_bound_execution(
                     transition=transition,
                     evidence=evidence,
@@ -622,6 +690,13 @@ class KubernetesDeploymentScaleProvider:
                 != transition.transition_hash
                 or observed_annotations.get(_OPERATION_ID_ANNOTATION)
                 != operation_id
+                or (
+                    reservation is not None
+                    and observed_annotations.get(
+                        _AUTHORITY_RESERVATION_HASH_ANNOTATION
+                    )
+                    != reservation.reservation_hash
+                )
             ):
                 raise RuntimeMutationOwnershipUncertain(
                     "deployment reached desired replicas after uncertain "
@@ -676,16 +751,18 @@ class KubernetesDeploymentScaleProvider:
                 raise ProtocolViolation(
                     "kubernetes patch acknowledgement lost authority reservation"
                 )
+            if context_binding is None:
+                raise ProtocolViolation(
+                    "authority reservation context is missing"
+                )
+            reservation_store = (
+                context_binding.authority_reservation_store
+            )
             if reservation_store is None:
                 raise ProtocolViolation(
                     "authority reservation store is missing"
                 )
             reservation_store.assert_active(
-                reservation,
-                execution_lease=active_lease,
-                now=now,
-            )
-            reservation_store.release(
                 reservation,
                 execution_lease=active_lease,
                 now=now,

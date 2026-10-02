@@ -37,6 +37,7 @@ quality-context:
 		tests/test_execution_context_provenance.py \
 		tests/test_execution_context_provenance_v2.py \
 		tests/test_execution_context_provenance_v3.py \
+		tests/test_execution_authority_reservation.py \
 		tests/test_execution_verification.py \
 		tests/test_execution_attestation.py
 

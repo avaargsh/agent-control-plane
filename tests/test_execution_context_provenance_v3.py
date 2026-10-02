@@ -73,4 +73,11 @@ def test_v3_terminal_receipt_keeps_original_authority_identity(tmp_path):
     assert bound["authority_state_hash"] == authority.authority_state_hash
     assert bound["authority_hash"] == authority.authority_hash
     assert bound["context_revision"] == proposal.context_revision
+    reservation = committed.result["_authority_reservation"]
+    assert (
+        reservation["reservation_hash"]
+        == committed.authority_reservation_hash
+    )
+    assert reservation["proposal_hash"] == proposal.proposal_hash
+    assert reservation["operation_id"] == committed.operation_id
     committed.verify()

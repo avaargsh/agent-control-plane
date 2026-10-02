@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from agent_control_plane.authority_reservation import (
+    SQLiteAuthorityReservationStore,
+)
 from agent_control_plane.context_overlay import SQLiteContextOverlayStore
 from agent_control_plane.context_transition import (
     ContextProposalBinding,
@@ -354,7 +358,7 @@ def prepare_context_attempt_v2(tmp_path):
     )
 
 
-def prepare_context_attempt_v3(tmp_path):
+def prepare_context_attempt_v3(tmp_path, *, api: Any = None):
     (
         fixture,
         store,
@@ -362,12 +366,35 @@ def prepare_context_attempt_v3(tmp_path):
         authority,
         proposal,
         context,
-    ) = build_context_bound_execution_v3(tmp_path)
+    ) = build_context_bound_execution_v3(
+        tmp_path,
+        api=api,
+    )
     journal, provenance, attempt = _prepare_attempt(
         tmp_path=tmp_path,
         fixture=fixture,
         proposal=proposal,
         journal_name="execution-v3.db",
+    )
+    reservations = SQLiteAuthorityReservationStore(store.path)
+    reservation = reservations.acquire(
+        reservation_id=f"reservation-{attempt.attempt_id}",
+        work_id=proposal.work_id,
+        expected_authority_generation=proposal.authority_generation,
+        expected_authority_hash=proposal.authority_hash,
+        proposal_hash=proposal.proposal_hash,
+        operation_id=attempt.operation_id,
+        execution_lease=fixture["lease"],
+        now=NOW + timedelta(seconds=5),
+    )
+    attempt = journal.bind_authority_reservation(
+        attempt,
+        reservation,
+    )
+    context = replace(
+        context,
+        authority_reservation=reservation,
+        authority_reservation_store=reservations,
     )
     return (
         fixture,
