@@ -310,55 +310,20 @@ def initialize_authority_reservations(
     )
 
 
-def _expire_stale(
-    connection: sqlite3.Connection,
-    *,
-    work_id: str,
-    now: datetime,
-) -> None:
-    _require_aware(now, "now")
-    rows = connection.execute(
-        """
-        SELECT reservation_id, expires_at
-        FROM work_authority_reservations
-        WHERE work_id = ? AND state = ?
-        """,
-        (work_id, AuthorityReservationState.ACTIVE.value),
-    ).fetchall()
-    expired_ids = [
-        row["reservation_id"]
-        for row in rows
-        if _parse_time(row["expires_at"]) <= now
-    ]
-    for reservation_id in expired_ids:
-        connection.execute(
-            """
-            UPDATE work_authority_reservations
-            SET state = ?
-            WHERE reservation_id = ? AND state = ?
-            """,
-            (
-                AuthorityReservationState.EXPIRED.value,
-                reservation_id,
-                AuthorityReservationState.ACTIVE.value,
-            ),
-        )
-
-
 def assert_authority_mutation_allowed(
     connection: sqlite3.Connection,
     *,
     work_id: str,
     now: datetime,
 ) -> None:
-    """Fail if an unexpired execution reservation freezes this authority."""
+    """Fail while any execution reservation still freezes authority.
+
+    Lease expiry does not auto-release authority. A timed-out provider request
+    may still commit later. Only terminal execution proof or a durable
+    higher-epoch takeover can safely clear the reservation.
+    """
 
     initialize_authority_reservations(connection)
-    _expire_stale(
-        connection,
-        work_id=work_id,
-        now=now,
-    )
     row = connection.execute(
         """
         SELECT reservation_id, lease_id, lease_epoch
@@ -475,11 +440,6 @@ class SQLiteAuthorityReservationStore:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             initialize_authority_reservations(connection)
-            _expire_stale(
-                connection,
-                work_id=work_id,
-                now=now,
-            )
 
             head = connection.execute(
                 """
@@ -620,11 +580,6 @@ class SQLiteAuthorityReservationStore:
         )
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            _expire_stale(
-                connection,
-                work_id=reservation.work_id,
-                now=now,
-            )
             current = self._get(
                 connection,
                 reservation.reservation_id,
@@ -727,11 +682,6 @@ class SQLiteAuthorityReservationStore:
         )
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            _expire_stale(
-                connection,
-                work_id=reservation.work_id,
-                now=now,
-            )
             current = self._get(
                 connection,
                 reservation.reservation_id,
