@@ -21,6 +21,7 @@ quality-context:
 		src/agent_control_plane/terminal_reservation_repair.py \
 		src/agent_control_plane/execution_attestation.py \
 		src/agent_control_plane/provable_execution.py \
+		src/agent_control_plane/kubernetes_transition_plan.py \
 		src/agent_control_plane/kubernetes_deployment_transition.py \
 		scripts/kubernetes_transition_smoke.py \
 		scripts/live_cross_agent_context_handoff.py \
@@ -34,6 +35,7 @@ quality-context:
 		tests/test_context_transition_v2.py \
 		tests/test_context_transition_v3.py \
 		tests/test_context_host_configs.py \
+		tests/test_kubernetes_transition_plan.py \
 		tests/test_kubernetes_deployment_transition.py \
 		tests/test_kubernetes_context_bound_execution.py \
 		tests/test_execution_journal.py \
