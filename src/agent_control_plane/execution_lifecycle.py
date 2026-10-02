@@ -126,18 +126,35 @@ class KubernetesDeploymentExecutionCoordinator:
         provenance = build_execution_context_provenance(
             context_binding.proposal
         )
-        existing = self.journal.open_for_action(
+        latest = self.journal.latest_for_action(
             resource_uid=transition.subject.resource_uid,
             action_hash=action.action_hash,
             authorization_hash=authorization.authorization_hash,
         )
-        if existing is not None:
-            stored_plan = existing.transition_plan
+        if (
+            latest is not None
+            and latest.state is ExecutionAttemptState.PREPARED
+        ):
+            stored_plan = latest.transition_plan
             if stored_plan is None:
                 raise ProtocolViolation(
                     "open execution attempt has no durable transition plan"
                 )
             plan = TransitionPlan.from_mapping(stored_plan)
+        elif (
+            latest is not None
+            and latest.state is ExecutionAttemptState.COMMITTED
+        ):
+            raise ProtocolViolation(
+                "execution action is already committed"
+            )
+        elif (
+            latest is not None
+            and latest.state is ExecutionAttemptState.UNKNOWN
+        ):
+            raise ProtocolViolation(
+                "execution action has UNKNOWN prior attempt"
+            )
         else:
             plan = self.provider.prepare_plan(
                 transition=transition,
