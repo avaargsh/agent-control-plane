@@ -286,7 +286,7 @@ def test_expired_lease_does_not_silently_unfreeze_authority(
 
     # Lease expiry prevents continued execution, but does not itself prove that
     # an in-flight provider request cannot still commit.
-    with pytest.raises(ProtocolViolation, match="lease has expired"):
+    with pytest.raises(ProtocolViolation, match="execution lease expired"):
         reservations.assert_active(
             reservation,
             execution_lease=lease,
