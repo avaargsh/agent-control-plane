@@ -164,7 +164,7 @@ class KubernetesDeploymentExecutionCoordinator:
         return PreparedDeploymentExecution(
             attempt=attempt,
             reservation=reservation,
-            context_binding=prepared.context_binding,
+            context_binding=bound_context,
         )
 
     def execute(
@@ -202,7 +202,7 @@ class KubernetesDeploymentExecutionCoordinator:
             caller=caller,
             now=self.clock(),
             operation_id=attempt.operation_id,
-            context_binding=bound_context,
+            context_binding=prepared.context_binding,
         )
 
         completed_at = self.clock()
