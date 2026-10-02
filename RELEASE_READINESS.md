@@ -14,6 +14,13 @@ A public v0.1 candidate should satisfy all of the following:
 - [x] real OPA v1.21.0 policy-enforcement proof
 - [x] cross-repository kind + Temporal + Kubernetes sandbox-replacement provenance proof
 - [x] MCP Execution Contract fault proof (lost ACK / duplicate retry / timeout / partial commit / compensation)
+- [x] provider-neutral TransitionPlan proven across Kubernetes scale and GitHub PR merge
+- [x] exact-plan authorization/fence and plan-native durable execution journal
+- [x] durable authority reservation survives crash/takeover ambiguity
+- [x] provider side-effect crash/lost-ACK falsification matrix
+- [x] stale/concurrent authority falsification matrix
+- [x] independent out-of-process execution proof verification and tamper rejection
+- [x] v0.1 execution architecture freeze contract recorded
 - [x] known limitations documented
 - [x] repository license selected and added (Apache-2.0)
 - [x] CONTRIBUTING.md added
