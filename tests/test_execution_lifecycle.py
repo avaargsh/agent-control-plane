@@ -19,6 +19,10 @@ from agent_control_plane.execution_lifecycle import (
 from agent_control_plane.kubernetes_deployment_transition import (
     KubernetesDeploymentScaleProvider,
 )
+from agent_control_plane.provable_execution import (
+    PlanAuthorizationBinding,
+    PlanExecutionFence,
+)
 from agent_control_plane.runtime_clients import (
     RuntimeMutationOwnershipUncertain,
 )
@@ -105,6 +109,8 @@ def test_coordinator_commits_then_releases_authority(tmp_path):
 
     assert result.receipt.changed is True
     assert result.attempt.state is ExecutionAttemptState.COMMITTED
+    assert result.attempt.plan_authorization_hash is not None
+    assert result.attempt.plan_fence_hash is not None
     assert result.reservation is not None
     terminal = result.attempt.result["_authority_reservation"]
     assert (
@@ -264,6 +270,17 @@ def test_prepare_recovers_acquire_before_journal_bind_gap(tmp_path):
         observer=fixture["holder"],
         now=NOW + timedelta(seconds=4),
     )
+    plan_authorization = PlanAuthorizationBinding.derive(
+        plan=plan,
+        transition=fixture["transition"],
+        action=fixture["action"],
+        authorization=fixture["authorization"],
+    )
+    plan_fence = PlanExecutionFence.bind(
+        plan=plan,
+        authorization=plan_authorization,
+        lease=fixture["lease"],
+    )
     attempt = journal.prepare(
         transition=fixture["transition"],
         action=fixture["action"],
@@ -271,6 +288,8 @@ def test_prepare_recovers_acquire_before_journal_bind_gap(tmp_path):
         fence=fixture["fence"],
         prepared_at=NOW + timedelta(seconds=5),
         transition_plan=plan,
+        plan_authorization=plan_authorization,
+        plan_fence=plan_fence,
         context_provenance=provenance,
     )
     reservation_id = f"execution-attempt:{attempt.attempt_id}"
@@ -297,6 +316,11 @@ def test_prepare_recovers_acquire_before_journal_bind_gap(tmp_path):
 
     assert recovered.attempt.attempt_id == attempt.attempt_id
     assert recovered.attempt.operation_id == attempt.operation_id
+    assert (
+        recovered.attempt.plan_authorization_hash
+        == plan_authorization.binding_hash
+    )
+    assert recovered.attempt.plan_fence_hash == plan_fence.fence_hash
     assert recovered.reservation == orphaned
     assert (
         recovered.attempt.authority_reservation_hash

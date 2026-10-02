@@ -13,7 +13,11 @@ from .authority_reservation import (
     AuthorityReservation,
     SQLiteAuthorityReservationStore,
 )
-from .provable_execution import TransitionPlan
+from .provable_execution import (
+    PlanAuthorizationBinding,
+    PlanExecutionFence,
+    TransitionPlan,
+)
 from .execution_provenance import (
     ExecutionContextProvenance,
     ExecutionContextProvenanceV2,
@@ -100,6 +104,8 @@ class ExecutionAttempt:
     result_json: str | None
     transition_plan_json: str | None = None
     transition_plan_hash: str | None = None
+    plan_authorization_hash: str | None = None
+    plan_fence_hash: str | None = None
     legacy_expected_generation: int | None = None
 
     def verify(self) -> None:
@@ -170,6 +176,23 @@ class ExecutionAttempt:
                     "execution transition plan resource mismatch"
                 )
             payload["transition_plan"] = transition_plan
+
+        if (
+            (self.plan_authorization_hash is None)
+            != (self.plan_fence_hash is None)
+        ):
+            raise ProtocolViolation(
+                "plan execution admission is only partially populated"
+            )
+        if self.plan_authorization_hash is not None:
+            if self.transition_plan_hash is None:
+                raise ProtocolViolation(
+                    "plan execution admission requires transition plan"
+                )
+            payload["plan_authorization_hash"] = (
+                self.plan_authorization_hash
+            )
+            payload["plan_fence_hash"] = self.plan_fence_hash
 
         if (
             (self.context_provenance_json is None)
@@ -385,6 +408,8 @@ class SQLiteExecutionJournal:
                     desired_json TEXT NOT NULL,
                     transition_plan_json TEXT,
                     transition_plan_hash TEXT,
+                    plan_authorization_hash TEXT,
+                    plan_fence_hash TEXT,
                     context_provenance_json TEXT,
                     context_provenance_hash TEXT,
                     authority_reservation_json TEXT,
@@ -424,6 +449,16 @@ class SQLiteExecutionJournal:
                 connection.execute(
                     "ALTER TABLE execution_attempts "
                     "ADD COLUMN transition_plan_hash TEXT"
+                )
+            if "plan_authorization_hash" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_attempts "
+                    "ADD COLUMN plan_authorization_hash TEXT"
+                )
+            if "plan_fence_hash" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_attempts "
+                    "ADD COLUMN plan_fence_hash TEXT"
                 )
             if "context_provenance_json" not in columns:
                 connection.execute(
@@ -480,6 +515,8 @@ class SQLiteExecutionJournal:
             result_json=row["result_json"],
             transition_plan_json=row["transition_plan_json"],
             transition_plan_hash=row["transition_plan_hash"],
+            plan_authorization_hash=row["plan_authorization_hash"],
+            plan_fence_hash=row["plan_fence_hash"],
             legacy_expected_generation=(
                 int(row["expected_generation"])
                 if row["expected_generation"] is not None
@@ -592,6 +629,8 @@ class SQLiteExecutionJournal:
         fence: ExecutionFence,
         prepared_at: datetime,
         transition_plan: TransitionPlan | None = None,
+        plan_authorization: PlanAuthorizationBinding | None = None,
+        plan_fence: PlanExecutionFence | None = None,
         context_provenance: (
             ExecutionContextProvenance
             | ExecutionContextProvenanceV2
@@ -664,6 +703,48 @@ class SQLiteExecutionJournal:
             )
             transition_plan_hash = transition_plan.plan_hash
 
+        plan_authorization_hash = None
+        plan_fence_hash = None
+        if (
+            (plan_authorization is None)
+            != (plan_fence is None)
+        ):
+            raise ProtocolViolation(
+                "journal plan execution admission is incomplete"
+            )
+        if plan_authorization is not None and plan_fence is not None:
+            if transition_plan is None:
+                raise ProtocolViolation(
+                    "journal plan execution admission requires plan"
+                )
+            plan_authorization.verify()
+            plan_fence.verify()
+            if plan_authorization.plan_hash != transition_plan.plan_hash:
+                raise ProtocolViolation(
+                    "journal plan authorization mismatch"
+                )
+            if plan_fence.plan_hash != transition_plan.plan_hash:
+                raise ProtocolViolation(
+                    "journal plan fence mismatch"
+                )
+            if (
+                plan_fence.plan_authorization_hash
+                != plan_authorization.binding_hash
+            ):
+                raise ProtocolViolation(
+                    "journal plan fence authorization mismatch"
+                )
+            if plan_fence.lease_id != fence.lease_id:
+                raise ProtocolViolation(
+                    "journal plan fence lease id mismatch"
+                )
+            if plan_fence.lease_epoch != fence.lease_epoch:
+                raise ProtocolViolation(
+                    "journal plan fence lease epoch mismatch"
+                )
+            plan_authorization_hash = plan_authorization.binding_hash
+            plan_fence_hash = plan_fence.fence_hash
+
         context_provenance_json = None
         context_provenance_hash = None
         if context_provenance is not None:
@@ -710,6 +791,16 @@ class SQLiteExecutionJournal:
                         connection.execute("ROLLBACK")
                         raise ProtocolViolation(
                             "open execution attempt transition plan "
+                            "does not match"
+                        )
+                    if (
+                        existing.plan_authorization_hash
+                        != plan_authorization_hash
+                        or existing.plan_fence_hash != plan_fence_hash
+                    ):
+                        connection.execute("ROLLBACK")
+                        raise ProtocolViolation(
+                            "open execution attempt plan admission "
                             "does not match"
                         )
                     if (
@@ -768,6 +859,11 @@ class SQLiteExecutionJournal:
                 attempt_payload["expected_generation"] = (
                     transition.expected_generation
                 )
+            if plan_authorization_hash is not None:
+                attempt_payload["plan_authorization_hash"] = (
+                    plan_authorization_hash
+                )
+                attempt_payload["plan_fence_hash"] = plan_fence_hash
             if context_provenance_json is not None:
                 attempt_payload["context_provenance"] = json.loads(
                     context_provenance_json
@@ -789,6 +885,8 @@ class SQLiteExecutionJournal:
                     desired_json,
                     transition_plan_json,
                     transition_plan_hash,
+                    plan_authorization_hash,
+                    plan_fence_hash,
                     context_provenance_json,
                     context_provenance_hash,
                     authority_reservation_json,
@@ -800,7 +898,7 @@ class SQLiteExecutionJournal:
                     result_hash,
                     result_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, NULL)
                 """,
                 (
                     attempt_id,
@@ -816,6 +914,8 @@ class SQLiteExecutionJournal:
                     desired_json,
                     transition_plan_json,
                     transition_plan_hash,
+                    plan_authorization_hash,
+                    plan_fence_hash,
                     context_provenance_json,
                     context_provenance_hash,
                     attempt_hash,
