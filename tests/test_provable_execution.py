@@ -5,6 +5,8 @@ import pytest
 
 from agent_control_plane.provable_execution import (
     ObservationSnapshot,
+    PlanAuthorizationBinding,
+    PlanExecutionFence,
     PolicyDecision,
     PolicyDecisionEnvelope,
     ReconciliationResult,
@@ -13,11 +15,16 @@ from agent_control_plane.provable_execution import (
     VerificationCondition,
     VerificationReport,
     VerificationStatus,
+    validate_plan_execution,
 )
 from agent_control_plane.state_transition_protocol import (
+    ActionIntent,
+    AuthorizationBinding,
+    ExecutionLease,
     Principal,
     ProtocolViolation,
     ResourceIdentity,
+    StateTransition,
     canonical_digest,
 )
 
@@ -259,3 +266,174 @@ def test_reconciliation_status_is_provider_neutral(status, expected):
 
     result.verify()
     assert result.status.value == expected
+
+
+def _legacy_admission_for_plan(plan, *, expected_generation):
+    transition = StateTransition.seal(
+        transition_id=f"legacy:{plan.plan_id}",
+        subject=plan.subject,
+        expected_generation=expected_generation,
+        before=plan.before,
+        desired=plan.desired,
+        evidence_hash="sha256:" + "a" * 64,
+        outcome_contract_hash="sha256:" + "b" * 64,
+        created_at=NOW,
+    )
+    action = ActionIntent.seal(
+        action_id=f"action:{plan.plan_id}",
+        transition_hash=transition.transition_hash,
+        provider=plan.provider,
+        operation=plan.operation,
+        parameters=plan.parameters,
+    )
+    authorization = AuthorizationBinding.seal(
+        transition=transition,
+        action=action,
+        policy_version="test-policy/v1",
+        policy_decision_hash="sha256:" + "c" * 64,
+        approval_hash="sha256:" + "d" * 64,
+        principal=Principal(type="agent", subject="proposal-author"),
+        expires_at=NOW + timedelta(minutes=5),
+    )
+    lease = ExecutionLease(
+        lease_id=f"lease:{plan.plan_id}",
+        resource_uid=plan.subject.resource_uid,
+        holder=Principal(type="controller", subject="executor-a"),
+        epoch=3,
+        acquired_at=NOW,
+        expires_at=NOW + timedelta(minutes=10),
+    )
+    plan_authorization = PlanAuthorizationBinding.derive(
+        plan=plan,
+        transition=transition,
+        action=action,
+        authorization=authorization,
+    )
+    plan_fence = PlanExecutionFence.bind(
+        plan=plan,
+        authorization=plan_authorization,
+        lease=lease,
+    )
+    return (
+        transition,
+        action,
+        authorization,
+        lease,
+        plan_authorization,
+        plan_fence,
+    )
+
+
+def test_plan_bound_admission_schema_is_provider_neutral():
+    _, k8s = kubernetes_plan()
+    _, github = github_plan()
+
+    k8s_admission = _legacy_admission_for_plan(
+        k8s,
+        expected_generation=7,
+    )
+    github_admission = _legacy_admission_for_plan(
+        github,
+        expected_generation=0,
+    )
+    k8s_authorization = k8s_admission[-2]
+    github_authorization = github_admission[-2]
+    k8s_fence = k8s_admission[-1]
+    github_fence = github_admission[-1]
+
+    assert [field.name for field in fields(k8s_authorization)] == [
+        field.name for field in fields(github_authorization)
+    ]
+    assert [field.name for field in fields(k8s_fence)] == [
+        field.name for field in fields(github_fence)
+    ]
+
+    authorization_fields = {
+        field.name for field in fields(PlanAuthorizationBinding)
+    }
+    fence_fields = {
+        field.name for field in fields(PlanExecutionFence)
+    }
+    assert "generation" not in authorization_fields
+    assert "expected_generation" not in authorization_fields
+    assert "desired_generation" not in fence_fields
+    assert "generation" not in fence_fields
+
+    validate_plan_execution(
+        plan=k8s,
+        authorization=k8s_authorization,
+        fence=k8s_fence,
+        active_lease=k8s_admission[3],
+        caller=k8s_admission[3].holder,
+        now=NOW + timedelta(seconds=2),
+    )
+    validate_plan_execution(
+        plan=github,
+        authorization=github_authorization,
+        fence=github_fence,
+        active_lease=github_admission[3],
+        caller=github_admission[3].holder,
+        now=NOW + timedelta(seconds=2),
+    )
+
+
+def test_plan_bound_admission_rejects_plan_substitution():
+    observation, plan = github_plan()
+    admission = _legacy_admission_for_plan(
+        plan,
+        expected_generation=0,
+    )
+    substituted = TransitionPlan.seal(
+        plan_id="plan-github-merge-substituted",
+        observation=observation,
+        before=plan.before,
+        desired=plan.desired,
+        provider=plan.provider,
+        operation=plan.operation,
+        parameters={"method": "merge"},
+        preconditions=plan.preconditions,
+        created_at=NOW + timedelta(seconds=1),
+    )
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="plan execution authorization mismatch",
+    ):
+        validate_plan_execution(
+            plan=substituted,
+            authorization=admission[-2],
+            fence=admission[-1],
+            active_lease=admission[3],
+            caller=admission[3].holder,
+            now=NOW + timedelta(seconds=2),
+        )
+
+
+def test_plan_bound_fence_rejects_higher_lease_epoch():
+    _, plan = kubernetes_plan()
+    admission = _legacy_admission_for_plan(
+        plan,
+        expected_generation=7,
+    )
+    lease = admission[3]
+    higher_epoch = ExecutionLease(
+        lease_id=lease.lease_id,
+        resource_uid=lease.resource_uid,
+        holder=lease.holder,
+        epoch=lease.epoch + 1,
+        acquired_at=NOW + timedelta(seconds=1),
+        expires_at=NOW + timedelta(minutes=10),
+    )
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="stale plan execution lease epoch",
+    ):
+        validate_plan_execution(
+            plan=plan,
+            authorization=admission[-2],
+            fence=admission[-1],
+            active_lease=higher_epoch,
+            caller=higher_epoch.holder,
+            now=NOW + timedelta(seconds=2),
+        )
