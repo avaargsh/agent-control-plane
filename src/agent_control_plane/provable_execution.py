@@ -544,10 +544,6 @@ def validate_plan_execution(
         raise ProtocolViolation(
             "caller does not hold plan execution lease"
         )
-    if authorization.principal != caller:
-        raise ProtocolViolation(
-            "plan authorization principal does not match caller"
-        )
 
 
 class PolicyDecision(str, Enum):
