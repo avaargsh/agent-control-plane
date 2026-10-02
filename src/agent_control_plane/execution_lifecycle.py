@@ -15,6 +15,7 @@ from .context_transition import (
 )
 from .execution_journal import (
     ExecutionAttempt,
+    ExecutionAttemptState,
     SQLiteExecutionJournal,
 )
 from .kubernetes_deployment_transition import (
@@ -31,6 +32,7 @@ from .state_transition_protocol import (
     ExecutionLease,
     OutcomeContract,
     Principal,
+    ProtocolViolation,
     StateTransition,
 )
 
