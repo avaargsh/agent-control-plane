@@ -13,6 +13,7 @@ from .authority_reservation import (
     AuthorityReservation,
     SQLiteAuthorityReservationStore,
 )
+from .provable_execution import TransitionPlan
 from .execution_provenance import (
     ExecutionContextProvenance,
     ExecutionContextProvenanceV2,
@@ -36,6 +37,7 @@ _AUTHORITY_RESERVATION_HASH_ANNOTATION = (
 )
 _EXECUTION_CONTEXT_RESULT_KEY = "_execution_context_provenance"
 _AUTHORITY_RESERVATION_RESULT_KEY = "_authority_reservation"
+_TRANSITION_PLAN_RESULT_KEY = "_transition_plan"
 
 
 def _require_aware(value: datetime, field_name: str) -> None:
@@ -96,6 +98,8 @@ class ExecutionAttempt:
     completed_at: datetime | None
     result_hash: str | None
     result_json: str | None
+    transition_plan_json: str | None = None
+    transition_plan_hash: str | None = None
 
     def verify(self) -> None:
         payload = {
@@ -112,6 +116,51 @@ class ExecutionAttempt:
             "desired": json.loads(self.desired_json),
             "prepared_at": self.prepared_at.isoformat(),
         }
+        if (
+            (self.transition_plan_json is None)
+            != (self.transition_plan_hash is None)
+        ):
+            raise ProtocolViolation(
+                "execution transition plan is only partially populated"
+            )
+        if self.transition_plan_json is not None:
+            transition_plan = json.loads(self.transition_plan_json)
+            if not isinstance(transition_plan, Mapping):
+                raise ProtocolViolation(
+                    "execution transition plan must be an object"
+                )
+            stored_plan_hash = transition_plan.get("plan_hash")
+            if (
+                not isinstance(stored_plan_hash, str)
+                or not stored_plan_hash
+            ):
+                raise ProtocolViolation(
+                    "execution transition plan hash is missing"
+                )
+            if (
+                canonical_digest(
+                    transition_plan,
+                    exclude=("plan_hash",),
+                )
+                != stored_plan_hash
+            ):
+                raise ProtocolViolation(
+                    "execution transition plan digest mismatch"
+                )
+            if stored_plan_hash != self.transition_plan_hash:
+                raise ProtocolViolation(
+                    "execution transition plan binding mismatch"
+                )
+            subject = transition_plan.get("subject")
+            if (
+                not isinstance(subject, Mapping)
+                or subject.get("resource_uid") != self.resource_uid
+            ):
+                raise ProtocolViolation(
+                    "execution transition plan resource mismatch"
+                )
+            payload["transition_plan"] = transition_plan
+
         if (
             (self.context_provenance_json is None)
             != (self.context_provenance_hash is None)
@@ -218,6 +267,14 @@ class ExecutionAttempt:
                 raise ProtocolViolation(
                     "terminal result authority reservation mismatch"
                 )
+        if self.transition_plan_json is not None:
+            expected_plan = self.transition_plan
+            if result_value.get(
+                _TRANSITION_PLAN_RESULT_KEY
+            ) != expected_plan:
+                raise ProtocolViolation(
+                    "terminal result transition plan mismatch"
+                )
 
     @property
     def before(self) -> Mapping[str, Any]:
@@ -231,6 +288,17 @@ class ExecutionAttempt:
         value = json.loads(self.desired_json)
         if not isinstance(value, Mapping):
             raise ProtocolViolation("journal desired state must be an object")
+        return value
+
+    @property
+    def transition_plan(self) -> Mapping[str, Any] | None:
+        if self.transition_plan_json is None:
+            return None
+        value = json.loads(self.transition_plan_json)
+        if not isinstance(value, Mapping):
+            raise ProtocolViolation(
+                "journal transition plan must be an object"
+            )
         return value
 
     @property
