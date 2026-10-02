@@ -33,6 +33,11 @@ def _execute(fixture, context, *, at=None):
         active_lease=fixture["lease"],
         caller=fixture["holder"],
         now=at or NOW + timedelta(seconds=6),
+        operation_id=(
+            context.authority_reservation.operation_id
+            if context.authority_reservation is not None
+            else None
+        ),
         context_binding=context,
     )
 
