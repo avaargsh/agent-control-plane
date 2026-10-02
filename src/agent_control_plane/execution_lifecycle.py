@@ -23,7 +23,12 @@ from .kubernetes_deployment_transition import (
     DeploymentScaleReceipt,
     KubernetesDeploymentScaleProvider,
 )
-from .provable_execution import TransitionPlan
+from .provable_execution import (
+    PlanAuthorizationBinding,
+    PlanExecutionFence,
+    TransitionPlan,
+    validate_plan_execution,
+)
 from .state_transition_protocol import (
     ActionIntent,
     AuthorizationBinding,
@@ -44,6 +49,8 @@ Clock = Callable[[], datetime]
 class PreparedDeploymentExecution:
     attempt: ExecutionAttempt
     plan: TransitionPlan
+    plan_authorization: PlanAuthorizationBinding
+    plan_fence: PlanExecutionFence
     reservation: AuthorityReservation | None
     context_binding: ContextBoundExecutionContext
 
@@ -165,6 +172,18 @@ class KubernetesDeploymentExecutionCoordinator:
                 now=self.clock(),
             )
 
+        plan_authorization = PlanAuthorizationBinding.derive(
+            plan=plan,
+            transition=transition,
+            action=action,
+            authorization=authorization,
+        )
+        plan_fence = PlanExecutionFence.bind(
+            plan=plan,
+            authorization=plan_authorization,
+            lease=active_lease,
+        )
+
         attempt = self.journal.prepare(
             transition=transition,
             action=action,
@@ -172,6 +191,8 @@ class KubernetesDeploymentExecutionCoordinator:
             fence=fence,
             prepared_at=self.clock(),
             transition_plan=plan,
+            plan_authorization=plan_authorization,
+            plan_fence=plan_fence,
             context_provenance=provenance,
         )
 
@@ -207,6 +228,8 @@ class KubernetesDeploymentExecutionCoordinator:
         return PreparedDeploymentExecution(
             attempt=attempt,
             plan=plan,
+            plan_authorization=plan_authorization,
+            plan_fence=plan_fence,
             reservation=reservation,
             context_binding=bound_context,
         )
@@ -234,6 +257,23 @@ class KubernetesDeploymentExecutionCoordinator:
         )
         attempt = prepared.attempt
         reservation = prepared.reservation
+
+        validate_plan_execution(
+            plan=prepared.plan,
+            authorization=prepared.plan_authorization,
+            fence=prepared.plan_fence,
+            active_lease=active_lease,
+            caller=caller,
+            now=self.clock(),
+        )
+        if (
+            attempt.plan_authorization_hash
+            != prepared.plan_authorization.binding_hash
+            or attempt.plan_fence_hash != prepared.plan_fence.fence_hash
+        ):
+            raise ProtocolViolation(
+                "PREPARED attempt lost plan execution admission binding"
+            )
 
         receipt = self.provider.execute_context_bound(
             transition=transition,
