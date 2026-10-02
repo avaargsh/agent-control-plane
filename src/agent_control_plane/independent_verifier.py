@@ -38,6 +38,12 @@ def _snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
     return json.loads(encoded)
 
 
+def _digest_hex(value: str) -> str:
+    if value.startswith("sha256:"):
+        return value.split(":", 1)[1]
+    return value
+
+
 def _required_mapping(
     value: Mapping[str, Any],
     name: str,
@@ -228,7 +234,7 @@ class IndependentExecutionProof:
         subject = {
             "name": f"execution/{attempt.attempt_id}",
             "digest": {
-                "sha256": execution_record_digest,
+                "sha256": _digest_hex(execution_record_digest),
             },
         }
         predicate = {
@@ -332,12 +338,16 @@ class IndependentExecutionProof:
         expected_subject = {
             "name": f"execution/{attempt.attempt_id}",
             "digest": {
-                "sha256": canonical_digest(
-                    {
-                        "attempt_hash": attempt.attempt_hash,
-                        "terminal_result_hash": attempt.result_hash,
-                        "verification_report_hash": verification.report_hash,
-                    }
+                "sha256": _digest_hex(
+                    canonical_digest(
+                        {
+                            "attempt_hash": attempt.attempt_hash,
+                            "terminal_result_hash": attempt.result_hash,
+                            "verification_report_hash": (
+                                verification.report_hash
+                            ),
+                        }
+                    )
                 )
             },
         }
