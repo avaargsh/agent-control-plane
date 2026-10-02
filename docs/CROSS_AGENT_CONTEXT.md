@@ -479,6 +479,48 @@ Any failure before terminal journal state leaves the PREPARED attempt and
 reservation available for replay/reconcile. Successful terminalization releases
 the reservation only after the terminal receipt has been durably written.
 
+## Terminal reservation repair
+
+A reservation can remain ACTIVE after the execution journal has already
+durably reached COMMITTED or ABORTED if the process crashes between terminal
+journal persistence and reservation release.
+
+Repair is deliberately narrow. It does not re-run the provider, rewrite the
+terminal receipt, or infer whether an UNKNOWN attempt is safe.
+
+Repair is allowed only when all of the following hold:
+
+- the journal contains a verified COMMITTED or ABORTED attempt;
+- the attempt durably binds the same reservation hash and terminal result;
+- the reservation is still ACTIVE;
+- no higher-epoch durable ACTIVE lease currently claims the resource;
+- no other PREPARED journal row references the same reservation hash.
+
+The repair action performs one Authority DB transaction:
+
+```text
+AuthorityReservation ACTIVE
+        |
+        | terminal proof + conflict checks
+        v
+UPDATE reservation -> RELEASED
+INSERT TerminalReservationRepairEvidence/v1
+        |
+        +-- same SQLite transaction
+```
+
+The evidence binds the reservation hash, terminal attempt id/hash/state,
+terminal result hash, repair actor and repair timestamp. The terminal
+ExecutionAttempt is never modified.
+
+If the evidence insert fails after the RELEASED update, the whole transaction
+rolls back and the reservation remains ACTIVE. Retrying after restart is
+idempotent because repair evidence is unique per reservation.
+
+UNKNOWN is never accepted as terminal repair proof. Any conflicting lease,
+PREPARED attempt, reservation mismatch or evidence mismatch leaves the
+reservation unchanged for manual review.
+
 ## Proposal binding v2: provenance without false invalidation
 
 `TransitionProposalBinding/v2` records both the authoritative work snapshot and
