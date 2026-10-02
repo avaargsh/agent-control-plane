@@ -12,6 +12,12 @@ from agent_control_plane.execution_journal import (
     ExecutionAttemptState,
     SQLiteExecutionJournal,
 )
+from agent_control_plane.execution_lifecycle import (
+    KubernetesDeploymentExecutionCoordinator,
+)
+from agent_control_plane.kubernetes_deployment_transition import (
+    KubernetesDeploymentScaleProvider,
+)
 from agent_control_plane.state_transition_protocol import (
     Principal,
     ProtocolViolation,
@@ -20,7 +26,11 @@ from agent_control_plane.terminal_reservation_repair import (
     SQLiteTerminalReservationRepairStore,
     TerminalReservationRepair,
 )
-from context_testkit import NOW, prepare_context_attempt_v3
+from context_testkit import (
+    NOW,
+    build_context_bound_execution_v3,
+    prepare_context_attempt_v3,
+)
 
 
 REPAIR_ACTOR = Principal(
@@ -437,3 +447,107 @@ def test_unknown_attempt_cannot_authorize_repair(tmp_path):
     assert durable is not None
     assert durable.state is AuthorityReservationState.ACTIVE
     assert fixture["api"].patch_calls == 0
+
+
+class FailReleaseReservationStore(SQLiteAuthorityReservationStore):
+    def release_after_terminal(self, binding, *, now):
+        raise RuntimeError("simulated crash before reservation release")
+
+
+def test_coordinator_commit_then_release_crash_is_repairable_after_restart(
+    tmp_path,
+):
+    (
+        fixture,
+        store,
+        _,
+        _,
+        proposal,
+        context,
+    ) = build_context_bound_execution_v3(tmp_path)
+    journal = SQLiteExecutionJournal(tmp_path / "repair-lifecycle.db")
+    failing_reservations = FailReleaseReservationStore(store.path)
+    coordinator = KubernetesDeploymentExecutionCoordinator(
+        provider=KubernetesDeploymentScaleProvider(fixture["api"]),
+        journal=journal,
+        reservation_store=failing_reservations,
+        clock=lambda: NOW + timedelta(seconds=6),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="simulated crash before reservation release",
+    ):
+        coordinator.execute(
+            transition=fixture["transition"],
+            evidence=fixture["evidence"],
+            outcome_contract=fixture["outcome"],
+            action=fixture["action"],
+            authorization=fixture["authorization"],
+            fence=fixture["fence"],
+            active_lease=fixture["lease"],
+            caller=fixture["holder"],
+            context_binding=context,
+        )
+
+    with sqlite3.connect(journal.path) as connection:
+        attempt_id = connection.execute(
+            """
+            SELECT attempt_id
+            FROM execution_attempts
+            WHERE resource_uid = ?
+              AND action_hash = ?
+            ORDER BY prepared_at DESC
+            LIMIT 1
+            """,
+            (
+                fixture["resource"].resource_uid,
+                fixture["action"].action_hash,
+            ),
+        ).fetchone()[0]
+
+    terminal = journal.get(attempt_id)
+    assert terminal is not None
+    assert terminal.state is ExecutionAttemptState.COMMITTED
+    binding = terminal.authority_reservation
+    assert binding is not None
+
+    durable = SQLiteAuthorityReservationStore(store.path).get(
+        binding["reservation_id"]
+    )
+    assert durable is not None
+    assert durable.state is AuthorityReservationState.ACTIVE
+
+    restarted_journal = SQLiteExecutionJournal(journal.path)
+    restarted_reservations = SQLiteAuthorityReservationStore(store.path)
+    repair_store = SQLiteTerminalReservationRepairStore(store.path)
+    repair = TerminalReservationRepair(
+        journal=restarted_journal,
+        reservation_store=restarted_reservations,
+        repair_store=repair_store,
+        lease_lookup=SQLiteExecutionLeaseStore(
+            tmp_path / "repair-lifecycle-leases.db"
+        ),
+    )
+    evidence = repair.repair(
+        terminal_attempt_id=attempt_id,
+        actor=REPAIR_ACTOR,
+        repaired_at=NOW + timedelta(seconds=20),
+    )
+
+    assert evidence.terminal_result_hash == terminal.result_hash
+    assert (
+        restarted_reservations.get(binding["reservation_id"]).state
+        is AuthorityReservationState.RELEASED
+    )
+    assert restarted_journal.get(attempt_id) == terminal
+
+    current = store.get(proposal.work_id)
+    updated = store.record_progress(
+        work_id=proposal.work_id,
+        expected_version=current.version,
+        actor=Principal(type="agent", subject="claude-code"),
+        updated_at=NOW + timedelta(seconds=21),
+        state_patch={"phase": "after-terminal-repair"},
+    )
+    assert updated.version == current.version + 1
