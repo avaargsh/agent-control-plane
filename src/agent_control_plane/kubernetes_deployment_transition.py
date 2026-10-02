@@ -19,9 +19,11 @@ from .kubernetes_transition_plan import (
     build_deployment_scale_plan,
     capture_deployment_scale_observation,
     validate_deployment_scale_plan,
+    validate_deployment_scale_plan_bindings,
+    validate_deployment_scale_plan_precondition,
 )
 from .policy_replay import TransitionPolicyInput
-from .provable_execution import ObservationSnapshot
+from .provable_execution import ObservationSnapshot, TransitionPlan
 from .runtime_clients import (
     RuntimeMutationOwnershipUncertain,
     RuntimeMutationUncertain,
@@ -342,6 +344,40 @@ class KubernetesDeploymentScaleProvider:
         self.api = api
         self.lease_authority = lease_authority
 
+    def prepare_plan(
+        self,
+        *,
+        transition: StateTransition,
+        action: ActionIntent,
+        observer: Principal,
+        now: datetime,
+    ) -> TransitionPlan:
+        live = self.api.get_deployment(
+            namespace=transition.subject.namespace,
+            name=transition.subject.name,
+        )
+        if live is None:
+            raise ProtocolViolation("deployment does not exist")
+        observation = capture_deployment_scale_observation(
+            subject=transition.subject,
+            deployment=live,
+            observer=observer,
+            observed_at=now,
+        )
+        plan = build_deployment_scale_plan(
+            transition=transition,
+            action=action,
+            observation=observation,
+            created_at=now,
+        )
+        validate_deployment_scale_plan(
+            plan=plan,
+            observation=observation,
+            transition=transition,
+            action=action,
+        )
+        return plan
+
     def execute(
         self,
         *,
@@ -355,6 +391,7 @@ class KubernetesDeploymentScaleProvider:
         caller: Principal,
         now: datetime,
         operation_id: str | None = None,
+        execution_plan: TransitionPlan | None = None,
     ) -> DeploymentScaleReceipt:
         return self._execute(
             transition=transition,
@@ -367,6 +404,7 @@ class KubernetesDeploymentScaleProvider:
             caller=caller,
             now=now,
             operation_id=operation_id,
+            execution_plan=execution_plan,
             context_binding=None,
         )
 
@@ -384,6 +422,7 @@ class KubernetesDeploymentScaleProvider:
         now: datetime,
         context_binding: ContextBoundExecutionContext,
         operation_id: str | None = None,
+        execution_plan: TransitionPlan | None = None,
     ) -> DeploymentScaleReceipt:
         return self._execute(
             transition=transition,
@@ -396,6 +435,7 @@ class KubernetesDeploymentScaleProvider:
             caller=caller,
             now=now,
             operation_id=operation_id,
+            execution_plan=execution_plan,
             context_binding=context_binding,
         )
 
@@ -412,6 +452,7 @@ class KubernetesDeploymentScaleProvider:
         caller: Principal,
         now: datetime,
         operation_id: str | None,
+        execution_plan: TransitionPlan | None,
         context_binding: ContextBoundExecutionContext | None,
     ) -> DeploymentScaleReceipt:
         if transition.subject.provider != "kubernetes":
@@ -435,6 +476,13 @@ class KubernetesDeploymentScaleProvider:
         if transition.desired.get("replicas") != desired_replicas:
             raise ProtocolViolation(
                 "action replicas do not match transition desired state"
+            )
+
+        if execution_plan is not None:
+            validate_deployment_scale_plan_bindings(
+                plan=execution_plan,
+                transition=transition,
+                action=action,
             )
 
         live = self.api.get_deployment(
@@ -496,6 +544,24 @@ class KubernetesDeploymentScaleProvider:
             observed_operation_id = str(
                 annotations.get(_OPERATION_ID_ANNOTATION, action.action_id)
             )
+            if (
+                execution_plan is not None
+                and annotations.get(_PLAN_HASH_ANNOTATION)
+                != execution_plan.plan_hash
+            ):
+                raise RuntimeMutationOwnershipUncertain(
+                    "deployment replay lost transition plan ownership proof",
+                    resource_ref=(
+                        f"k8s://{transition.subject.namespace}/deployment/"
+                        f"{transition.subject.name}"
+                    ),
+                    operation_id=(
+                        operation_id
+                        if operation_id is not None
+                        else observed_operation_id
+                    ),
+                    observed_operation_id=observed_operation_id,
+                )
             if (
                 operation_id is not None
                 and observed_operation_id != operation_id
@@ -582,24 +648,30 @@ class KubernetesDeploymentScaleProvider:
                 "live replicas do not match transition before state"
             )
 
-        plan_observation = capture_deployment_scale_observation(
-            subject=transition.subject,
-            deployment=live,
-            observer=caller,
-            observed_at=now,
-        )
-        execution_plan = build_deployment_scale_plan(
-            transition=transition,
-            action=action,
-            observation=plan_observation,
-            created_at=now,
-        )
-        validate_deployment_scale_plan(
-            plan=execution_plan,
-            observation=plan_observation,
-            transition=transition,
-            action=action,
-        )
+        if execution_plan is None:
+            plan_observation = capture_deployment_scale_observation(
+                subject=transition.subject,
+                deployment=live,
+                observer=caller,
+                observed_at=now,
+            )
+            execution_plan = build_deployment_scale_plan(
+                transition=transition,
+                action=action,
+                observation=plan_observation,
+                created_at=now,
+            )
+            validate_deployment_scale_plan(
+                plan=execution_plan,
+                observation=plan_observation,
+                transition=transition,
+                action=action,
+            )
+        else:
+            validate_deployment_scale_plan_precondition(
+                plan=execution_plan,
+                deployment=live,
+            )
 
         operation_id = operation_id or uuid4().hex
         reservation = None
