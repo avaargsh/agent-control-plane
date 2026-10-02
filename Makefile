@@ -49,7 +49,8 @@ quality-context:
 		tests/test_terminal_reservation_repair.py \
 		tests/test_execution_verification.py \
 		tests/test_execution_attestation.py \
-		tests/test_provable_execution.py
+		tests/test_provable_execution.py \
+		tests/test_provable_execution_crash_matrix.py
 
 test:
 	$(PYTHON) -m pytest -q
