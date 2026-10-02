@@ -32,6 +32,7 @@ from .state_transition_protocol import (
 _ACTION_HASH_ANNOTATION = "agent-control-plane.openai.com/action-hash"
 _TRANSITION_HASH_ANNOTATION = "agent-control-plane.openai.com/transition-hash"
 _OPERATION_ID_ANNOTATION = "agent-control-plane.openai.com/operation-id"
+_PLAN_HASH_ANNOTATION = "agent-control-plane.openai.com/plan-hash"
 _AUTHORITY_RESERVATION_HASH_ANNOTATION = (
     "agent-control-plane.openai.com/authority-reservation-hash"
 )
@@ -1209,6 +1210,7 @@ def reconcile_deployment_attempt(
     observed_reservation_hash = annotations.get(
         _AUTHORITY_RESERVATION_HASH_ANNOTATION
     )
+    observed_plan_hash = annotations.get(_PLAN_HASH_ANNOTATION)
     provenance = current.context_provenance
     requires_reservation = (
         provenance is not None
@@ -1234,6 +1236,10 @@ def reconcile_deployment_attempt(
         == transition.transition_hash
         and annotations.get(_OPERATION_ID_ANNOTATION)
         == current.operation_id
+        and (
+            current.transition_plan_hash is None
+            or observed_plan_hash == current.transition_plan_hash
+        )
         and reservation_matches
     )
 
@@ -1249,6 +1255,7 @@ def reconcile_deployment_attempt(
             "after_resource_version": resource_version,
             "reconstructed_after_crash": True,
             "authority_reservation_hash": observed_reservation_hash,
+            "plan_hash": observed_plan_hash,
         }
         committed = journal.commit(
             current,
@@ -1332,6 +1339,8 @@ def reconcile_deployment_attempt(
         "expected_authority_reservation_hash": (
             current.authority_reservation_hash
         ),
+        "observed_plan_hash": observed_plan_hash,
+        "expected_plan_hash": current.transition_plan_hash,
     }
     journal.mark_unknown(
         current,
