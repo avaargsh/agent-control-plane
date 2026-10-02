@@ -226,7 +226,7 @@ def test_higher_epoch_takeover_requires_durable_active_lease_authority(
         )
 
 
-def test_expired_reservation_no_longer_blocks_authority_mutation(
+def test_expired_lease_does_not_silently_unfreeze_authority(
     tmp_path,
 ):
     path = tmp_path / "expiring.db"
@@ -238,7 +238,7 @@ def test_expired_reservation_no_longer_blocks_authority_mutation(
     created = store.create(
         work_id="expiring-work",
         namespace="repo/demo",
-        goal="prove reservation expiry",
+        goal="prove reservation expiry stays fail-closed",
         actor=HUMAN,
         created_at=NOW,
         state={"target": 30},
@@ -272,14 +272,26 @@ def test_expired_reservation_no_longer_blocks_authority_mutation(
     assert reservation.state is AuthorityReservationState.ACTIVE
 
     clock[0] = NOW + timedelta(seconds=5)
-    updated = store.record_progress(
-        work_id=created.work_id,
-        expected_version=claimed.version,
-        actor=PROPOSER,
-        updated_at=NOW + timedelta(seconds=5),
-        state_patch={"target": 40},
-    )
-    assert updated.version == claimed.version + 1
+    with pytest.raises(
+        ProtocolViolation,
+        match="blocked by active execution reservation",
+    ):
+        store.record_progress(
+            work_id=created.work_id,
+            expected_version=claimed.version,
+            actor=PROPOSER,
+            updated_at=NOW + timedelta(seconds=5),
+            state_patch={"target": 40},
+        )
+
+    # Lease expiry prevents continued execution, but does not itself prove that
+    # an in-flight provider request cannot still commit.
+    with pytest.raises(ProtocolViolation, match="lease has expired"):
+        reservations.assert_active(
+            reservation,
+            execution_lease=lease,
+            now=NOW + timedelta(seconds=5),
+        )
 
 
 class AuthorityRaceApi(FakeDeploymentApi):
