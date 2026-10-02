@@ -112,7 +112,7 @@ def test_provider_plan_rejects_generation_drift_before_mutation():
 
     with pytest.raises(
         ProtocolViolation,
-        match="scale plan observation generation is stale",
+        match="resource generation changed before execution",
     ):
         build_deployment_scale_plan(
             transition=fixture["transition"],
