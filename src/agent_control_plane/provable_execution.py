@@ -7,9 +7,13 @@ from enum import Enum
 from typing import Any, Mapping, Protocol
 
 from .state_transition_protocol import (
+    ActionIntent,
+    AuthorizationBinding,
+    ExecutionLease,
     Principal,
     ProtocolViolation,
     ResourceIdentity,
+    StateTransition,
     canonical_digest,
 )
 
@@ -290,6 +294,260 @@ class TransitionPlan:
             "plan_hash": self.plan_hash,
             "plan_version": self.plan_version,
         }
+
+
+@dataclass(frozen=True)
+class PlanAuthorizationBinding:
+    """Bind existing authority to one exact provider TransitionPlan."""
+
+    plan_hash: str
+    transition_hash: str
+    action_hash: str
+    source_authorization_hash: str
+    principal: Principal
+    expires_at: datetime
+    binding_hash: str
+    binding_version: str = "plan-authorization-binding/v1"
+
+    @classmethod
+    def derive(
+        cls,
+        *,
+        plan: TransitionPlan,
+        transition: StateTransition,
+        action: ActionIntent,
+        authorization: AuthorizationBinding,
+    ) -> "PlanAuthorizationBinding":
+        plan.verify()
+        transition.verify()
+        action.verify()
+        authorization.verify()
+
+        if plan.subject != transition.subject:
+            raise ProtocolViolation(
+                "plan authorization subject mismatch"
+            )
+        if plan.before != transition.before:
+            raise ProtocolViolation(
+                "plan authorization before-state mismatch"
+            )
+        if plan.desired != transition.desired:
+            raise ProtocolViolation(
+                "plan authorization desired-state mismatch"
+            )
+        if plan.provider != action.provider:
+            raise ProtocolViolation(
+                "plan authorization provider mismatch"
+            )
+        if plan.operation != action.operation:
+            raise ProtocolViolation(
+                "plan authorization operation mismatch"
+            )
+        if plan.parameters != action.parameters:
+            raise ProtocolViolation(
+                "plan authorization parameters mismatch"
+            )
+        if action.transition_hash != transition.transition_hash:
+            raise ProtocolViolation(
+                "plan authorization action transition mismatch"
+            )
+        if authorization.transition_hash != transition.transition_hash:
+            raise ProtocolViolation(
+                "plan authorization source transition mismatch"
+            )
+        if authorization.action_hash != action.action_hash:
+            raise ProtocolViolation(
+                "plan authorization source action mismatch"
+            )
+        if authorization.evidence_hash != transition.evidence_hash:
+            raise ProtocolViolation(
+                "plan authorization source evidence mismatch"
+            )
+
+        provisional = cls(
+            plan_hash=plan.plan_hash,
+            transition_hash=transition.transition_hash,
+            action_hash=action.action_hash,
+            source_authorization_hash=authorization.authorization_hash,
+            principal=authorization.principal,
+            expires_at=authorization.expires_at,
+            binding_hash="",
+        )
+        return cls(
+            plan_hash=provisional.plan_hash,
+            transition_hash=provisional.transition_hash,
+            action_hash=provisional.action_hash,
+            source_authorization_hash=(
+                provisional.source_authorization_hash
+            ),
+            principal=provisional.principal,
+            expires_at=provisional.expires_at,
+            binding_hash=canonical_digest(
+                provisional,
+                exclude=("binding_hash",),
+            ),
+        )
+
+    def verify(self) -> None:
+        _require_aware(self.expires_at, "expires_at")
+        if not all(
+            (
+                self.plan_hash,
+                self.transition_hash,
+                self.action_hash,
+                self.source_authorization_hash,
+            )
+        ):
+            raise ProtocolViolation(
+                "plan authorization digest bindings are required"
+            )
+        actual = canonical_digest(
+            self,
+            exclude=("binding_hash",),
+        )
+        if actual != self.binding_hash:
+            raise ProtocolViolation(
+                "plan authorization digest mismatch: "
+                f"expected {self.binding_hash}, got {actual}"
+            )
+
+
+@dataclass(frozen=True)
+class PlanExecutionFence:
+    """Provider-neutral execution fence bound to plan + authority + lease."""
+
+    resource_uid: str
+    plan_hash: str
+    plan_authorization_hash: str
+    lease_id: str
+    lease_holder: Principal
+    lease_epoch: int
+    expires_at: datetime
+    fence_hash: str
+    fence_version: str = "plan-execution-fence/v1"
+
+    @classmethod
+    def bind(
+        cls,
+        *,
+        plan: TransitionPlan,
+        authorization: PlanAuthorizationBinding,
+        lease: ExecutionLease,
+    ) -> "PlanExecutionFence":
+        plan.verify()
+        authorization.verify()
+        if plan.subject.resource_uid != lease.resource_uid:
+            raise ProtocolViolation(
+                "plan fence lease resource mismatch"
+            )
+        if authorization.plan_hash != plan.plan_hash:
+            raise ProtocolViolation(
+                "plan fence authorization plan mismatch"
+            )
+        provisional = cls(
+            resource_uid=plan.subject.resource_uid,
+            plan_hash=plan.plan_hash,
+            plan_authorization_hash=authorization.binding_hash,
+            lease_id=lease.lease_id,
+            lease_holder=lease.holder,
+            lease_epoch=lease.epoch,
+            expires_at=min(
+                authorization.expires_at,
+                lease.expires_at,
+            ),
+            fence_hash="",
+        )
+        return cls(
+            resource_uid=provisional.resource_uid,
+            plan_hash=provisional.plan_hash,
+            plan_authorization_hash=(
+                provisional.plan_authorization_hash
+            ),
+            lease_id=provisional.lease_id,
+            lease_holder=provisional.lease_holder,
+            lease_epoch=provisional.lease_epoch,
+            expires_at=provisional.expires_at,
+            fence_hash=canonical_digest(
+                provisional,
+                exclude=("fence_hash",),
+            ),
+        )
+
+    def verify(self) -> None:
+        _require_aware(self.expires_at, "expires_at")
+        if self.lease_epoch <= 0:
+            raise ProtocolViolation(
+                "plan execution fence lease epoch must be positive"
+            )
+        actual = canonical_digest(
+            self,
+            exclude=("fence_hash",),
+        )
+        if actual != self.fence_hash:
+            raise ProtocolViolation(
+                "plan execution fence digest mismatch: "
+                f"expected {self.fence_hash}, got {actual}"
+            )
+
+
+def validate_plan_execution(
+    *,
+    plan: TransitionPlan,
+    authorization: PlanAuthorizationBinding,
+    fence: PlanExecutionFence,
+    active_lease: ExecutionLease,
+    caller: Principal,
+    now: datetime,
+) -> None:
+    """Fail closed before a provider side effect without provider semantics."""
+
+    plan.verify()
+    authorization.verify()
+    fence.verify()
+    active_lease.assert_active(now)
+    _require_aware(now, "now")
+
+    if now >= authorization.expires_at or now >= fence.expires_at:
+        raise ProtocolViolation("plan execution admission expired")
+    if authorization.plan_hash != plan.plan_hash:
+        raise ProtocolViolation(
+            "plan execution authorization mismatch"
+        )
+    if fence.plan_hash != plan.plan_hash:
+        raise ProtocolViolation(
+            "plan execution fence plan mismatch"
+        )
+    if (
+        fence.plan_authorization_hash
+        != authorization.binding_hash
+    ):
+        raise ProtocolViolation(
+            "plan execution fence authorization mismatch"
+        )
+    if fence.resource_uid != plan.subject.resource_uid:
+        raise ProtocolViolation(
+            "plan execution fence resource mismatch"
+        )
+    if active_lease.resource_uid != plan.subject.resource_uid:
+        raise ProtocolViolation(
+            "active lease resource does not match plan"
+        )
+    if active_lease.lease_id != fence.lease_id:
+        raise ProtocolViolation("stale plan execution lease id")
+    if active_lease.epoch != fence.lease_epoch:
+        raise ProtocolViolation("stale plan execution lease epoch")
+    if active_lease.holder != fence.lease_holder:
+        raise ProtocolViolation(
+            "plan execution lease holder mismatch"
+        )
+    if caller != fence.lease_holder:
+        raise ProtocolViolation(
+            "caller does not hold plan execution lease"
+        )
+    if authorization.principal != caller:
+        raise ProtocolViolation(
+            "plan authorization principal does not match caller"
+        )
 
 
 class PolicyDecision(str, Enum):
