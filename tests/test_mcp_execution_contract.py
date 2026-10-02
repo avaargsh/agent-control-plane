@@ -94,7 +94,9 @@ def test_timeout_before_commit_retries_same_key_and_commits_once(tmp_path):
     adapter = MCPSubprocessToolAdapter(
         state_path=path,
         timeout_seconds=0.3,
-        fault_sleep_seconds=2.0,
+        # Keep the provider blocked well beyond the client timeout so this
+        # proof is independent of CI runner scheduling pauses.
+        fault_sleep_seconds=30.0,
     )
 
     result = execute(
