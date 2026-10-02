@@ -109,6 +109,8 @@ def test_coordinator_commits_then_releases_authority(tmp_path):
 
     assert result.receipt.changed is True
     assert result.attempt.state is ExecutionAttemptState.COMMITTED
+    assert result.attempt.plan_authorization_hash is not None
+    assert result.attempt.plan_fence_hash is not None
     assert result.reservation is not None
     terminal = result.attempt.result["_authority_reservation"]
     assert (
