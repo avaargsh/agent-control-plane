@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Any, Mapping, Protocol
 
 from .state_transition_protocol import (
     ExecutionLease,
@@ -23,6 +24,16 @@ def _parse_time(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     _require_aware(parsed, "stored authority reservation timestamp")
     return parsed
+
+
+class LeaseAuthority(Protocol):
+    def assert_active(
+        self,
+        lease: ExecutionLease,
+        *,
+        now: datetime,
+    ) -> Any:
+        ...
 
 
 class AuthorityReservationState(str, Enum):
@@ -158,6 +169,82 @@ class AuthorityReservation:
             raise ProtocolViolation(
                 "authority reservation digest mismatch"
             )
+
+    def as_binding_mapping(self) -> dict[str, Any]:
+        """Return immutable acquisition binding, excluding mutable state."""
+
+        self.verify()
+        return {
+            "reservation_id": self.reservation_id,
+            "work_id": self.work_id,
+            "authority_generation": self.authority_generation,
+            "authority_hash": self.authority_hash,
+            "proposal_hash": self.proposal_hash,
+            "operation_id": self.operation_id,
+            "resource_uid": self.resource_uid,
+            "lease_id": self.lease_id,
+            "lease_epoch": self.lease_epoch,
+            "holder": {
+                "type": self.holder.type,
+                "subject": self.holder.subject,
+            },
+            "acquired_at": self.acquired_at.isoformat(),
+            "expires_at": self.expires_at.isoformat(),
+            "reservation_version": self.reservation_version,
+            "reservation_hash": self.reservation_hash,
+        }
+
+    @classmethod
+    def verify_binding_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> None:
+        required = {
+            "reservation_id",
+            "work_id",
+            "authority_generation",
+            "authority_hash",
+            "proposal_hash",
+            "operation_id",
+            "resource_uid",
+            "lease_id",
+            "lease_epoch",
+            "holder",
+            "acquired_at",
+            "expires_at",
+            "reservation_version",
+            "reservation_hash",
+        }
+        if set(value) != required:
+            raise ProtocolViolation(
+                "authority reservation binding fields are invalid"
+            )
+        holder = value["holder"]
+        if not isinstance(holder, Mapping):
+            raise ProtocolViolation(
+                "authority reservation binding holder is invalid"
+            )
+        reservation = cls(
+            reservation_id=str(value["reservation_id"]),
+            work_id=str(value["work_id"]),
+            authority_generation=int(value["authority_generation"]),
+            authority_hash=str(value["authority_hash"]),
+            proposal_hash=str(value["proposal_hash"]),
+            operation_id=str(value["operation_id"]),
+            resource_uid=str(value["resource_uid"]),
+            lease_id=str(value["lease_id"]),
+            lease_epoch=int(value["lease_epoch"]),
+            holder=Principal(
+                type=str(holder.get("type", "")),
+                subject=str(holder.get("subject", "")),
+            ),
+            acquired_at=_parse_time(str(value["acquired_at"])),
+            expires_at=_parse_time(str(value["expires_at"])),
+            state=AuthorityReservationState.ACTIVE,
+            reservation_hash=str(value["reservation_hash"]),
+            reservation_version=str(value["reservation_version"]),
+        )
+        reservation.verify()
 
     def assert_bound_lease(
         self,
@@ -343,6 +430,13 @@ class SQLiteAuthorityReservationStore:
         record.verify()
         return record
 
+    def get(
+        self,
+        reservation_id: str,
+    ) -> AuthorityReservation | None:
+        with self._connect() as connection:
+            return self._get(connection, reservation_id)
+
     def _get(
         self,
         connection: sqlite3.Connection,
@@ -369,6 +463,7 @@ class SQLiteAuthorityReservationStore:
         operation_id: str,
         execution_lease: ExecutionLease,
         now: datetime,
+        lease_authority: LeaseAuthority | None = None,
     ) -> AuthorityReservation:
         _require_aware(now, "now")
         execution_lease.assert_active(now)
@@ -430,6 +525,16 @@ class SQLiteAuthorityReservationStore:
                     active.resource_uid == execution_lease.resource_uid
                     and active.lease_epoch < execution_lease.epoch
                 ):
+                    if lease_authority is None:
+                        connection.execute("ROLLBACK")
+                        raise ProtocolViolation(
+                            "higher-epoch reservation takeover requires "
+                            "durable active lease authority"
+                        )
+                    lease_authority.assert_active(
+                        execution_lease,
+                        now=now,
+                    )
                     connection.execute(
                         """
                         UPDATE work_authority_reservations
