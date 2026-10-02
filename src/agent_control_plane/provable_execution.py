@@ -180,6 +180,54 @@ class TransitionPlan:
             ),
         )
 
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "TransitionPlan":
+        subject_value = value.get("subject")
+        if not isinstance(subject_value, Mapping):
+            raise ProtocolViolation(
+                "transition plan subject mapping is required"
+            )
+        try:
+            created_at = datetime.fromisoformat(
+                str(value["created_at"])
+            )
+            plan = cls(
+                plan_id=str(value["plan_id"]),
+                subject=ResourceIdentity(
+                    provider=str(subject_value["provider"]),
+                    resource_uid=str(subject_value["resource_uid"]),
+                    namespace=str(subject_value["namespace"]),
+                    kind=str(subject_value["kind"]),
+                    name=str(subject_value["name"]),
+                ),
+                observation_hash=str(value["observation_hash"]),
+                before=_snapshot(value["before"]),
+                desired=_snapshot(value["desired"]),
+                provider=str(value["provider"]),
+                operation=str(value["operation"]),
+                parameters=_snapshot(value["parameters"]),
+                preconditions=_snapshot(value["preconditions"]),
+                created_at=created_at,
+                before_hash=str(value["before_hash"]),
+                desired_hash=str(value["desired_hash"]),
+                plan_hash=str(value["plan_hash"]),
+                plan_version=str(
+                    value.get(
+                        "plan_version",
+                        "transition-plan/v1",
+                    )
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProtocolViolation(
+                "invalid transition plan mapping"
+            ) from exc
+        plan.verify()
+        return plan
+
     def verify(
         self,
         observation: ObservationSnapshot | None = None,
