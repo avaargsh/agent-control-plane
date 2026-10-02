@@ -412,7 +412,9 @@ AuthorityHead. Authoritative Work mutation and reservation acquisition both use
 The reservation is not a second execution lease. It is bound to the existing
 ExecutionLease resource UID, lease ID, epoch, holder and expiry. A higher epoch
 for the same resource may supersede an abandoned reservation during controller
-takeover. Expired reservations stop blocking authority mutation.
+takeover only after the durable lease authority confirms the new lease ACTIVE.
+Lease expiry alone does not stop the reservation from blocking authority
+mutation.
 
 Provider acknowledgement does **not** release the reservation. For proposal v3
 the execution journal first persists the reservation binding while the attempt
@@ -434,6 +436,48 @@ The Kubernetes mutation writes the reservation hash into target annotations.
 Independent post-execution observation carries that proof into EvidenceBundle;
 ExecutionAttestation/v2 binds the terminal result hash, which now transitively
 contains the same reservation proof.
+
+## Durable execution lifecycle coordinator
+
+The reservation/journal/provider ordering is now exposed through a thin
+Kubernetes-specific coordinator rather than requiring every caller to reproduce
+the sequence manually.
+
+```text
+KubernetesDeploymentExecutionCoordinator.prepare()
+    |
+    +--> ExecutionJournal PREPARED
+    +--> deterministic reservation id from attempt_id
+    +--> AuthorityReservation acquire/recover
+    +--> durable journal reservation binding
+    |
+    v
+provider side effect
+    |
+    v
+ExecutionJournal COMMITTED
+    |
+    v
+AuthorityReservation RELEASED
+```
+
+`execute()` performs the whole normal path. `prepare()` is exposed
+separately for crash/recovery tests and controllers that deliberately separate
+the durable prepare phase from provider execution.
+
+The coordinator does not make policy, approval, authority, or verification
+decisions. It only fixes lifecycle ordering around already-sealed protocol
+objects.
+
+The deterministic reservation id also closes the unavoidable cross-database
+gap between the Work/Authority SQLite store and the execution journal. If a
+process dies after reservation acquisition but before journal binding, retrying
+`prepare()` reopens the same PREPARED attempt, recovers the same ACTIVE
+reservation, and durably binds it instead of creating another reservation.
+
+Any failure before terminal journal state leaves the PREPARED attempt and
+reservation available for replay/reconcile. Successful terminalization releases
+the reservation only after the terminal receipt has been durably written.
 
 ## Proposal binding v2: provenance without false invalidation
 

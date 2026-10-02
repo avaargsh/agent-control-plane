@@ -441,6 +441,53 @@ class SQLiteAuthorityReservationStore:
             connection.execute("BEGIN IMMEDIATE")
             initialize_authority_reservations(connection)
 
+            existing = self._get(
+                connection,
+                reservation_id,
+            )
+            if existing is not None:
+                expected = {
+                    "work_id": work_id,
+                    "authority_generation": expected_authority_generation,
+                    "authority_hash": expected_authority_hash,
+                    "proposal_hash": proposal_hash,
+                    "operation_id": operation_id,
+                    "resource_uid": execution_lease.resource_uid,
+                    "lease_id": execution_lease.lease_id,
+                    "lease_epoch": execution_lease.epoch,
+                    "holder": execution_lease.holder,
+                    "expires_at": execution_lease.expires_at,
+                }
+                actual = {
+                    "work_id": existing.work_id,
+                    "authority_generation": existing.authority_generation,
+                    "authority_hash": existing.authority_hash,
+                    "proposal_hash": existing.proposal_hash,
+                    "operation_id": existing.operation_id,
+                    "resource_uid": existing.resource_uid,
+                    "lease_id": existing.lease_id,
+                    "lease_epoch": existing.lease_epoch,
+                    "holder": existing.holder,
+                    "expires_at": existing.expires_at,
+                }
+                if actual != expected:
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "existing authority reservation binding mismatch"
+                    )
+                if existing.state is not AuthorityReservationState.ACTIVE:
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "existing authority reservation is not ACTIVE: "
+                        f"{existing.state.value}"
+                    )
+                existing.assert_bound_lease(
+                    execution_lease,
+                    now=now,
+                )
+                connection.execute("COMMIT")
+                return existing
+
             head = connection.execute(
                 """
                 SELECT generation, authority_hash
