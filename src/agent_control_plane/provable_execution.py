@@ -39,6 +39,46 @@ def _snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
     return json.loads(encoded)
 
 
+def _resource_mapping(value: ResourceIdentity) -> dict[str, str]:
+    return {
+        "provider": value.provider,
+        "resource_uid": value.resource_uid,
+        "namespace": value.namespace,
+        "kind": value.kind,
+        "name": value.name,
+    }
+
+
+def _resource_from_mapping(value: Mapping[str, Any]) -> ResourceIdentity:
+    try:
+        return ResourceIdentity(
+            provider=str(value["provider"]),
+            resource_uid=str(value["resource_uid"]),
+            namespace=str(value["namespace"]),
+            kind=str(value["kind"]),
+            name=str(value["name"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ProtocolViolation("invalid resource identity mapping") from exc
+
+
+def _principal_mapping(value: Principal) -> dict[str, str]:
+    return {
+        "type": value.type,
+        "subject": value.subject,
+    }
+
+
+def _principal_from_mapping(value: Mapping[str, Any]) -> Principal:
+    try:
+        return Principal(
+            type=str(value["type"]),
+            subject=str(value["subject"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ProtocolViolation("invalid principal mapping") from exc
+
+
 @dataclass(frozen=True)
 class ObservationSnapshot:
     """Immutable observation of external provider reality."""
@@ -98,6 +138,56 @@ class ObservationSnapshot:
                 "observation digest mismatch: "
                 f"expected {self.observation_hash}, got {actual}"
             )
+
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "ObservationSnapshot":
+        subject = value.get("subject")
+        observer = value.get("observer")
+        if not isinstance(subject, Mapping) or not isinstance(
+            observer,
+            Mapping,
+        ):
+            raise ProtocolViolation(
+                "observation subject/observer mappings are required"
+            )
+        try:
+            snapshot = cls(
+                subject=_resource_from_mapping(subject),
+                observed_version=str(value["observed_version"]),
+                observed_at=datetime.fromisoformat(
+                    str(value["observed_at"])
+                ),
+                state=_snapshot(value["state"]),
+                observer=_principal_from_mapping(observer),
+                observation_hash=str(value["observation_hash"]),
+                observation_version=str(
+                    value.get(
+                        "observation_version",
+                        "observation-snapshot/v1",
+                    )
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProtocolViolation(
+                "invalid observation snapshot mapping"
+            ) from exc
+        snapshot.verify()
+        return snapshot
+
+    def as_mapping(self) -> dict[str, Any]:
+        self.verify()
+        return {
+            "subject": _resource_mapping(self.subject),
+            "observed_version": self.observed_version,
+            "observed_at": self.observed_at.isoformat(),
+            "state": dict(self.state),
+            "observer": _principal_mapping(self.observer),
+            "observation_hash": self.observation_hash,
+            "observation_version": self.observation_version,
+        }
 
 
 @dataclass(frozen=True)
@@ -274,13 +364,7 @@ class TransitionPlan:
         self.verify()
         return {
             "plan_id": self.plan_id,
-            "subject": {
-                "provider": self.subject.provider,
-                "resource_uid": self.subject.resource_uid,
-                "namespace": self.subject.namespace,
-                "kind": self.subject.kind,
-                "name": self.subject.name,
-            },
+            "subject": _resource_mapping(self.subject),
             "observation_hash": self.observation_hash,
             "before": dict(self.before),
             "desired": dict(self.desired),
@@ -411,6 +495,56 @@ class PlanAuthorizationBinding:
                 f"expected {self.binding_hash}, got {actual}"
             )
 
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "PlanAuthorizationBinding":
+        principal = value.get("principal")
+        if not isinstance(principal, Mapping):
+            raise ProtocolViolation(
+                "plan authorization principal mapping is required"
+            )
+        try:
+            binding = cls(
+                plan_hash=str(value["plan_hash"]),
+                transition_hash=str(value["transition_hash"]),
+                action_hash=str(value["action_hash"]),
+                source_authorization_hash=str(
+                    value["source_authorization_hash"]
+                ),
+                principal=_principal_from_mapping(principal),
+                expires_at=datetime.fromisoformat(
+                    str(value["expires_at"])
+                ),
+                binding_hash=str(value["binding_hash"]),
+                binding_version=str(
+                    value.get(
+                        "binding_version",
+                        "plan-authorization-binding/v1",
+                    )
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProtocolViolation(
+                "invalid plan authorization mapping"
+            ) from exc
+        binding.verify()
+        return binding
+
+    def as_mapping(self) -> dict[str, Any]:
+        self.verify()
+        return {
+            "plan_hash": self.plan_hash,
+            "transition_hash": self.transition_hash,
+            "action_hash": self.action_hash,
+            "source_authorization_hash": self.source_authorization_hash,
+            "principal": _principal_mapping(self.principal),
+            "expires_at": self.expires_at.isoformat(),
+            "binding_hash": self.binding_hash,
+            "binding_version": self.binding_version,
+        }
+
 
 @dataclass(frozen=True)
 class PlanExecutionFence:
@@ -488,6 +622,58 @@ class PlanExecutionFence:
                 "plan execution fence digest mismatch: "
                 f"expected {self.fence_hash}, got {actual}"
             )
+
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "PlanExecutionFence":
+        holder = value.get("lease_holder")
+        if not isinstance(holder, Mapping):
+            raise ProtocolViolation(
+                "plan execution fence lease holder mapping is required"
+            )
+        try:
+            fence = cls(
+                resource_uid=str(value["resource_uid"]),
+                plan_hash=str(value["plan_hash"]),
+                plan_authorization_hash=str(
+                    value["plan_authorization_hash"]
+                ),
+                lease_id=str(value["lease_id"]),
+                lease_holder=_principal_from_mapping(holder),
+                lease_epoch=int(value["lease_epoch"]),
+                expires_at=datetime.fromisoformat(
+                    str(value["expires_at"])
+                ),
+                fence_hash=str(value["fence_hash"]),
+                fence_version=str(
+                    value.get(
+                        "fence_version",
+                        "plan-execution-fence/v1",
+                    )
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProtocolViolation(
+                "invalid plan execution fence mapping"
+            ) from exc
+        fence.verify()
+        return fence
+
+    def as_mapping(self) -> dict[str, Any]:
+        self.verify()
+        return {
+            "resource_uid": self.resource_uid,
+            "plan_hash": self.plan_hash,
+            "plan_authorization_hash": self.plan_authorization_hash,
+            "lease_id": self.lease_id,
+            "lease_holder": _principal_mapping(self.lease_holder),
+            "lease_epoch": self.lease_epoch,
+            "expires_at": self.expires_at.isoformat(),
+            "fence_hash": self.fence_hash,
+            "fence_version": self.fence_version,
+        }
 
 
 def validate_plan_execution(
@@ -908,6 +1094,84 @@ class VerificationReport:
                 raise ProtocolViolation(
                     "verification report observation binding mismatch"
                 )
+
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "VerificationReport":
+        verifier = value.get("verifier")
+        condition_values = value.get("conditions")
+        if not isinstance(verifier, Mapping) or not isinstance(
+            condition_values,
+            list,
+        ):
+            raise ProtocolViolation(
+                "verification report verifier/conditions are required"
+            )
+        conditions = []
+        try:
+            for item in condition_values:
+                if not isinstance(item, Mapping):
+                    raise TypeError("condition must be mapping")
+                conditions.append(
+                    VerificationCondition(
+                        condition_type=str(item["condition_type"]),
+                        status=VerificationStatus(str(item["status"])),
+                        reason=str(item["reason"]),
+                        message=str(item["message"]),
+                        evidence_digest=(
+                            str(item["evidence_digest"])
+                            if item.get("evidence_digest") is not None
+                            else None
+                        ),
+                    )
+                )
+            report = cls(
+                plan_hash=str(value["plan_hash"]),
+                after_observation_hash=str(
+                    value["after_observation_hash"]
+                ),
+                conditions=tuple(conditions),
+                verifier=_principal_from_mapping(verifier),
+                verified_at=datetime.fromisoformat(
+                    str(value["verified_at"])
+                ),
+                report_hash=str(value["report_hash"]),
+                report_version=str(
+                    value.get(
+                        "report_version",
+                        "verification-report/v1",
+                    )
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProtocolViolation(
+                "invalid verification report mapping"
+            ) from exc
+        report.verify()
+        return report
+
+    def as_mapping(self) -> dict[str, Any]:
+        self.verify()
+        return {
+            "plan_hash": self.plan_hash,
+            "after_observation_hash": self.after_observation_hash,
+            "conditions": [
+                {
+                    "condition_type": item.condition_type,
+                    "status": item.status.value,
+                    "reason": item.reason,
+                    "message": item.message,
+                    "evidence_digest": item.evidence_digest,
+                }
+                for item in self.conditions
+            ],
+            "verifier": _principal_mapping(self.verifier),
+            "verified_at": self.verified_at.isoformat(),
+            "report_hash": self.report_hash,
+            "report_version": self.report_version,
+        }
 
 
 class MutationProvider(Protocol):

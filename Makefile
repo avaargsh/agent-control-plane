@@ -21,6 +21,7 @@ quality-context:
 		src/agent_control_plane/terminal_reservation_repair.py \
 		src/agent_control_plane/execution_attestation.py \
 		src/agent_control_plane/provable_execution.py \
+		src/agent_control_plane/independent_verifier.py \
 		src/agent_control_plane/github_pull_request_transition.py \
 		src/agent_control_plane/kubernetes_transition_plan.py \
 		src/agent_control_plane/kubernetes_deployment_transition.py \
@@ -51,7 +52,8 @@ quality-context:
 		tests/test_execution_attestation.py \
 		tests/test_provable_execution.py \
 		tests/test_provable_execution_crash_matrix.py \
-		tests/test_provable_execution_concurrency_matrix.py
+		tests/test_provable_execution_concurrency_matrix.py \
+		tests/test_independent_verifier.py
 
 test:
 	$(PYTHON) -m pytest -q

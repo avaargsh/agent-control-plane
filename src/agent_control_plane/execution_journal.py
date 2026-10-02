@@ -309,6 +309,164 @@ class ExecutionAttempt:
                     "terminal result transition plan mismatch"
                 )
 
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "ExecutionAttempt":
+        def optional_mapping(name: str) -> str | None:
+            raw = value.get(name)
+            if raw is None:
+                return None
+            if not isinstance(raw, Mapping):
+                raise ProtocolViolation(
+                    f"execution attempt {name} must be an object"
+                )
+            return _json_snapshot(raw)
+
+        before = value.get("before")
+        desired = value.get("desired")
+        if not isinstance(before, Mapping) or not isinstance(
+            desired,
+            Mapping,
+        ):
+            raise ProtocolViolation(
+                "execution attempt before/desired mappings are required"
+            )
+
+        try:
+            completed_raw = value.get("completed_at")
+            attempt = cls(
+                attempt_id=str(value["attempt_id"]),
+                operation_id=str(value["operation_id"]),
+                resource_uid=str(value["resource_uid"]),
+                transition_hash=str(value["transition_hash"]),
+                action_hash=str(value["action_hash"]),
+                authorization_hash=str(value["authorization_hash"]),
+                lease_id=str(value["lease_id"]),
+                lease_epoch=int(value["lease_epoch"]),
+                before_json=_json_snapshot(before),
+                desired_json=_json_snapshot(desired),
+                context_provenance_json=optional_mapping(
+                    "context_provenance"
+                ),
+                context_provenance_hash=(
+                    str(value["context_provenance_hash"])
+                    if value.get("context_provenance_hash") is not None
+                    else None
+                ),
+                authority_reservation_json=optional_mapping(
+                    "authority_reservation"
+                ),
+                authority_reservation_hash=(
+                    str(value["authority_reservation_hash"])
+                    if value.get("authority_reservation_hash") is not None
+                    else None
+                ),
+                attempt_hash=str(value["attempt_hash"]),
+                state=ExecutionAttemptState(str(value["state"])),
+                prepared_at=datetime.fromisoformat(
+                    str(value["prepared_at"])
+                ),
+                completed_at=(
+                    datetime.fromisoformat(str(completed_raw))
+                    if completed_raw is not None
+                    else None
+                ),
+                result_hash=(
+                    str(value["result_hash"])
+                    if value.get("result_hash") is not None
+                    else None
+                ),
+                result_json=optional_mapping("result"),
+                transition_plan_json=optional_mapping(
+                    "transition_plan"
+                ),
+                transition_plan_hash=(
+                    str(value["transition_plan_hash"])
+                    if value.get("transition_plan_hash") is not None
+                    else None
+                ),
+                plan_authorization_hash=(
+                    str(value["plan_authorization_hash"])
+                    if value.get("plan_authorization_hash") is not None
+                    else None
+                ),
+                plan_fence_hash=(
+                    str(value["plan_fence_hash"])
+                    if value.get("plan_fence_hash") is not None
+                    else None
+                ),
+                legacy_expected_generation=(
+                    int(value["legacy_expected_generation"])
+                    if value.get("legacy_expected_generation") is not None
+                    else None
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProtocolViolation(
+                "invalid execution attempt mapping"
+            ) from exc
+        attempt.verify()
+        return attempt
+
+    def as_mapping(self) -> dict[str, Any]:
+        self.verify()
+        value: dict[str, Any] = {
+            "attempt_id": self.attempt_id,
+            "operation_id": self.operation_id,
+            "resource_uid": self.resource_uid,
+            "transition_hash": self.transition_hash,
+            "action_hash": self.action_hash,
+            "authorization_hash": self.authorization_hash,
+            "lease_id": self.lease_id,
+            "lease_epoch": self.lease_epoch,
+            "before": dict(self.before),
+            "desired": dict(self.desired),
+            "attempt_hash": self.attempt_hash,
+            "state": self.state.value,
+            "prepared_at": self.prepared_at.isoformat(),
+            "completed_at": (
+                self.completed_at.isoformat()
+                if self.completed_at is not None
+                else None
+            ),
+            "result_hash": self.result_hash,
+            "result": (
+                dict(self.result)
+                if self.result is not None
+                else None
+            ),
+            "transition_plan_hash": self.transition_plan_hash,
+            "transition_plan": (
+                dict(self.transition_plan)
+                if self.transition_plan is not None
+                else None
+            ),
+            "plan_authorization_hash": self.plan_authorization_hash,
+            "plan_fence_hash": self.plan_fence_hash,
+            "context_provenance_hash": self.context_provenance_hash,
+            "context_provenance": (
+                dict(self.context_provenance)
+                if self.context_provenance is not None
+                else None
+            ),
+            "authority_reservation_hash": self.authority_reservation_hash,
+            "authority_reservation": (
+                dict(self.authority_reservation)
+                if self.authority_reservation is not None
+                else None
+            ),
+        }
+        if (
+            self.transition_plan is None
+            and self.legacy_expected_generation is not None
+        ):
+            value["legacy_expected_generation"] = (
+                self.legacy_expected_generation
+            )
+        return value
+
     @property
     def before(self) -> Mapping[str, Any]:
         value = json.loads(self.before_json)
