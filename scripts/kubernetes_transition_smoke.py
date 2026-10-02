@@ -15,7 +15,6 @@ from agent_control_plane.context_overlay import SQLiteContextOverlayStore
 from agent_control_plane.context_transition import (
     TransitionProposalBindingV3,
     authorize_context_bound_transition,
-    build_execution_context_provenance,
     seal_context_bound_policy_input,
 )
 from agent_control_plane.execution_attestation import ExecutionAttestation
@@ -28,6 +27,9 @@ from agent_control_plane.execution_journal import (
     ReconcileStatus,
     SQLiteExecutionJournal,
     reconcile_deployment_attempt,
+)
+from agent_control_plane.execution_lifecycle import (
+    KubernetesDeploymentExecutionCoordinator,
 )
 from agent_control_plane.kubernetes_deployment_transition import (
     ContextBoundExecutionContext,
@@ -461,46 +463,47 @@ def main() -> int:
     )
     os.makedirs(os.path.dirname(journal_db) or ".", exist_ok=True)
     execution_journal = SQLiteExecutionJournal(journal_db)
-    durable_context = build_execution_context_provenance(proposal)
-    attempt = execution_journal.prepare(
-        transition=transition,
-        action=action,
-        authorization=authorization,
-        fence=fence,
-        prepared_at=datetime.now(timezone.utc),
-        context_provenance=durable_context,
-    )
-
     reservation_store = SQLiteAuthorityReservationStore(work_db)
-    reservation = reservation_store.acquire(
-        reservation_id=f"reservation-{attempt.attempt_id}",
-        work_id=proposal.work_id,
-        expected_authority_generation=proposal.authority_generation,
-        expected_authority_hash=proposal.authority_hash,
-        proposal_hash=proposal.proposal_hash,
-        operation_id=attempt.operation_id,
-        execution_lease=lease,
-        now=datetime.now(timezone.utc),
+    provider = KubernetesDeploymentScaleProvider(
+        api,
         lease_authority=lease_authority,
     )
-    attempt = execution_journal.bind_authority_reservation(
-        attempt,
-        reservation,
+    coordinator = KubernetesDeploymentExecutionCoordinator(
+        provider=provider,
+        journal=execution_journal,
+        reservation_store=reservation_store,
+        clock=lambda: datetime.now(timezone.utc),
+        lease_authority=lease_authority,
     )
-
-    context_binding = ContextBoundExecutionContext(
+    base_context = ContextBoundExecutionContext(
         policy_input=policy_input,
         proposal=proposal,
         store=work_store,
         signed_approval=signed_approval,
         approval_verifier=approval_verifier,
-        authority_reservation=reservation,
-        authority_reservation_store=reservation_store,
     )
-    receipt = KubernetesDeploymentScaleProvider(
-        api,
-        lease_authority=lease_authority,
-    ).execute_context_bound(
+    prepared = coordinator.prepare(
+        transition=transition,
+        action=action,
+        authorization=authorization,
+        fence=fence,
+        active_lease=lease,
+        context_binding=base_context,
+    )
+    attempt = prepared.attempt
+    reservation = prepared.reservation
+    context_binding = prepared.context_binding
+    if reservation is None:
+        raise RuntimeError(
+            "proposal v3 coordinator prepare did not reserve authority"
+        )
+    expected_provenance_hash = attempt.context_provenance_hash
+    if expected_provenance_hash is None:
+        raise RuntimeError(
+            "coordinator prepare did not persist context provenance"
+        )
+
+    receipt = provider.execute_context_bound(
         transition=transition,
         evidence=evidence,
         outcome_contract=outcome,
@@ -547,7 +550,7 @@ def main() -> int:
         )
     if (
         committed_attempt.context_provenance_hash
-        != durable_context.provenance_hash
+        != expected_provenance_hash
     ):
         raise RuntimeError(
             "reconciled execution attempt lost context provenance"
@@ -561,7 +564,7 @@ def main() -> int:
     if (
         not isinstance(terminal_context, dict)
         or terminal_context.get("provenance_hash")
-        != durable_context.provenance_hash
+        != expected_provenance_hash
     ):
         raise RuntimeError(
             "terminal execution receipt lost context provenance"
