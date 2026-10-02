@@ -196,21 +196,41 @@ class KubernetesDeploymentExecutionCoordinator:
         bound_context = context_binding
         proposal = context_binding.proposal
         if isinstance(proposal, TransitionProposalBindingV3):
-            reservation = self.reservation_store.acquire(
-                reservation_id=(
-                    f"execution-attempt:{attempt.attempt_id}"
-                ),
-                work_id=proposal.work_id,
-                expected_authority_generation=(
-                    proposal.authority_generation
-                ),
-                expected_authority_hash=proposal.authority_hash,
-                proposal_hash=proposal.proposal_hash,
-                operation_id=attempt.operation_id,
-                execution_lease=active_lease,
-                now=self.clock(),
-                lease_authority=self.lease_authority,
-            )
+            try:
+                reservation = self.reservation_store.acquire(
+                    reservation_id=(
+                        f"execution-attempt:{attempt.attempt_id}"
+                    ),
+                    work_id=proposal.work_id,
+                    expected_authority_generation=(
+                        proposal.authority_generation
+                    ),
+                    expected_authority_hash=proposal.authority_hash,
+                    proposal_hash=proposal.proposal_hash,
+                    operation_id=attempt.operation_id,
+                    execution_lease=active_lease,
+                    now=self.clock(),
+                    lease_authority=self.lease_authority,
+                )
+            except ProtocolViolation as exc:
+                # Reservation acquisition is strictly before the provider
+                # side effect. A deterministic authority/fencing rejection
+                # therefore proves this attempt was NOT_APPLIED and should
+                # not be left looking like an ambiguous PREPARED attempt.
+                self.journal.abort_not_applied(
+                    attempt,
+                    completed_at=self.clock(),
+                    result={
+                        "status": "NOT_APPLIED",
+                        "reason": (
+                            "authority reservation rejected before "
+                            "provider side effect"
+                        ),
+                        "error": str(exc),
+                        "plan_hash": plan.plan_hash,
+                    },
+                )
+                raise
             attempt = self.journal.bind_authority_reservation(
                 attempt,
                 reservation,
