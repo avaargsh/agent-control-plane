@@ -6,6 +6,9 @@ from agent_control_plane.authority_reservation import (
     AuthorityReservationState,
     SQLiteAuthorityReservationStore,
 )
+from agent_control_plane.context_transition import (
+    build_execution_context_provenance,
+)
 from agent_control_plane.execution_journal import (
     ExecutionAttemptState,
     SQLiteExecutionJournal,
@@ -235,3 +238,64 @@ def test_uncertain_provider_ownership_leaves_prepared_and_frozen(
             updated_at=NOW + timedelta(seconds=20),
             state_patch={"phase": "must-remain-frozen"},
         )
+
+
+def test_prepare_recovers_acquire_before_journal_bind_gap(tmp_path):
+    (
+        fixture,
+        store,
+        _,
+        _,
+        proposal,
+        context,
+    ) = build_context_bound_execution_v3(tmp_path)
+    coordinator, journal, reservations = _coordinator(
+        tmp_path,
+        fixture,
+        store,
+    )
+
+    # Simulate the first process persisting PREPARED and acquiring the
+    # deterministic reservation, then dying before journal.bind_*().
+    provenance = build_execution_context_provenance(proposal)
+    attempt = journal.prepare(
+        transition=fixture["transition"],
+        action=fixture["action"],
+        authorization=fixture["authorization"],
+        fence=fixture["fence"],
+        prepared_at=NOW + timedelta(seconds=5),
+        context_provenance=provenance,
+    )
+    reservation_id = f"execution-attempt:{attempt.attempt_id}"
+    orphaned = reservations.acquire(
+        reservation_id=reservation_id,
+        work_id=proposal.work_id,
+        expected_authority_generation=proposal.authority_generation,
+        expected_authority_hash=proposal.authority_hash,
+        proposal_hash=proposal.proposal_hash,
+        operation_id=attempt.operation_id,
+        execution_lease=fixture["lease"],
+        now=NOW + timedelta(seconds=6),
+    )
+    assert journal.get(attempt.attempt_id).authority_reservation is None
+
+    recovered = coordinator.prepare(
+        transition=fixture["transition"],
+        action=fixture["action"],
+        authorization=fixture["authorization"],
+        fence=fixture["fence"],
+        active_lease=fixture["lease"],
+        context_binding=context,
+    )
+
+    assert recovered.attempt.attempt_id == attempt.attempt_id
+    assert recovered.attempt.operation_id == attempt.operation_id
+    assert recovered.reservation == orphaned
+    assert (
+        recovered.attempt.authority_reservation_hash
+        == orphaned.reservation_hash
+    )
+    assert (
+        recovered.context_binding.authority_reservation
+        == orphaned
+    )
