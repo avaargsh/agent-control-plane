@@ -649,6 +649,70 @@ class SQLiteAuthorityReservationStore:
         )
         return current
 
+    def release_after_terminal(
+        self,
+        binding: Mapping[str, Any],
+        *,
+        now: datetime,
+    ) -> AuthorityReservation:
+        """Release the exact durable binding after journal terminalization."""
+
+        _require_aware(now, "now")
+        AuthorityReservation.verify_binding_mapping(binding)
+        reservation_id = str(binding["reservation_id"])
+        reservation_hash = str(binding["reservation_hash"])
+
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT *
+                FROM work_authority_reservations
+                WHERE reservation_id = ?
+                """,
+                (reservation_id,),
+            ).fetchone()
+            if row is None:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "terminal authority reservation does not exist"
+                )
+            current = self._record(row)
+            if current.reservation_hash != reservation_hash:
+                connection.execute("ROLLBACK")
+                raise ProtocolViolation(
+                    "terminal authority reservation hash mismatch"
+                )
+            if current.state is AuthorityReservationState.ACTIVE:
+                connection.execute(
+                    """
+                    UPDATE work_authority_reservations
+                    SET state = ?
+                    WHERE reservation_id = ? AND state = ?
+                    """,
+                    (
+                        AuthorityReservationState.RELEASED.value,
+                        reservation_id,
+                        AuthorityReservationState.ACTIVE.value,
+                    ),
+                )
+                row = connection.execute(
+                    """
+                    SELECT *
+                    FROM work_authority_reservations
+                    WHERE reservation_id = ?
+                    """,
+                    (reservation_id,),
+                ).fetchone()
+                if row is None:
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "released authority reservation disappeared"
+                    )
+                current = self._record(row)
+            connection.execute("COMMIT")
+        return current
+
     def release(
         self,
         reservation: AuthorityReservation,
