@@ -132,7 +132,7 @@ def build_deployment_scale_plan(
         )
     if generation != transition.expected_generation:
         raise ProtocolViolation(
-            "scale plan observation generation is stale"
+            "resource generation changed before execution"
         )
 
     expected_before = transition.before.get("replicas")
