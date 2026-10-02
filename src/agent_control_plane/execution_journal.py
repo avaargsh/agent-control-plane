@@ -1249,8 +1249,39 @@ def reconcile_deployment_attempt(
         )
 
     desired_replicas = action.parameters.get("replicas")
-    before_replicas = transition.before.get("replicas")
     live_replicas = spec.get("replicas")
+
+    durable_plan = current.transition_plan
+    if durable_plan is not None:
+        preconditions = durable_plan.get("preconditions")
+        before_state = durable_plan.get("before")
+        desired_state = durable_plan.get("desired")
+        if (
+            not isinstance(preconditions, Mapping)
+            or not isinstance(before_state, Mapping)
+            or not isinstance(desired_state, Mapping)
+        ):
+            raise ProtocolViolation(
+                "durable transition plan is malformed during reconcile"
+            )
+        expected_generation = preconditions.get("generation")
+        before_replicas = before_state.get("replicas")
+        planned_replicas = desired_state.get("replicas")
+        if (
+            isinstance(expected_generation, bool)
+            or not isinstance(expected_generation, int)
+        ):
+            raise ProtocolViolation(
+                "kubernetes transition plan generation precondition is invalid"
+            )
+        if planned_replicas != desired_replicas:
+            raise ProtocolViolation(
+                "durable transition plan desired replicas mismatch"
+            )
+    else:
+        # Compatibility for pre-TransitionPlan journal rows.
+        expected_generation = transition.expected_generation
+        before_replicas = transition.before.get("replicas")
     observed_reservation_hash = annotations.get(
         _AUTHORITY_RESERVATION_HASH_ANNOTATION
     )
@@ -1274,7 +1305,7 @@ def reconcile_deployment_attempt(
     )
     owns_postcondition = (
         live_replicas == desired_replicas
-        and generation == transition.expected_generation + 1
+        and generation == expected_generation + 1
         and annotations.get(_ACTION_HASH_ANNOTATION) == action.action_hash
         and annotations.get(_TRANSITION_HASH_ANNOTATION)
         == transition.transition_hash
@@ -1325,7 +1356,7 @@ def reconcile_deployment_attempt(
         )
 
     safely_not_applied = (
-        generation == transition.expected_generation
+        generation == expected_generation
         and live_replicas == before_replicas
         and annotations.get(_OPERATION_ID_ANNOTATION)
         != current.operation_id
