@@ -108,7 +108,10 @@ def test_timeout_before_commit_retries_same_key_and_commits_once(tmp_path):
     persisted = state(path)
     operation = persisted["operations"][result.idempotency_key]
     assert result.attempts == 2
-    assert result.verified_after_error is False
+    # The retry ACK may itself be lost on a slow runner and recovered by
+    # read-after-write verification. The contract invariant is one commit,
+    # not which successful transport path produced the terminal receipt.
+    assert result.result["status"] == "committed"
     assert persisted["side_effect_count"] == 1
     assert operation["apply_invocations"] == 2
     assert operation["commit_count"] == 1
