@@ -1,3 +1,4 @@
+import inspect
 import sqlite3
 from datetime import timedelta
 
@@ -12,11 +13,24 @@ from agent_control_plane.execution_journal import (
 from agent_control_plane.kubernetes_deployment_transition import (
     KubernetesDeploymentScaleProvider,
 )
-from agent_control_plane.provable_execution import TransitionPlan
+from agent_control_plane.provable_execution import (
+    ObservationSnapshot,
+    PlanAuthorizationBinding,
+    PlanExecutionFence,
+    TransitionPlan,
+)
 from agent_control_plane.runtime_clients import (
     RuntimeMutationOwnershipUncertain,
 )
-from agent_control_plane.state_transition_protocol import ProtocolViolation
+from agent_control_plane.state_transition_protocol import (
+    ActionIntent,
+    AuthorizationBinding,
+    ExecutionLease,
+    Principal,
+    ProtocolViolation,
+    ResourceIdentity,
+    StateTransition,
+)
 from kubernetes_testkit import NOW, FakeDeploymentApi, build_transition
 
 
@@ -49,6 +63,97 @@ def _prepare_with_plan(journal, fixture):
     return attempt, plan
 
 
+def _github_plan_admission():
+    resource = ResourceIdentity(
+        provider="github",
+        resource_uid="github:acme/payments#123",
+        namespace="acme/payments",
+        kind="PullRequest",
+        name="123",
+    )
+    observer = Principal(
+        type="controller",
+        subject="github-observer",
+    )
+    observation = ObservationSnapshot.capture(
+        subject=resource,
+        observed_version="head-sha:abc123",
+        observed_at=NOW,
+        state={
+            "state": "open",
+            "merged": False,
+            "head_sha": "abc123",
+        },
+        observer=observer,
+    )
+    plan = TransitionPlan.seal(
+        plan_id="github-merge-123",
+        observation=observation,
+        before={
+            "state": "open",
+            "head_sha": "abc123",
+        },
+        desired={
+            "state": "merged",
+            "head_sha": "abc123",
+        },
+        provider="github",
+        operation="merge_pull_request",
+        parameters={"merge_method": "squash"},
+        preconditions={
+            "observed_version": "head-sha:abc123",
+            "approved_head_sha": "abc123",
+        },
+        created_at=NOW + timedelta(milliseconds=100),
+    )
+    transition = StateTransition.seal(
+        transition_id="legacy-github-merge-123",
+        subject=resource,
+        expected_generation=0,
+        before=plan.before,
+        desired=plan.desired,
+        evidence_hash="sha256:" + "a" * 64,
+        outcome_contract_hash="sha256:" + "b" * 64,
+        created_at=NOW,
+    )
+    action = ActionIntent.seal(
+        action_id="legacy-github-merge-action-123",
+        transition_hash=transition.transition_hash,
+        provider=plan.provider,
+        operation=plan.operation,
+        parameters=plan.parameters,
+    )
+    source_authorization = AuthorizationBinding.seal(
+        transition=transition,
+        action=action,
+        policy_version="github-merge-policy/v1",
+        policy_decision_hash="sha256:" + "c" * 64,
+        approval_hash="sha256:" + "d" * 64,
+        principal=Principal(type="agent", subject="release-agent"),
+        expires_at=NOW + timedelta(minutes=5),
+    )
+    lease = ExecutionLease(
+        lease_id="lease-github-pr-123",
+        resource_uid=resource.resource_uid,
+        holder=Principal(type="controller", subject="executor-a"),
+        epoch=4,
+        acquired_at=NOW,
+        expires_at=NOW + timedelta(minutes=10),
+    )
+    plan_authorization = PlanAuthorizationBinding.derive(
+        plan=plan,
+        transition=transition,
+        action=action,
+        authorization=source_authorization,
+    )
+    plan_fence = PlanExecutionFence.bind(
+        plan=plan,
+        authorization=plan_authorization,
+        lease=lease,
+    )
+    return plan, plan_authorization, plan_fence
+
+
 def _execute_with_attempt(fixture, attempt):
     plan = (
         TransitionPlan.from_mapping(attempt.transition_plan)
@@ -68,6 +173,67 @@ def _execute_with_attempt(fixture, attempt):
         operation_id=attempt.operation_id,
         execution_plan=plan,
     )
+
+
+def test_plan_native_prepare_api_has_no_generation_parameter():
+    parameters = inspect.signature(
+        SQLiteExecutionJournal.prepare_plan
+    ).parameters
+
+    assert "expected_generation" not in parameters
+    assert "transition" not in parameters
+    assert "action" not in parameters
+
+
+def test_github_plan_uses_same_durable_journal_without_generation(
+    tmp_path,
+):
+    path = tmp_path / "github-plan-journal.db"
+    journal = SQLiteExecutionJournal(path)
+    plan, authorization, fence = _github_plan_admission()
+
+    attempt = journal.prepare_plan(
+        plan=plan,
+        authorization=authorization,
+        fence=fence,
+        prepared_at=NOW + timedelta(seconds=1),
+    )
+
+    assert attempt.state is ExecutionAttemptState.PREPARED
+    assert attempt.transition_plan_hash == plan.plan_hash
+    assert attempt.plan_authorization_hash == authorization.binding_hash
+    assert attempt.plan_fence_hash == fence.fence_hash
+    assert attempt.legacy_expected_generation == 0
+
+    restarted = SQLiteExecutionJournal(path)
+    recovered = restarted.latest_for_plan(
+        resource_uid=plan.subject.resource_uid,
+        plan_hash=plan.plan_hash,
+        plan_authorization_hash=authorization.binding_hash,
+    )
+    assert recovered == attempt
+
+    committed = restarted.commit(
+        recovered,
+        completed_at=NOW + timedelta(seconds=2),
+        result={
+            "status": "APPLIED",
+            "provider": "github",
+            "plan_hash": plan.plan_hash,
+        },
+    )
+    assert committed.state is ExecutionAttemptState.COMMITTED
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="execution plan is already committed",
+    ):
+        restarted.prepare_plan(
+            plan=plan,
+            authorization=authorization,
+            fence=fence,
+            prepared_at=NOW + timedelta(seconds=3),
+        )
 
 
 def test_prepared_attempt_survives_restart_with_same_operation_id(tmp_path):
