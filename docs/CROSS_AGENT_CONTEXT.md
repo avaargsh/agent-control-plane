@@ -414,13 +414,26 @@ ExecutionLease resource UID, lease ID, epoch, holder and expiry. A higher epoch
 for the same resource may supersede an abandoned reservation during controller
 takeover. Expired reservations stop blocking authority mutation.
 
-Successful provider acknowledgement, including a verified lost-ACK recovery,
-releases the reservation. An unresolved mutation-ownership result deliberately
-leaves it ACTIVE until lease expiry or higher-epoch takeover.
+Provider acknowledgement does **not** release the reservation. For proposal v3
+the execution journal first persists the reservation binding while the attempt
+is PREPARED. The reservation remains ACTIVE across the provider call and any
+process-crash window.
+
+A terminal journal transition carries the same reservation binding into the
+hashed terminal result. Crash reconciliation accepts APPLIED only when the
+provider target contains the exact journal-bound action hash, transition hash,
+operation id **and authority reservation hash**. After terminalization the
+reservation may be released.
+
+ExecutionLease expiry alone does not unfreeze authority: an in-flight provider
+request may still return after its lease deadline. Recovery therefore remains
+fail-closed until terminal proof or a durable higher-epoch takeover. Higher
+epoch takeover must itself be confirmed ACTIVE by the durable lease authority.
 
 The Kubernetes mutation writes the reservation hash into target annotations.
-The independent post-execution observation therefore carries that proof into
-the EvidenceBundle and final ExecutionAttestation/v2.
+Independent post-execution observation carries that proof into EvidenceBundle;
+ExecutionAttestation/v2 binds the terminal result hash, which now transitively
+contains the same reservation proof.
 
 ## Proposal binding v2: provenance without false invalidation
 
