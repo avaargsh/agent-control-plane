@@ -15,6 +15,7 @@ from context_testkit import (
     NOW,
     PROPOSER,
     build_context_bound_execution_v3,
+    prepare_context_attempt_v3,
 )
 from kubernetes_testkit import build_transition
 
@@ -77,7 +78,10 @@ def test_proposal_v3_allows_context_drift_without_authority_drift(tmp_path):
         authority,
         proposal,
         context,
-    ) = build_context_bound_execution_v3(tmp_path)
+        _,
+        _,
+        _,
+    ) = prepare_context_attempt_v3(tmp_path)
 
     overlay_store.append(
         work_id=proposal.work_id,
