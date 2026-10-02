@@ -281,15 +281,11 @@ def test_prepare_recovers_acquire_before_journal_bind_gap(tmp_path):
         authorization=plan_authorization,
         lease=fixture["lease"],
     )
-    attempt = journal.prepare(
-        transition=fixture["transition"],
-        action=fixture["action"],
-        authorization=fixture["authorization"],
-        fence=fixture["fence"],
+    attempt = journal.prepare_plan(
+        plan=plan,
+        authorization=plan_authorization,
+        fence=plan_fence,
         prepared_at=NOW + timedelta(seconds=5),
-        transition_plan=plan,
-        plan_authorization=plan_authorization,
-        plan_fence=plan_fence,
         context_provenance=provenance,
     )
     reservation_id = f"execution-attempt:{attempt.attempt_id}"
