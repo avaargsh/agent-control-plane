@@ -20,6 +20,7 @@ quality-context:
 		src/agent_control_plane/execution_lifecycle.py \
 		src/agent_control_plane/terminal_reservation_repair.py \
 		src/agent_control_plane/execution_attestation.py \
+		src/agent_control_plane/provable_execution.py \
 		src/agent_control_plane/kubernetes_deployment_transition.py \
 		scripts/kubernetes_transition_smoke.py \
 		scripts/live_cross_agent_context_handoff.py \
@@ -43,7 +44,8 @@ quality-context:
 		tests/test_execution_lifecycle.py \
 		tests/test_terminal_reservation_repair.py \
 		tests/test_execution_verification.py \
-		tests/test_execution_attestation.py
+		tests/test_execution_attestation.py \
+		tests/test_provable_execution.py
 
 test:
 	$(PYTHON) -m pytest -q
