@@ -7,6 +7,9 @@ import subprocess
 import time
 from datetime import datetime, timedelta, timezone
 
+from agent_control_plane.authority_reservation import (
+    SQLiteAuthorityReservationStore,
+)
 from agent_control_plane.cli_runtime_transports import KubectlDeploymentApi
 from agent_control_plane.context_overlay import SQLiteContextOverlayStore
 from agent_control_plane.context_transition import (
@@ -468,12 +471,31 @@ def main() -> int:
         context_provenance=durable_context,
     )
 
+    reservation_store = SQLiteAuthorityReservationStore(work_db)
+    reservation = reservation_store.acquire(
+        reservation_id=f"reservation-{attempt.attempt_id}",
+        work_id=proposal.work_id,
+        expected_authority_generation=proposal.authority_generation,
+        expected_authority_hash=proposal.authority_hash,
+        proposal_hash=proposal.proposal_hash,
+        operation_id=attempt.operation_id,
+        execution_lease=lease,
+        now=datetime.now(timezone.utc),
+        lease_authority=lease_authority,
+    )
+    attempt = execution_journal.bind_authority_reservation(
+        attempt,
+        reservation,
+    )
+
     context_binding = ContextBoundExecutionContext(
         policy_input=policy_input,
         proposal=proposal,
         store=work_store,
         signed_approval=signed_approval,
         approval_verifier=approval_verifier,
+        authority_reservation=reservation,
+        authority_reservation_store=reservation_store,
     )
     receipt = KubernetesDeploymentScaleProvider(
         api,
@@ -509,6 +531,9 @@ def main() -> int:
         namespace=NAMESPACE,
         name=DEPLOYMENT,
         reconciled_at=datetime.now(timezone.utc),
+        authority_reservation_store=SQLiteAuthorityReservationStore(
+            work_db
+        ),
     )
     if reconciled.status is not ReconcileStatus.APPLIED:
         raise RuntimeError(
@@ -530,6 +555,9 @@ def main() -> int:
     terminal_context = committed_attempt.result.get(
         "_execution_context_provenance"
     )
+    terminal_reservation = committed_attempt.result.get(
+        "_authority_reservation"
+    )
     if (
         not isinstance(terminal_context, dict)
         or terminal_context.get("provenance_hash")
@@ -537,6 +565,24 @@ def main() -> int:
     ):
         raise RuntimeError(
             "terminal execution receipt lost context provenance"
+        )
+    if (
+        not isinstance(terminal_reservation, dict)
+        or terminal_reservation.get("reservation_hash")
+        != reservation.reservation_hash
+    ):
+        raise RuntimeError(
+            "terminal execution receipt lost authority reservation"
+        )
+    durable_reservation = reservation_store.get(
+        reservation.reservation_id
+    )
+    if (
+        durable_reservation is None
+        or durable_reservation.state.value != "RELEASED"
+    ):
+        raise RuntimeError(
+            "reconcile did not release terminal authority reservation"
         )
 
     observer = KubernetesDeploymentObserver(
@@ -638,6 +684,12 @@ def main() -> int:
                 ),
                 "authority_reservation_hash": (
                     receipt.authority_reservation_hash
+                ),
+                "terminal_authority_reservation_hash": (
+                    terminal_reservation["reservation_hash"]
+                ),
+                "authority_reservation_state": (
+                    durable_reservation.state.value
                 ),
                 "context_revision_observed": (
                     committed_attempt.context_provenance[
