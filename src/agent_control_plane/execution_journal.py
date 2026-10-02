@@ -516,6 +516,32 @@ class SQLiteExecutionJournal:
             ).fetchone()
         return row is not None
 
+    def latest_for_action(
+        self,
+        *,
+        resource_uid: str,
+        action_hash: str,
+        authorization_hash: str,
+    ) -> ExecutionAttempt | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM execution_attempts
+                WHERE resource_uid = ?
+                  AND action_hash = ?
+                  AND authorization_hash = ?
+                ORDER BY prepared_at DESC
+                LIMIT 1
+                """,
+                (
+                    resource_uid,
+                    action_hash,
+                    authorization_hash,
+                ),
+            ).fetchone()
+        return self._attempt(row) if row is not None else None
+
     def open_for_action(
         self,
         *,
