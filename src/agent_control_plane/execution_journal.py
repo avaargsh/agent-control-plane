@@ -592,6 +592,32 @@ class SQLiteExecutionJournal:
             ).fetchone()
         return self._attempt(row) if row is not None else None
 
+    def latest_for_plan(
+        self,
+        *,
+        resource_uid: str,
+        plan_hash: str,
+        plan_authorization_hash: str,
+    ) -> ExecutionAttempt | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM execution_attempts
+                WHERE resource_uid = ?
+                  AND transition_plan_hash = ?
+                  AND plan_authorization_hash = ?
+                ORDER BY prepared_at DESC
+                LIMIT 1
+                """,
+                (
+                    resource_uid,
+                    plan_hash,
+                    plan_authorization_hash,
+                ),
+            ).fetchone()
+        return self._attempt(row) if row is not None else None
+
     def open_for_action(
         self,
         *,
@@ -928,6 +954,224 @@ class SQLiteExecutionJournal:
         attempt = self.get(attempt_id)
         if attempt is None:
             raise ProtocolViolation("prepared execution attempt disappeared")
+        return attempt
+
+    def prepare_plan(
+        self,
+        *,
+        plan: TransitionPlan,
+        authorization: PlanAuthorizationBinding,
+        fence: PlanExecutionFence,
+        prepared_at: datetime,
+        context_provenance: (
+            ExecutionContextProvenance
+            | ExecutionContextProvenanceV2
+            | ExecutionContextProvenanceV3
+            | None
+        ) = None,
+    ) -> ExecutionAttempt:
+        """Prepare a provider-neutral execution attempt.
+
+        Legacy transition/action/source-authorization digests are copied from
+        the plan authorization only as compatibility/audit metadata. The
+        execution identity is the exact plan + plan authorization + plan fence.
+        """
+
+        _require_aware(prepared_at, "prepared_at")
+        plan.verify()
+        authorization.verify()
+        fence.verify()
+
+        if authorization.plan_hash != plan.plan_hash:
+            raise ProtocolViolation(
+                "journal plan-native authorization mismatch"
+            )
+        if fence.plan_hash != plan.plan_hash:
+            raise ProtocolViolation(
+                "journal plan-native fence mismatch"
+            )
+        if fence.plan_authorization_hash != authorization.binding_hash:
+            raise ProtocolViolation(
+                "journal plan-native fence authorization mismatch"
+            )
+        if fence.resource_uid != plan.subject.resource_uid:
+            raise ProtocolViolation(
+                "journal plan-native fence resource mismatch"
+            )
+
+        before_json = _json_snapshot(plan.before)
+        desired_json = _json_snapshot(plan.desired)
+        transition_plan_json = _json_snapshot(plan.as_mapping())
+
+        context_provenance_json = None
+        context_provenance_hash = None
+        if context_provenance is not None:
+            context_provenance.verify()
+            context_provenance_json = _json_snapshot(
+                context_provenance.as_mapping()
+            )
+            context_provenance_hash = canonical_digest(
+                json.loads(context_provenance_json)
+            )
+            if (
+                context_provenance.provenance_hash
+                != context_provenance_hash
+            ):
+                raise ProtocolViolation(
+                    "execution context provenance hash mismatch"
+                )
+
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT *
+                FROM execution_attempts
+                WHERE resource_uid = ?
+                  AND transition_plan_hash = ?
+                  AND plan_authorization_hash = ?
+                ORDER BY prepared_at DESC
+                LIMIT 1
+                """,
+                (
+                    plan.subject.resource_uid,
+                    plan.plan_hash,
+                    authorization.binding_hash,
+                ),
+            ).fetchone()
+            if row is not None:
+                existing = self._attempt(row)
+                if existing.state is ExecutionAttemptState.PREPARED:
+                    if existing.plan_fence_hash != fence.fence_hash:
+                        connection.execute("ROLLBACK")
+                        raise ProtocolViolation(
+                            "open plan execution attempt fence does not match"
+                        )
+                    if (
+                        existing.context_provenance_hash
+                        != context_provenance_hash
+                    ):
+                        connection.execute("ROLLBACK")
+                        raise ProtocolViolation(
+                            "open plan execution attempt context provenance "
+                            "does not match"
+                        )
+                    if (
+                        existing.lease_id != fence.lease_id
+                        or existing.lease_epoch != fence.lease_epoch
+                    ):
+                        connection.execute("ROLLBACK")
+                        raise ProtocolViolation(
+                            "open execution attempt must be reconciled "
+                            "before lease rebinding"
+                        )
+                    connection.execute("COMMIT")
+                    return existing
+                if existing.state is ExecutionAttemptState.COMMITTED:
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "execution plan is already committed"
+                    )
+                if existing.state is ExecutionAttemptState.UNKNOWN:
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "execution plan has UNKNOWN prior attempt"
+                    )
+
+            attempt_id = uuid4().hex
+            operation_id = uuid4().hex
+            attempt_payload = {
+                "attempt_id": attempt_id,
+                "operation_id": operation_id,
+                "resource_uid": plan.subject.resource_uid,
+                "transition_hash": authorization.transition_hash,
+                "action_hash": authorization.action_hash,
+                "authorization_hash": (
+                    authorization.source_authorization_hash
+                ),
+                "lease_id": fence.lease_id,
+                "lease_epoch": fence.lease_epoch,
+                "before": json.loads(before_json),
+                "desired": json.loads(desired_json),
+                "prepared_at": prepared_at.isoformat(),
+                "transition_plan": json.loads(transition_plan_json),
+                "plan_authorization_hash": authorization.binding_hash,
+                "plan_fence_hash": fence.fence_hash,
+            }
+            if context_provenance_json is not None:
+                attempt_payload["context_provenance"] = json.loads(
+                    context_provenance_json
+                )
+            attempt_hash = canonical_digest(attempt_payload)
+
+            legacy_generation = plan.preconditions.get("generation", 0)
+            if (
+                isinstance(legacy_generation, bool)
+                or not isinstance(legacy_generation, int)
+            ):
+                legacy_generation = 0
+
+            connection.execute(
+                """
+                INSERT INTO execution_attempts (
+                    attempt_id,
+                    operation_id,
+                    resource_uid,
+                    transition_hash,
+                    action_hash,
+                    authorization_hash,
+                    lease_id,
+                    lease_epoch,
+                    expected_generation,
+                    before_json,
+                    desired_json,
+                    transition_plan_json,
+                    transition_plan_hash,
+                    plan_authorization_hash,
+                    plan_fence_hash,
+                    context_provenance_json,
+                    context_provenance_hash,
+                    authority_reservation_json,
+                    authority_reservation_hash,
+                    attempt_hash,
+                    state,
+                    prepared_at,
+                    completed_at,
+                    result_hash,
+                    result_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, NULL)
+                """,
+                (
+                    attempt_id,
+                    operation_id,
+                    plan.subject.resource_uid,
+                    authorization.transition_hash,
+                    authorization.action_hash,
+                    authorization.source_authorization_hash,
+                    fence.lease_id,
+                    fence.lease_epoch,
+                    legacy_generation,
+                    before_json,
+                    desired_json,
+                    transition_plan_json,
+                    plan.plan_hash,
+                    authorization.binding_hash,
+                    fence.fence_hash,
+                    context_provenance_json,
+                    context_provenance_hash,
+                    attempt_hash,
+                    ExecutionAttemptState.PREPARED.value,
+                    prepared_at.isoformat(),
+                ),
+            )
+            connection.execute("COMMIT")
+
+        attempt = self.get(attempt_id)
+        if attempt is None:
+            raise ProtocolViolation(
+                "prepared plan execution attempt disappeared"
+            )
         return attempt
 
     def bind_authority_reservation(
