@@ -395,7 +395,7 @@ controlled-lab commissioning provenance remain the evidence of execution.
 
 ## Current status
 
-v0.1 release candidate.
+v0.1 release candidate with a frozen provable-execution architecture. See [docs/V0.1_FREEZE.md](docs/V0.1_FREEZE.md).
 
 Implemented:
 
@@ -406,6 +406,11 @@ Implemented:
 - Fleet/Agent AuthorityEnvelope inventory and fail-closed drift admission
 - replay-verifiable ReleaseEvidence
 - evidence-bound StateTransition / Authorization / ExecutionFence protocol
+- provider-neutral `TransitionPlan` with exact-plan authorization and execution fencing
+- durable authority reservation across provider side-effect and crash/takeover windows
+- provider-neutral, plan-native `ExecutionJournal`
+- crash/lost-ACK and stale/concurrent authority falsification matrices
+- out-of-process `IndependentExecutionProof` verification from canonical artifacts
 - Kubernetes Deployment scale provider with generation/resourceVersion fencing
 - independent Deployment + Pods + Events observation and OutcomeContract verification
 - recovery modeled as a newly authorized StateTransition
