@@ -23,12 +23,43 @@ from context_testkit import (
     NOW,
     PROPOSER,
     build_context_bound_execution_v3,
+    prepare_context_attempt_v3,
 )
 from kubernetes_testkit import (
     FakeDeploymentApi,
     LostAckDeploymentApi,
     LostAckOwnedByOtherApi,
 )
+
+
+class ActiveLeaseAuthority:
+    def __init__(self, expected: ExecutionLease) -> None:
+        self.expected = expected
+        self.calls = 0
+
+    def assert_active(self, lease: ExecutionLease, *, now):
+        self.calls += 1
+        assert lease == self.expected
+        lease.assert_active(now)
+        return object()
+
+
+def _execute_bound(fixture, context, attempt, *, at=None):
+    return KubernetesDeploymentScaleProvider(
+        fixture["api"],
+    ).execute_context_bound(
+        transition=fixture["transition"],
+        evidence=fixture["evidence"],
+        outcome_contract=fixture["outcome"],
+        action=fixture["action"],
+        authorization=fixture["authorization"],
+        fence=fixture["fence"],
+        active_lease=fixture["lease"],
+        caller=fixture["holder"],
+        now=at or NOW + timedelta(seconds=6),
+        operation_id=attempt.operation_id,
+        context_binding=context,
+    )
 
 
 def test_active_reservation_blocks_authority_mutation_until_release(
@@ -120,7 +151,9 @@ def test_reservation_rejects_stale_authority_generation(tmp_path):
         )
 
 
-def test_higher_execution_lease_epoch_supersedes_old_reservation(tmp_path):
+def test_higher_epoch_takeover_requires_durable_active_lease_authority(
+    tmp_path,
+):
     (
         fixture,
         store,
@@ -152,6 +185,22 @@ def test_higher_execution_lease_epoch_supersedes_old_reservation(tmp_path):
         expires_at=NOW + timedelta(minutes=10),
     )
 
+    with pytest.raises(
+        ProtocolViolation,
+        match="requires durable active lease authority",
+    ):
+        reservations.acquire(
+            reservation_id="reservation-new-unverified",
+            work_id=proposal.work_id,
+            expected_authority_generation=authority.generation,
+            expected_authority_hash=authority.authority_hash,
+            proposal_hash=proposal.proposal_hash,
+            operation_id="authority-test-op-new",
+            execution_lease=newer_lease,
+            now=NOW + timedelta(seconds=6),
+        )
+
+    lease_authority = ActiveLeaseAuthority(newer_lease)
     newer = reservations.acquire(
         reservation_id="reservation-new",
         work_id=proposal.work_id,
@@ -161,8 +210,10 @@ def test_higher_execution_lease_epoch_supersedes_old_reservation(tmp_path):
         operation_id="authority-test-op-new",
         execution_lease=newer_lease,
         now=NOW + timedelta(seconds=6),
+        lease_authority=lease_authority,
     )
 
+    assert lease_authority.calls == 1
     assert newer.lease_epoch == old.lease_epoch + 1
     with pytest.raises(
         ProtocolViolation,
@@ -256,7 +307,9 @@ class AuthorityRaceApi(FakeDeploymentApi):
         )
 
 
-def test_provider_holds_authority_reservation_across_patch(tmp_path):
+def test_provider_holds_reservation_until_terminal_journal_state(
+    tmp_path,
+):
     api = AuthorityRaceApi()
     (
         fixture,
@@ -265,7 +318,10 @@ def test_provider_holds_authority_reservation_across_patch(tmp_path):
         authority,
         proposal,
         context,
-    ) = build_context_bound_execution_v3(
+        journal,
+        _,
+        attempt,
+    ) = prepare_context_attempt_v3(
         tmp_path,
         api=api,
     )
@@ -281,19 +337,11 @@ def test_provider_holds_authority_reservation_across_patch(tmp_path):
         )
 
     api.before_patch = race_authority_mutation
-    receipt = KubernetesDeploymentScaleProvider(
-        fixture["api"],
-    ).execute_context_bound(
-        transition=fixture["transition"],
-        evidence=fixture["evidence"],
-        outcome_contract=fixture["outcome"],
-        action=fixture["action"],
-        authorization=fixture["authorization"],
-        fence=fixture["fence"],
-        active_lease=fixture["lease"],
-        caller=fixture["holder"],
-        now=NOW + timedelta(seconds=5),
-        context_binding=context,
+    receipt = _execute_bound(
+        fixture,
+        context,
+        attempt,
+        at=NOW + timedelta(seconds=5),
     )
 
     assert receipt.changed is True
@@ -308,20 +356,44 @@ def test_provider_holds_authority_reservation_across_patch(tmp_path):
     )
     assert store.get_authority_head(proposal.work_id) == authority
 
-    # Successful acknowledgement releases the reservation, so the next
-    # authoritative mutation can proceed immediately.
+    # Provider acknowledgement alone is not terminal. Authority remains
+    # frozen until the journal records the outcome.
     current = store.get(proposal.work_id)
+    with pytest.raises(
+        ProtocolViolation,
+        match="blocked by active execution reservation",
+    ):
+        store.record_progress(
+            work_id=proposal.work_id,
+            expected_version=current.version,
+            actor=PROPOSER,
+            updated_at=NOW + timedelta(seconds=6),
+            state_patch={"phase": "before-journal-commit"},
+        )
+
+    committed = journal.commit(
+        attempt,
+        completed_at=NOW + timedelta(seconds=7),
+        result={"status": "APPLIED"},
+    )
+    context.authority_reservation_store.release_after_terminal(
+        committed.authority_reservation,
+        now=NOW + timedelta(seconds=7),
+    )
+
     updated = store.record_progress(
         work_id=proposal.work_id,
         expected_version=current.version,
         actor=PROPOSER,
-        updated_at=NOW + timedelta(seconds=7),
-        state_patch={"phase": "after-provider-patch"},
+        updated_at=NOW + timedelta(seconds=8),
+        state_patch={"phase": "after-journal-commit"},
     )
     assert updated.version == current.version + 1
 
 
-def test_verified_lost_ack_releases_authority_reservation(tmp_path):
+def test_verified_lost_ack_stays_frozen_until_terminal_journal_state(
+    tmp_path,
+):
     api = LostAckDeploymentApi()
     (
         fixture,
@@ -330,37 +402,52 @@ def test_verified_lost_ack_releases_authority_reservation(tmp_path):
         _,
         proposal,
         context,
-    ) = build_context_bound_execution_v3(
+        journal,
+        _,
+        attempt,
+    ) = prepare_context_attempt_v3(
         tmp_path,
         api=api,
     )
 
-    receipt = KubernetesDeploymentScaleProvider(
-        fixture["api"],
-    ).execute_context_bound(
-        transition=fixture["transition"],
-        evidence=fixture["evidence"],
-        outcome_contract=fixture["outcome"],
-        action=fixture["action"],
-        authorization=fixture["authorization"],
-        fence=fixture["fence"],
-        active_lease=fixture["lease"],
-        caller=fixture["holder"],
-        now=NOW + timedelta(seconds=5),
-        context_binding=context,
-        operation_id="attempt-lost-ack",
+    receipt = _execute_bound(
+        fixture,
+        context,
+        attempt,
+        at=NOW + timedelta(seconds=5),
     )
-
     assert receipt.verified_after_uncertain_mutation is True
     assert receipt.authority_reservation_hash
 
     current = store.get(proposal.work_id)
+    with pytest.raises(
+        ProtocolViolation,
+        match="blocked by active execution reservation",
+    ):
+        store.record_progress(
+            work_id=proposal.work_id,
+            expected_version=current.version,
+            actor=PROPOSER,
+            updated_at=NOW + timedelta(seconds=6),
+            state_patch={"phase": "before-terminal-proof"},
+        )
+
+    committed = journal.commit(
+        attempt,
+        completed_at=NOW + timedelta(seconds=7),
+        result={"status": "APPLIED"},
+    )
+    context.authority_reservation_store.release_after_terminal(
+        committed.authority_reservation,
+        now=NOW + timedelta(seconds=7),
+    )
+
     updated = store.record_progress(
         work_id=proposal.work_id,
         expected_version=current.version,
         actor=PROPOSER,
-        updated_at=NOW + timedelta(seconds=6),
-        state_patch={"phase": "after-verified-lost-ack"},
+        updated_at=NOW + timedelta(seconds=8),
+        state_patch={"phase": "after-terminal-proof"},
     )
     assert updated.version == current.version + 1
 
@@ -374,26 +461,20 @@ def test_unresolved_mutation_ownership_keeps_authority_frozen(tmp_path):
         _,
         proposal,
         context,
-    ) = build_context_bound_execution_v3(
+        _,
+        _,
+        attempt,
+    ) = prepare_context_attempt_v3(
         tmp_path,
         api=api,
     )
 
     with pytest.raises(RuntimeMutationOwnershipUncertain):
-        KubernetesDeploymentScaleProvider(
-            fixture["api"],
-        ).execute_context_bound(
-            transition=fixture["transition"],
-            evidence=fixture["evidence"],
-            outcome_contract=fixture["outcome"],
-            action=fixture["action"],
-            authorization=fixture["authorization"],
-            fence=fixture["fence"],
-            active_lease=fixture["lease"],
-            caller=fixture["holder"],
-            now=NOW + timedelta(seconds=5),
-            context_binding=context,
-            operation_id="attempt-owned-by-other",
+        _execute_bound(
+            fixture,
+            context,
+            attempt,
+            at=NOW + timedelta(seconds=5),
         )
 
     current = store.get(proposal.work_id)
