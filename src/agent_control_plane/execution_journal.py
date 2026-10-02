@@ -373,6 +373,8 @@ class SQLiteExecutionJournal:
                     expected_generation INTEGER NOT NULL,
                     before_json TEXT NOT NULL,
                     desired_json TEXT NOT NULL,
+                    transition_plan_json TEXT,
+                    transition_plan_hash TEXT,
                     context_provenance_json TEXT,
                     context_provenance_hash TEXT,
                     authority_reservation_json TEXT,
@@ -403,6 +405,16 @@ class SQLiteExecutionJournal:
                     "PRAGMA table_info(execution_attempts)"
                 ).fetchall()
             }
+            if "transition_plan_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_attempts "
+                    "ADD COLUMN transition_plan_json TEXT"
+                )
+            if "transition_plan_hash" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_attempts "
+                    "ADD COLUMN transition_plan_hash TEXT"
+                )
             if "context_provenance_json" not in columns:
                 connection.execute(
                     "ALTER TABLE execution_attempts "
@@ -457,6 +469,8 @@ class SQLiteExecutionJournal:
             completed_at=_parse_time(row["completed_at"]),
             result_hash=row["result_hash"],
             result_json=row["result_json"],
+            transition_plan_json=row["transition_plan_json"],
+            transition_plan_hash=row["transition_plan_hash"],
         )
         attempt.verify()
         return attempt
@@ -537,6 +551,7 @@ class SQLiteExecutionJournal:
         authorization: AuthorizationBinding,
         fence: ExecutionFence,
         prepared_at: datetime,
+        transition_plan: TransitionPlan | None = None,
         context_provenance: (
             ExecutionContextProvenance
             | ExecutionContextProvenanceV2
@@ -576,6 +591,39 @@ class SQLiteExecutionJournal:
 
         before_json = _json_snapshot(transition.before)
         desired_json = _json_snapshot(transition.desired)
+        transition_plan_json = None
+        transition_plan_hash = None
+        if transition_plan is not None:
+            transition_plan.verify()
+            if transition_plan.subject != transition.subject:
+                raise ProtocolViolation(
+                    "journal transition plan subject mismatch"
+                )
+            if transition_plan.before != transition.before:
+                raise ProtocolViolation(
+                    "journal transition plan before-state mismatch"
+                )
+            if transition_plan.desired != transition.desired:
+                raise ProtocolViolation(
+                    "journal transition plan desired-state mismatch"
+                )
+            if transition_plan.provider != action.provider:
+                raise ProtocolViolation(
+                    "journal transition plan provider mismatch"
+                )
+            if transition_plan.operation != action.operation:
+                raise ProtocolViolation(
+                    "journal transition plan operation mismatch"
+                )
+            if transition_plan.parameters != action.parameters:
+                raise ProtocolViolation(
+                    "journal transition plan parameters mismatch"
+                )
+            transition_plan_json = _json_snapshot(
+                transition_plan.as_mapping()
+            )
+            transition_plan_hash = transition_plan.plan_hash
+
         context_provenance_json = None
         context_provenance_hash = None
         if context_provenance is not None:
@@ -615,6 +663,15 @@ class SQLiteExecutionJournal:
             if row is not None:
                 existing = self._attempt(row)
                 if existing.state is ExecutionAttemptState.PREPARED:
+                    if (
+                        existing.transition_plan_hash
+                        != transition_plan_hash
+                    ):
+                        connection.execute("ROLLBACK")
+                        raise ProtocolViolation(
+                            "open execution attempt transition plan "
+                            "does not match"
+                        )
                     if (
                         existing.context_provenance_hash
                         != context_provenance_hash
@@ -662,6 +719,10 @@ class SQLiteExecutionJournal:
                 "desired": json.loads(desired_json),
                 "prepared_at": prepared_at.isoformat(),
             }
+            if transition_plan_json is not None:
+                attempt_payload["transition_plan"] = json.loads(
+                    transition_plan_json
+                )
             if context_provenance_json is not None:
                 attempt_payload["context_provenance"] = json.loads(
                     context_provenance_json
@@ -681,6 +742,8 @@ class SQLiteExecutionJournal:
                     expected_generation,
                     before_json,
                     desired_json,
+                    transition_plan_json,
+                    transition_plan_hash,
                     context_provenance_json,
                     context_provenance_hash,
                     authority_reservation_json,
@@ -692,7 +755,7 @@ class SQLiteExecutionJournal:
                     result_hash,
                     result_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, NULL)
                 """,
                 (
                     attempt_id,
@@ -706,6 +769,8 @@ class SQLiteExecutionJournal:
                     transition.expected_generation,
                     before_json,
                     desired_json,
+                    transition_plan_json,
+                    transition_plan_hash,
                     context_provenance_json,
                     context_provenance_hash,
                     attempt_hash,
@@ -881,6 +946,24 @@ class SQLiteExecutionJournal:
                 effective_result[
                     _EXECUTION_CONTEXT_RESULT_KEY
                 ] = expected_reserved
+            transition_plan = current.transition_plan
+            if transition_plan is not None:
+                reserved_plan = effective_result.get(
+                    _TRANSITION_PLAN_RESULT_KEY
+                )
+                expected_plan = dict(transition_plan)
+                if (
+                    reserved_plan is not None
+                    and reserved_plan != expected_plan
+                ):
+                    connection.execute("ROLLBACK")
+                    raise ProtocolViolation(
+                        "terminal result transition plan mismatch"
+                    )
+                effective_result[
+                    _TRANSITION_PLAN_RESULT_KEY
+                ] = expected_plan
+
             authority_reservation = current.authority_reservation
             if authority_reservation is not None:
                 reserved = effective_result.get(
