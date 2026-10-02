@@ -163,16 +163,15 @@ def build_deployment_scale_plan(
     )
 
 
-def validate_deployment_scale_plan(
+def validate_deployment_scale_plan_bindings(
     *,
     plan: TransitionPlan,
-    observation: ObservationSnapshot,
     transition: StateTransition,
     action: ActionIntent,
 ) -> None:
-    """Prove the generic plan is exactly covered by legacy protocol objects."""
+    """Prove the generic plan is covered by legacy protocol bindings."""
 
-    plan.verify(observation)
+    plan.verify()
     transition.verify()
     action.verify()
 
@@ -189,16 +188,70 @@ def validate_deployment_scale_plan(
     if plan.parameters != action.parameters:
         raise ProtocolViolation("scale plan parameter binding mismatch")
     if (
-        plan.preconditions.get("observed_version")
-        != observation.observed_version
-    ):
-        raise ProtocolViolation(
-            "scale plan observed-version precondition mismatch"
-        )
-    if (
         plan.preconditions.get("generation")
         != transition.expected_generation
     ):
         raise ProtocolViolation(
             "scale plan generation precondition mismatch"
+        )
+
+
+def validate_deployment_scale_plan_precondition(
+    *,
+    plan: TransitionPlan,
+    deployment: Mapping[str, Any],
+) -> None:
+    """Fail closed if live provider state moved after plan creation."""
+
+    plan.verify()
+    metadata = _mapping(deployment.get("metadata"))
+    spec = _mapping(deployment.get("spec"))
+    resource_version = _required_str(
+        metadata.get("resourceVersion"),
+        "metadata.resourceVersion",
+    )
+    generation = _required_int(
+        metadata.get("generation"),
+        "metadata.generation",
+    )
+    replicas = _required_int(spec.get("replicas"), "spec.replicas")
+
+    if (
+        plan.preconditions.get("observed_version")
+        != f"resourceVersion:{resource_version}"
+    ):
+        raise ProtocolViolation(
+            "resource version changed before execution"
+        )
+    if plan.preconditions.get("generation") != generation:
+        raise ProtocolViolation(
+            "resource generation changed before execution"
+        )
+    if plan.before.get("replicas") != replicas:
+        raise ProtocolViolation(
+            "live replicas do not match transition before state"
+        )
+
+
+def validate_deployment_scale_plan(
+    *,
+    plan: TransitionPlan,
+    observation: ObservationSnapshot,
+    transition: StateTransition,
+    action: ActionIntent,
+) -> None:
+    """Validate both legacy binding and the original observation identity."""
+
+    plan.verify(observation)
+    validate_deployment_scale_plan_bindings(
+        plan=plan,
+        transition=transition,
+        action=action,
+    )
+    if (
+        plan.preconditions.get("observed_version")
+        != observation.observed_version
+    ):
+        raise ProtocolViolation(
+            "scale plan observed-version precondition mismatch"
         )
