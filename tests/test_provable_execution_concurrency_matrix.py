@@ -232,7 +232,7 @@ def test_authority_generation_drift_rejects_before_provider_side_effect(
 
     with pytest.raises(
         ProtocolViolation,
-        match="authority generation is stale",
+        match="authority reservation generation is stale",
     ):
         _execute(coordinator, fixture, context)
 
@@ -243,8 +243,13 @@ def test_authority_generation_drift_rejects_before_provider_side_effect(
         authorization_hash=fixture["authorization"].authorization_hash,
     )
     assert latest is not None
-    assert latest.state is ExecutionAttemptState.PREPARED
+    assert latest.state is ExecutionAttemptState.ABORTED
     assert latest.authority_reservation is None
+    assert latest.result["status"] == "NOT_APPLIED"
+    assert (
+        latest.result["reason"]
+        == "authority reservation rejected before provider side effect"
+    )
 
 
 def test_higher_lease_epoch_cannot_rebind_prepared_plan(tmp_path):
