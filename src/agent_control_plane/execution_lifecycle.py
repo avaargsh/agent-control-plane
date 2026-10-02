@@ -72,6 +72,7 @@ def _receipt_mapping(
         "after_resource_version": receipt.after_resource_version,
         "before_generation": receipt.before_generation,
         "after_generation": receipt.after_generation,
+        "plan_hash": receipt.plan_hash,
         "authority_reservation_hash": (
             receipt.authority_reservation_hash
         ),
