@@ -1108,11 +1108,19 @@ def reconcile_deployment_attempt(
             "observed_generation": generation,
             "observed_resource_version": resource_version,
         }
-        journal.abort_not_applied(
+        aborted = journal.abort_not_applied(
             current,
             completed_at=reconciled_at,
             result=result,
         )
+        if (
+            authority_reservation_store is not None
+            and aborted.authority_reservation is not None
+        ):
+            authority_reservation_store.release_after_terminal(
+                aborted.authority_reservation,
+                now=reconciled_at,
+            )
         return ExecutionReconcileResult(
             status=ReconcileStatus.NOT_APPLIED,
             attempt_id=current.attempt_id,
