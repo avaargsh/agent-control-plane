@@ -218,6 +218,31 @@ class TransitionPlan:
                 "transition plan observation binding mismatch"
             )
 
+    def as_mapping(self) -> dict[str, Any]:
+        self.verify()
+        return {
+            "plan_id": self.plan_id,
+            "subject": {
+                "provider": self.subject.provider,
+                "resource_uid": self.subject.resource_uid,
+                "namespace": self.subject.namespace,
+                "kind": self.subject.kind,
+                "name": self.subject.name,
+            },
+            "observation_hash": self.observation_hash,
+            "before": dict(self.before),
+            "desired": dict(self.desired),
+            "provider": self.provider,
+            "operation": self.operation,
+            "parameters": dict(self.parameters),
+            "preconditions": dict(self.preconditions),
+            "created_at": self.created_at.isoformat(),
+            "before_hash": self.before_hash,
+            "desired_hash": self.desired_hash,
+            "plan_hash": self.plan_hash,
+            "plan_version": self.plan_version,
+        }
+
 
 class PolicyDecision(str, Enum):
     ALLOW = "ALLOW"
