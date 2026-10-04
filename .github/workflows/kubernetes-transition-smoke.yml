@@ -18,6 +18,11 @@ on:
       - "src/agent_control_plane/cli_runtime_transports.py"
       - "scripts/kubernetes_transition_smoke.py"
       - "scripts/verify_execution_proof.py"
+      - "scripts/verify_v01_acceptance_artifacts.py"
+      - "scripts/fresh_clone_kind_release_rehearsal.sh"
+      - "release/v0.1-acceptance-artifact-contract.json"
+      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
+      - "Makefile"
       - ".github/workflows/kubernetes-transition-smoke.yml"
   push:
     branches: [main]
@@ -37,6 +42,11 @@ on:
       - "src/agent_control_plane/cli_runtime_transports.py"
       - "scripts/kubernetes_transition_smoke.py"
       - "scripts/verify_execution_proof.py"
+      - "scripts/verify_v01_acceptance_artifacts.py"
+      - "scripts/fresh_clone_kind_release_rehearsal.sh"
+      - "release/v0.1-acceptance-artifact-contract.json"
+      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
+      - "Makefile"
       - ".github/workflows/kubernetes-transition-smoke.yml"
   workflow_dispatch:
 
@@ -70,28 +80,22 @@ jobs:
       - name: Create kind cluster
         run: kind create cluster --name agent-transition --wait 120s
 
-      - name: Execute context-bound live transition
+      - name: Run fresh-clone v0.1 release rehearsal
         env:
           KUBE_CONTEXT: kind-agent-transition
         run: |
           set -o pipefail
-          mkdir -p .artifacts/kubernetes-transition
-          python scripts/kubernetes_transition_smoke.py \
-            | tee .artifacts/kubernetes-transition/summary.json
-
-      - name: Verify independent proof in a fresh process
-        run: |
-          python scripts/verify_execution_proof.py \
-            .artifacts/kubernetes-transition/independent-execution-proof.json \
-            --expected-hash-file \
-            .artifacts/kubernetes-transition/independent-execution-proof.json.sha256
+          sh scripts/fresh_clone_kind_release_rehearsal.sh \
+            | tee /tmp/v01-fresh-clone-kind.txt
 
       - name: Upload transition proof
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kubernetes-transition-proof
-          path: .artifacts/kubernetes-transition/
+          name: v01-kubernetes-acceptance-proof
+          path: |
+            .artifacts/v0.1-fresh-clone-kind/
+            /tmp/v01-fresh-clone-kind.txt
 
       - name: Dump cluster state on failure
         if: failure()
