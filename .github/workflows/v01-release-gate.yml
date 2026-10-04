@@ -82,3 +82,4 @@ jobs:
           path: |
             .artifacts/release/
             /tmp/fresh-clone-release.txt
+          include-hidden-files: true
