@@ -220,13 +220,15 @@ Policy / signed approval / authorization
         ↓
 ExecutionContextProvenance
         ↓
-PREPARED attempt → provider side effect → reconcile
+PREPARED exact TransitionPlan
+        ↓
+provider side effect → reconcile
         ↓
 COMMITTED result
         ↓
-fresh observation + OutcomeContract
+fresh observation + ownership-aware verification
         ↓
-ExecutionAttestation
+IndependentExecutionProof
 ```
 
 Key properties:
@@ -239,9 +241,10 @@ Key properties:
   mutation and on owned replay;
 - crash recovery preserves the work/projection/proposal provenance in the
   durable journal;
-- the final attestation binds the committed receipt to the exact transition,
-  outcome contract, independently collected observation evidence, and a sealed
-  successful verification result.
+- the completed-execution proof binds the exact plan, authorization, fence,
+  durable terminal attempt, fresh observation, and ownership-aware
+  VerificationReport. `ExecutionAttestation` remains only as a v0.1
+  compatibility artifact.
 
 The local MCP server is optional:
 
