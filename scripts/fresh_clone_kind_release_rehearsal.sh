@@ -4,7 +4,7 @@ set -eu
 ROOT="$(git rev-parse --show-toplevel)"
 SOURCE_SHA="$(git -C "$ROOT" rev-parse HEAD)"
 TMP="$(mktemp -d)"
-OUTPUT="${REHEARSAL_OUTPUT_DIR:-$ROOT/.artifacts/v0.1-fresh-clone-kind}"
+OUTPUT="${REHEARSAL_OUTPUT_DIR:-$ROOT/release-evidence/v0.1-kubernetes}"
 KUBE_CONTEXT_VALUE="${KUBE_CONTEXT:-kind-agent-transition}"
 
 trap 'rm -rf "$TMP"' EXIT INT TERM
