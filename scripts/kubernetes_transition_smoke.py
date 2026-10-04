@@ -189,7 +189,6 @@ def main() -> int:
         raise RuntimeError("bootstrap Deployment disappeared")
 
     metadata = live["metadata"]
-    generation = int(metadata["generation"])
     resource = ResourceIdentity(
         provider="kubernetes",
         resource_uid=str(metadata["uid"]),
@@ -201,6 +200,40 @@ def main() -> int:
         type="service_account",
         subject="ci/kind-observer",
     )
+    holder = Principal(
+        type="controller",
+        subject="ci/kind-controller",
+    )
+
+    # Fence the real target before freezing transition evidence. Kubernetes
+    # Deployments increment metadata.generation when annotations change, so
+    # projecting the lease epoch after StateTransition creation would make the
+    # frozen expected_generation stale before the provider plan is prepared.
+    lease_db = os.environ.get(
+        "EXECUTION_LEASE_DB",
+        ".artifacts/kubernetes-transition/execution-leases.db",
+    )
+    os.makedirs(os.path.dirname(lease_db) or ".", exist_ok=True)
+    lease_authority = SQLiteExecutionLeaseStore(lease_db)
+    lease = acquire_fenced_execution_lease(
+        authority=lease_authority,
+        projector=KubernetesDeploymentFenceProjector(api),
+        resource_uid=resource.resource_uid,
+        namespace=NAMESPACE,
+        name=DEPLOYMENT,
+        holder=holder,
+        now=datetime.now(timezone.utc),
+        ttl_seconds=300,
+    )
+
+    live = api.get_deployment(
+        namespace=NAMESPACE,
+        name=DEPLOYMENT,
+    )
+    if live is None:
+        raise RuntimeError("fenced Deployment disappeared")
+    metadata = live["metadata"]
+    generation = int(metadata["generation"])
     started_at = datetime.now(timezone.utc)
 
     before_evidence = EvidenceItem.capture(
@@ -434,26 +467,6 @@ def main() -> int:
         raise RuntimeError(
             "kind smoke did not advance independent context revision"
         )
-    holder = Principal(
-        type="controller",
-        subject="ci/kind-controller",
-    )
-    lease_db = os.environ.get(
-        "EXECUTION_LEASE_DB",
-        ".artifacts/kubernetes-transition/execution-leases.db",
-    )
-    os.makedirs(os.path.dirname(lease_db) or ".", exist_ok=True)
-    lease_authority = SQLiteExecutionLeaseStore(lease_db)
-    lease = acquire_fenced_execution_lease(
-        authority=lease_authority,
-        projector=KubernetesDeploymentFenceProjector(api),
-        resource_uid=resource.resource_uid,
-        namespace=NAMESPACE,
-        name=DEPLOYMENT,
-        holder=holder,
-        now=started_at,
-        ttl_seconds=300,
-    )
     fence = ExecutionFence.bind(
         transition=transition,
         action=action,
