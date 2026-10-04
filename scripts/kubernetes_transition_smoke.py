@@ -31,11 +31,15 @@ from agent_control_plane.execution_journal import (
 from agent_control_plane.execution_lifecycle import (
     KubernetesDeploymentExecutionCoordinator,
 )
+from agent_control_plane.independent_verifier import (
+    IndependentExecutionProof,
+)
 from agent_control_plane.kubernetes_deployment_transition import (
     ContextBoundExecutionContext,
     KubernetesDeploymentObserver,
     KubernetesDeploymentScaleProvider,
     VerificationStatus,
+    build_deployment_execution_verification,
     verify_outcome,
 )
 from agent_control_plane.policy_replay import (
@@ -185,7 +189,6 @@ def main() -> int:
         raise RuntimeError("bootstrap Deployment disappeared")
 
     metadata = live["metadata"]
-    generation = int(metadata["generation"])
     resource = ResourceIdentity(
         provider="kubernetes",
         resource_uid=str(metadata["uid"]),
@@ -197,6 +200,40 @@ def main() -> int:
         type="service_account",
         subject="ci/kind-observer",
     )
+    holder = Principal(
+        type="controller",
+        subject="ci/kind-controller",
+    )
+
+    # Fence the real target before freezing transition evidence. Kubernetes
+    # Deployments increment metadata.generation when annotations change, so
+    # projecting the lease epoch after StateTransition creation would make the
+    # frozen expected_generation stale before the provider plan is prepared.
+    lease_db = os.environ.get(
+        "EXECUTION_LEASE_DB",
+        ".artifacts/kubernetes-transition/execution-leases.db",
+    )
+    os.makedirs(os.path.dirname(lease_db) or ".", exist_ok=True)
+    lease_authority = SQLiteExecutionLeaseStore(lease_db)
+    lease = acquire_fenced_execution_lease(
+        authority=lease_authority,
+        projector=KubernetesDeploymentFenceProjector(api),
+        resource_uid=resource.resource_uid,
+        namespace=NAMESPACE,
+        name=DEPLOYMENT,
+        holder=holder,
+        now=datetime.now(timezone.utc),
+        ttl_seconds=300,
+    )
+
+    live = api.get_deployment(
+        namespace=NAMESPACE,
+        name=DEPLOYMENT,
+    )
+    if live is None:
+        raise RuntimeError("fenced Deployment disappeared")
+    metadata = live["metadata"]
+    generation = int(metadata["generation"])
     started_at = datetime.now(timezone.utc)
 
     before_evidence = EvidenceItem.capture(
@@ -430,26 +467,6 @@ def main() -> int:
         raise RuntimeError(
             "kind smoke did not advance independent context revision"
         )
-    holder = Principal(
-        type="controller",
-        subject="ci/kind-controller",
-    )
-    lease_db = os.environ.get(
-        "EXECUTION_LEASE_DB",
-        ".artifacts/kubernetes-transition/execution-leases.db",
-    )
-    os.makedirs(os.path.dirname(lease_db) or ".", exist_ok=True)
-    lease_authority = SQLiteExecutionLeaseStore(lease_db)
-    lease = acquire_fenced_execution_lease(
-        authority=lease_authority,
-        projector=KubernetesDeploymentFenceProjector(api),
-        resource_uid=resource.resource_uid,
-        namespace=NAMESPACE,
-        name=DEPLOYMENT,
-        holder=holder,
-        now=started_at,
-        ttl_seconds=300,
-    )
     fence = ExecutionFence.bind(
         transition=transition,
         action=action,
@@ -514,8 +531,13 @@ def main() -> int:
         caller=holder,
         now=datetime.now(timezone.utc),
         operation_id=attempt.operation_id,
+        execution_plan=prepared.plan,
         context_binding=context_binding,
     )
+    if receipt.plan_hash != prepared.plan.plan_hash:
+        raise RuntimeError(
+            "provider execution did not preserve the durable prepared plan"
+        )
     if not receipt.authority_reservation_hash:
         raise RuntimeError(
             "proposal v3 live transition did not use authority reservation"
@@ -636,6 +658,47 @@ def main() -> int:
                 )
                 handle.write("\n")
 
+            proof_verification = build_deployment_execution_verification(
+                plan=prepared.plan,
+                after_observation=observation.snapshot,
+                expected_operation_id=committed_attempt.operation_id,
+                expected_action_hash=committed_attempt.action_hash,
+                expected_transition_hash=committed_attempt.transition_hash,
+                expected_authority_reservation_hash=(
+                    reservation.reservation_hash
+                ),
+                verifier=collector,
+                verified_at=checked_at,
+            )
+            independent_proof = IndependentExecutionProof.seal(
+                proof_id="kind-live-independent-proof-20-30",
+                plan=prepared.plan,
+                authorization=prepared.plan_authorization,
+                fence=prepared.plan_fence,
+                attempt=committed_attempt,
+                after_observation=observation.snapshot,
+                verification=proof_verification,
+            )
+            proof_path = (
+                ".artifacts/kubernetes-transition/"
+                "independent-execution-proof.json"
+            )
+            proof_hash_path = proof_path + ".sha256"
+            with open(proof_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    independent_proof.as_mapping(),
+                    handle,
+                    indent=2,
+                    sort_keys=True,
+                )
+                handle.write("\n")
+            with open(
+                proof_hash_path,
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                handle.write(independent_proof.statement_hash + "\n")
+
             summary = {
                 "transition_id": transition.transition_id,
                 "transition_hash": transition.transition_hash,
@@ -732,6 +795,14 @@ def main() -> int:
                     attestation.attestation_hash
                 ),
                 "execution_attestation_path": attestation_path,
+                "independent_execution_proof_hash": (
+                    independent_proof.statement_hash
+                ),
+                "independent_execution_proof_path": proof_path,
+                "independent_execution_proof_hash_path": proof_hash_path,
+                "proof_verification_report_hash": (
+                    proof_verification.report_hash
+                ),
                 "evidence_before": evidence.manifest_hash,
                 "evidence_after": (
                     observation.evidence_bundle.manifest_hash

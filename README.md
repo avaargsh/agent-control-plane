@@ -114,7 +114,11 @@ live Deployment replicas=20
     -> context freshness + live generation/resourceVersion validation
     -> kubectl merge PATCH with resourceVersion precondition
     -> fresh Deployment + Pods + Events observation
+    -> provider ownership markers projected into ObservationSnapshot
     -> OutcomeContract: readyReplicas == 30
+    -> VerificationReport
+    -> IndependentExecutionProof
+    -> fresh-process proof verification
     -> SUCCEEDED
 ```
 
@@ -126,10 +130,15 @@ export KUBE_CONTEXT=kind-agent-transition
 make kind-transition-smoke
 ```
 
-The proof emits a JSON artifact containing the work snapshot/projection/proposal
-hashes, transition, action, policy, signed approval, authorization and
-before/after evidence hashes plus the Kubernetes generation and
-resourceVersion boundary.
+The smoke retains the legacy execution attestation and now also emits a
+canonical `independent-execution-proof.json` plus its SHA-256 statement hash.
+The proof binds the exact TransitionPlan, authorization, execution fence,
+durable terminal attempt, fresh provider observation, and VerificationReport.
+The workflow verifies that serialized proof again in a fresh Python process,
+without the original Agent session or execution process. Kubernetes operation
+ownership is proved from the fresh observation's control-plane annotations
+(operation id, action hash, transition hash, plan hash, and authority
+reservation hash), not from the mutation acknowledgement.
 
 ## Architecture
 

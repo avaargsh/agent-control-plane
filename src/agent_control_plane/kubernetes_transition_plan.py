@@ -46,6 +46,12 @@ def capture_deployment_scale_observation(
     metadata = _mapping(deployment.get("metadata"))
     spec = _mapping(deployment.get("spec"))
     status = _mapping(deployment.get("status"))
+    annotations = _mapping(metadata.get("annotations"))
+    control_plane_ownership = {
+        str(key): str(value)
+        for key, value in annotations.items()
+        if str(key).startswith("agent-control-plane.openai.com/")
+    }
     uid = _required_str(metadata.get("uid"), "metadata.uid")
     resource_version = _required_str(
         metadata.get("resourceVersion"),
@@ -80,6 +86,7 @@ def capture_deployment_scale_observation(
             "replicas": replicas,
             "readyReplicas": status.get("readyReplicas"),
             "availableReplicas": status.get("availableReplicas"),
+            "controlPlaneOwnership": control_plane_ownership,
         },
         observer=observer,
     )
