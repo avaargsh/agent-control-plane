@@ -77,18 +77,21 @@ jobs:
       - name: Stage release evidence
         if: always()
         run: |
-          rm -rf release-evidence/v0.1-package
-          mkdir -p release-evidence/v0.1-package
-          if [ -d .artifacts/release ]; then
-            cp -R .artifacts/release/. release-evidence/v0.1-package/
-          fi
-          if [ -f /tmp/fresh-clone-release.txt ]; then
-            cp /tmp/fresh-clone-release.txt release-evidence/v0.1-package/
-          fi
+          set -euo pipefail
+          test -f .artifacts/release/verification.json
+          test -f /tmp/fresh-clone-release.txt
+          rm -rf /tmp/v01-package-release-proof
+          mkdir -p /tmp/v01-package-release-proof
+          cp -R .artifacts/release/. /tmp/v01-package-release-proof/
+          cp /tmp/fresh-clone-release.txt \
+            /tmp/v01-package-release-proof/fresh-clone-release.log
+          find /tmp/v01-package-release-proof -maxdepth 2 \
+            -type f -printf '%P\n' | sort
 
       - name: Upload release proof
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: v01-release-gate-proof
-          path: release-evidence/v0.1-package/
+          path: /tmp/v01-package-release-proof/
+          if-no-files-found: error
