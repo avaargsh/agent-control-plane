@@ -16,9 +16,7 @@ on:
       - "RELEASE_NOTES.md"
       - "RELEASE_READINESS.md"
       - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
-      - "docs/V0.1_FREEZE.md"
-      - "docs/RELEASE_VERIFICATION.md"
-      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
+      - "docs/V0.1_PUBLIC_COMPATIBILITY.md"
       - "docs/V0.1_FREEZE.md"
       - "docs/RELEASE_VERIFICATION.md"
       - ".github/workflows/v01-release-gate.yml"
@@ -36,6 +34,10 @@ on:
       - "pyproject.toml"
       - "RELEASE_NOTES.md"
       - "RELEASE_READINESS.md"
+      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
+      - "docs/V0.1_PUBLIC_COMPATIBILITY.md"
+      - "docs/V0.1_FREEZE.md"
+      - "docs/RELEASE_VERIFICATION.md"
       - ".github/workflows/v01-release-gate.yml"
 
 permissions:
@@ -65,8 +67,11 @@ jobs:
         run: make audit-history
       - name: Run release verifier
         run: make verify-release
-      - name: Run fresh-clone smoke
-        run: sh scripts/fresh_clone_release_smoke.sh | tee /tmp/fresh-clone-release.txt
+      - name: Run fresh-clone package smoke
+        run: |
+          set -o pipefail
+          sh scripts/fresh_clone_release_smoke.sh \
+            | tee /tmp/fresh-clone-release.txt
       - name: Upload release proof
         if: always()
         uses: actions/upload-artifact@v4
