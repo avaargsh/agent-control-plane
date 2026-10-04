@@ -2,7 +2,7 @@ PYTHON ?= python3
 ARTIFACTS ?= .artifacts
 CONTEXT_DB ?= $(ARTIFACTS)/cross-agent-context/live-handoff.db
 
-.PHONY: setup quality-context test demo mcp-contract-proof context-live-handoff preflight smoke kind-transition-smoke verify-release audit-history clean
+.PHONY: setup quality-context test demo mcp-contract-proof context-live-handoff preflight smoke kind-transition-smoke verify-v01-public-contract verify-v01-acceptance-artifacts fresh-clone-kind-release-rehearsal verify-release audit-history clean
 
 setup:
 	$(PYTHON) -m pip install -e '.[dev]'
@@ -27,6 +27,8 @@ quality-context:
 		src/agent_control_plane/kubernetes_deployment_transition.py \
 		scripts/kubernetes_transition_smoke.py \
 		scripts/verify_execution_proof.py \
+		scripts/verify_v01_public_contract.py \
+		scripts/verify_v01_acceptance_artifacts.py \
 		scripts/live_cross_agent_context_handoff.py \
 		tests/kubernetes_testkit.py \
 		tests/test_authority_reservation.py \
@@ -78,7 +80,17 @@ smoke: preflight
 
 kind-transition-smoke:
 	mkdir -p $(ARTIFACTS)/kubernetes-transition
-	KUBE_CONTEXT=${KUBE_CONTEXT:-kind-agent-transition} $(PYTHON) scripts/kubernetes_transition_smoke.py | tee $(ARTIFACTS)/kubernetes-transition/summary.json
+	KUBE_CONTEXT=${KUBE_CONTEXT:-kind-agent-transition} $(PYTHON) scripts/kubernetes_transition_smoke.py > $(ARTIFACTS)/kubernetes-transition/summary.json
+	cat $(ARTIFACTS)/kubernetes-transition/summary.json
+
+verify-v01-public-contract:
+	$(PYTHON) scripts/verify_v01_public_contract.py
+
+verify-v01-acceptance-artifacts:
+	$(PYTHON) scripts/verify_v01_acceptance_artifacts.py $(ARTIFACTS)/kubernetes-transition
+
+fresh-clone-kind-release-rehearsal:
+	sh scripts/fresh_clone_kind_release_rehearsal.sh
 
 verify-release:
 	$(PYTHON) scripts/verify_release.py
