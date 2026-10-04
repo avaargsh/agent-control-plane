@@ -31,11 +31,15 @@ from agent_control_plane.execution_journal import (
 from agent_control_plane.execution_lifecycle import (
     KubernetesDeploymentExecutionCoordinator,
 )
+from agent_control_plane.independent_verifier import (
+    IndependentExecutionProof,
+)
 from agent_control_plane.kubernetes_deployment_transition import (
     ContextBoundExecutionContext,
     KubernetesDeploymentObserver,
     KubernetesDeploymentScaleProvider,
     VerificationStatus,
+    build_deployment_execution_verification,
     verify_outcome,
 )
 from agent_control_plane.policy_replay import (
@@ -636,6 +640,48 @@ def main() -> int:
                 )
                 handle.write("\n")
 
+            proof_verification = build_deployment_execution_verification(
+                plan=prepared.plan,
+                fence=prepared.plan_fence,
+                after_observation=observation.snapshot,
+                expected_operation_id=committed_attempt.operation_id,
+                expected_action_hash=committed_attempt.action_hash,
+                expected_transition_hash=committed_attempt.transition_hash,
+                expected_authority_reservation_hash=(
+                    reservation.reservation_hash
+                ),
+                verifier=collector,
+                verified_at=checked_at,
+            )
+            independent_proof = IndependentExecutionProof.seal(
+                proof_id="kind-live-independent-proof-20-30",
+                plan=prepared.plan,
+                authorization=prepared.plan_authorization,
+                fence=prepared.plan_fence,
+                attempt=committed_attempt,
+                after_observation=observation.snapshot,
+                verification=proof_verification,
+            )
+            proof_path = (
+                ".artifacts/kubernetes-transition/"
+                "independent-execution-proof.json"
+            )
+            proof_hash_path = proof_path + ".sha256"
+            with open(proof_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    independent_proof.as_mapping(),
+                    handle,
+                    indent=2,
+                    sort_keys=True,
+                )
+                handle.write("\n")
+            with open(
+                proof_hash_path,
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                handle.write(independent_proof.statement_hash + "\n")
+
             summary = {
                 "transition_id": transition.transition_id,
                 "transition_hash": transition.transition_hash,
@@ -732,6 +778,14 @@ def main() -> int:
                     attestation.attestation_hash
                 ),
                 "execution_attestation_path": attestation_path,
+                "independent_execution_proof_hash": (
+                    independent_proof.statement_hash
+                ),
+                "independent_execution_proof_path": proof_path,
+                "independent_execution_proof_hash_path": proof_hash_path,
+                "proof_verification_report_hash": (
+                    proof_verification.report_hash
+                ),
                 "evidence_before": evidence.manifest_hash,
                 "evidence_after": (
                     observation.evidence_bundle.manifest_hash
