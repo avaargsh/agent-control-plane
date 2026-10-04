@@ -66,7 +66,7 @@ serialized proof in a new Python process, validates the complete Acceptance
 Artifact Contract, and copies the verified artifacts to:
 
 ```text
-.artifacts/v0.1-fresh-clone-kind/
+release-evidence/v0.1-kubernetes/
 ```
 
 The directory includes `release-evidence.json`, containing the exact source
