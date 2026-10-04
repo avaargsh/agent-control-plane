@@ -433,9 +433,11 @@ fail-closed until terminal proof or a durable higher-epoch takeover. Higher
 epoch takeover must itself be confirmed ACTIVE by the durable lease authority.
 
 The Kubernetes mutation writes the reservation hash into target annotations.
-Independent post-execution observation carries that proof into EvidenceBundle;
-ExecutionAttestation/v2 binds the terminal result hash, which now transitively
-contains the same reservation proof.
+Independent post-execution observation projects the control-plane ownership
+markers into the provider-neutral ObservationSnapshot. v0.1 release acceptance
+requires those observed markers to match the durable operation, action,
+transition, plan, and authority reservation before
+`OperationOwnershipProven=TRUE`.
 
 ## Durable execution lifecycle coordinator
 
@@ -648,12 +650,15 @@ WorkSnapshot
   -> PolicyInput
   -> Signed Approval
   -> Authorization
-  -> ExecutionFence
-  -> provider reads live generation/resourceVersion
+  -> project fenced execution lease
+  -> fresh provider generation/resourceVersion
+  -> exact durable TransitionPlan
   -> validate_context_bound_execution()
-  -> Kubernetes PATCH
+  -> Kubernetes PATCH using that plan
+  -> reconcile terminal ownership
   -> fresh Observation
-  -> OutcomeContract
+  -> ownership-aware VerificationReport
+  -> IndependentExecutionProof
 ```
 
 The provider keeps the existing plain `execute()` entrypoint for
@@ -732,41 +737,42 @@ recovered COMMITTED journal record rather than trusting temporary in-process
 objects.
 
 
-## Provider-independent execution attestation
+## Completed-execution proof
 
-The execution chain now closes with a provider-independent
-`ExecutionAttestation/v2`.
+`ExecutionAttestation/v2` remains as a compatibility artifact, but it is no
+longer the normative v0.1 release closure proof.
 
-It seals the durable execution receipt to independently observed verification:
+The v0.1 Golden Slice closes with:
 
 ```text
 ExecutionAttempt(COMMITTED)
-   + attempt_hash
-   + terminal_result_hash
-   + context_provenance_hash
-          |
-          + OutcomeContract hash
-          + post-execution EvidenceBundle hash
-          + OutcomeVerificationResult/v1 hash
-          |
-          v
-ExecutionAttestation/v2
-          |
-     attestation_hash
+        |
+exact TransitionPlan
++ PlanAuthorizationBinding
++ PlanExecutionFence
+        |
+fresh ObservationSnapshot
++ provider ownership markers
+        |
+DesiredStateReached = TRUE
+OperationOwnershipProven = TRUE
+        |
+VerificationReport
+        |
+IndependentExecutionProof/v1
+        |
+fresh-process verification
 ```
 
-The attestation intentionally does not embed Kubernetes-specific fields. It can
-be reused by future providers as long as they produce:
+This distinction matters because **desired state reached does not prove which
+operation produced it**. The Kubernetes reference verifier derives ownership
+from the fresh target observation and refuses to seal an
+`IndependentExecutionProof` when operation id, action hash, transition hash,
+plan hash, or authority reservation hash is missing or mismatched.
 
-- a COMMITTED durable execution attempt;
-- an independently collected observation/evidence hash;
-- an outcome contract hash;
-- a hash-sealed `OutcomeVerificationResult/v1` with status `SUCCEEDED`.
-
-For context-bound attempts, the attestation transitively closes the chain back
-to the exact work snapshot, projection and proposal through
-`context_provenance_hash`.
-
-The live kind transition writes
-`.artifacts/kubernetes-transition/execution-attestation.json`, which is
-uploaded with the rest of the transition proof.
+The live kind transition still writes
+`.artifacts/kubernetes-transition/execution-attestation.json` for compatibility,
+but release acceptance is defined by
+[`V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md`](V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md)
+and the independently verifiable
+`independent-execution-proof.json`.

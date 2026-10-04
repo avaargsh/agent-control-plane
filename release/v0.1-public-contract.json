@@ -1,0 +1,101 @@
+{
+  "contractVersion": "agent-control-plane/v0.1.0-public-surface",
+  "packageVersion": "0.1.0",
+  "consoleScripts": [
+    "agent-control-plane",
+    "agent-context-mcp"
+  ],
+  "cliCommands": [
+    "validate",
+    "plan",
+    "gate",
+    "authority-inventory",
+    "authority-admit",
+    "decision-eval-verify",
+    "decision-eval-gate",
+    "live-proof-verify"
+  ],
+  "topLevelExports": [
+    "AuthorityAdmissionDecision",
+    "AuthorityDiff",
+    "AuthorityGrant",
+    "BindingResolutionError",
+    "ManifestValidationError",
+    "admit_authority_change",
+    "authority_digest",
+    "build_authority_inventory",
+    "diff_authority",
+    "resolve_bindings",
+    "validate_manifest"
+  ],
+  "exportedDataclassFields": {
+    "AuthorityGrant": [
+      "effect",
+      "capability",
+      "resource",
+      "verb"
+    ],
+    "AuthorityDiff": [
+      "added_grants",
+      "removed_grants",
+      "added_runtime_refs",
+      "removed_runtime_refs",
+      "approval_mode_before",
+      "approval_mode_after",
+      "evidence_required_before",
+      "evidence_required_after",
+      "max_operations_before",
+      "max_operations_after"
+    ],
+    "AuthorityAdmissionDecision": [
+      "decision",
+      "admitted",
+      "baseline_digest",
+      "proposed_digest",
+      "reasons",
+      "diff"
+    ]
+  },
+  "manifestSchemas": {
+    "AgentBundle": "agent-bundle.schema.json",
+    "AgentRelease": "agent-release.schema.json",
+    "AgentAuthorityEnvelope": "agent-authority-envelope.schema.json",
+    "RuntimeBinding": "runtime-binding.schema.json",
+    "SandboxBinding": "sandbox-binding.schema.json",
+    "CapabilityIntent": "capability-intent.schema.json",
+    "ToolContract": "tool-contract.schema.json",
+    "EvidenceEvent": "evidence-event.schema.json",
+    "Session": "session.schema.json",
+    "Run": "run.schema.json",
+    "StateRef": "state-ref.schema.json",
+    "EvidenceRef": "evidence-ref.schema.json",
+    "EvalGate": "eval-gate.schema.json",
+    "ContextProjectionPolicy": "context-projection-policy.schema.json"
+  },
+  "independentExecutionProof": {
+    "classPath": "agent_control_plane.independent_verifier.IndependentExecutionProof",
+    "dataclassFields": [
+      "proof_id",
+      "subject",
+      "predicate_type",
+      "predicate",
+      "statement_hash",
+      "statement_version"
+    ],
+    "predicateType": "agent-control-plane/state-transition-execution/v1",
+    "statementVersion": "independent-execution-proof/v1",
+    "predicateFields": [
+      "transition_plan",
+      "plan_authorization",
+      "plan_fence",
+      "execution_attempt",
+      "after_observation",
+      "verification_report"
+    ]
+  },
+  "compatibilityNotes": [
+    "The v0.1 public compatibility promise covers the listed console scripts, CLI command names, top-level package exports, manifest kind-to-schema mapping, and IndependentExecutionProof wire identity/field names.",
+    "Provider adapters, SQLite table layouts, internal coordinator classes, and other non-exported implementation modules remain internal in v0.1 and may evolve without a wire-format guarantee.",
+    "execution-attestation.json is retained for compatibility but IndependentExecutionProof is the normative v0.1 completed-execution proof."
+  ]
+}

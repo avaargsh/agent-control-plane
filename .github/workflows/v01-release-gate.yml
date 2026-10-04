@@ -9,10 +9,18 @@ on:
       - "examples/**"
       - "experiments/**"
       - "scripts/verify_release.py"
+      - "scripts/verify_v01_public_contract.py"
       - "scripts/fresh_clone_release_smoke.sh"
+      - "release/**"
       - "pyproject.toml"
+      - "Makefile"
+      - "Makefile"
       - "RELEASE_NOTES.md"
       - "RELEASE_READINESS.md"
+      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
+      - "docs/V0.1_PUBLIC_COMPATIBILITY.md"
+      - "docs/V0.1_FREEZE.md"
+      - "docs/RELEASE_VERIFICATION.md"
       - ".github/workflows/v01-release-gate.yml"
   push:
     branches: [main]
@@ -22,10 +30,16 @@ on:
       - "examples/**"
       - "experiments/**"
       - "scripts/verify_release.py"
+      - "scripts/verify_v01_public_contract.py"
       - "scripts/fresh_clone_release_smoke.sh"
+      - "release/**"
       - "pyproject.toml"
       - "RELEASE_NOTES.md"
       - "RELEASE_READINESS.md"
+      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
+      - "docs/V0.1_PUBLIC_COMPATIBILITY.md"
+      - "docs/V0.1_FREEZE.md"
+      - "docs/RELEASE_VERIFICATION.md"
       - ".github/workflows/v01-release-gate.yml"
 
 permissions:
@@ -55,13 +69,29 @@ jobs:
         run: make audit-history
       - name: Run release verifier
         run: make verify-release
-      - name: Run fresh-clone smoke
-        run: sh scripts/fresh_clone_release_smoke.sh | tee /tmp/fresh-clone-release.txt
+      - name: Run fresh-clone package smoke
+        run: |
+          set -o pipefail
+          sh scripts/fresh_clone_release_smoke.sh \
+            | tee /tmp/fresh-clone-release.txt
+      - name: Stage release evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          test -f .artifacts/release/verification.json
+          test -f /tmp/fresh-clone-release.txt
+          rm -rf /tmp/v01-package-release-proof
+          mkdir -p /tmp/v01-package-release-proof
+          cp -R .artifacts/release/. /tmp/v01-package-release-proof/
+          cp /tmp/fresh-clone-release.txt \
+            /tmp/v01-package-release-proof/fresh-clone-release.log
+          find /tmp/v01-package-release-proof -maxdepth 2 \
+            -type f -printf '%P\n' | sort
+
       - name: Upload release proof
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: v01-release-gate-proof
-          path: |
-            .artifacts/release/
-            /tmp/fresh-clone-release.txt
+          path: /tmp/v01-package-release-proof/
+          if-no-files-found: error

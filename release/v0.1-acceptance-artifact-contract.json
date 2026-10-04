@@ -1,0 +1,58 @@
+{
+  "contractVersion": "agent-control-plane/v0.1.0-acceptance-artifacts",
+  "goldenSlice": "kubernetes-deployment-scale-20-to-30",
+  "requiredArtifacts": [
+    "execution-attestation.json",
+    "independent-execution-proof.json",
+    "independent-execution-proof.json.sha256",
+    "execution-journal.db",
+    "execution-leases.db",
+    "work-context.db",
+    "summary.json"
+  ],
+  "proof": {
+    "predicateType": "agent-control-plane/state-transition-execution/v1",
+    "statementVersion": "independent-execution-proof/v1",
+    "requiredTopLevelFields": [
+      "proof_id",
+      "subject",
+      "predicate_type",
+      "predicate",
+      "statement_hash",
+      "statement_version"
+    ],
+    "requiredPredicateFields": [
+      "transition_plan",
+      "plan_authorization",
+      "plan_fence",
+      "execution_attempt",
+      "after_observation",
+      "verification_report"
+    ],
+    "requiredVerificationConditions": [
+      "DesiredStateReached",
+      "OperationOwnershipProven"
+    ],
+    "ownershipAnnotations": [
+      "agent-control-plane.openai.com/operation-id",
+      "agent-control-plane.openai.com/action-hash",
+      "agent-control-plane.openai.com/transition-hash",
+      "agent-control-plane.openai.com/plan-hash",
+      "agent-control-plane.openai.com/authority-reservation-hash"
+    ],
+    "statementHash": {
+      "algorithm": "sha256",
+      "representation": "sha256:<lowercase-hex>",
+      "canonicalization": "canonical_digest(IndependentExecutionProof, exclude=('statement_hash',)): recursive dataclass/enum/mapping canonicalization followed by UTF-8 JSON with sort_keys=true,separators=(',',':'),ensure_ascii=false,allow_nan=false",
+      "trustedDigestFile": "independent-execution-proof.json.sha256"
+    }
+  },
+  "legacyArtifacts": {
+    "execution-attestation.json": "compatibility artifact retained for v0.1; it is not sufficient by itself to prove provider operation ownership"
+  },
+  "durableEvidenceStores": {
+    "execution-journal.db": "required release evidence store; SQLite storage format is not a public wire/API compatibility promise",
+    "execution-leases.db": "required release evidence store; SQLite storage format is not a public wire/API compatibility promise",
+    "work-context.db": "required release evidence store; SQLite storage format is not a public wire/API compatibility promise"
+  }
+}

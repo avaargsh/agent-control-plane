@@ -21,6 +21,8 @@ A public v0.1 candidate should satisfy all of the following:
 - [x] stale/concurrent authority falsification matrix
 - [x] independent out-of-process execution proof verification and tamper rejection
 - [x] live kind scale proof emits ownership-backed IndependentExecutionProof and re-verifies it in a fresh process
+- [x] v0.1 Acceptance Artifact Contract frozen and machine-verifiable
+- [x] v0.1 public API/schema/CLI compatibility snapshot executable
 - [x] v0.1 execution architecture freeze contract recorded
 - [x] known limitations documented
 - [x] repository license selected and added (Apache-2.0)
@@ -30,11 +32,12 @@ A public v0.1 candidate should satisfy all of the following:
 - [x] current-tree private/customer identifier spot-check clean
 - [x] full git-history secret scan complete (Gitleaks v8.30.1, full checkout)
 - [x] direct dependency/license review complete
-- [ ] live kind/minikube + Temporal smoke exercised and documented
+- [x] live kind Deployment 20 -> 30 acceptance path exercised from a clean clone
 - [x] GitHub Actions runner issue documented
-- [x] fresh-clone demo / MCP proof / wheel build verification complete
+- [x] fresh-clone package/demo/MCP/wheel verification complete
+- [x] fresh-clone Kubernetes acceptance artifact rehearsal complete
 - [x] v0.1.0 release notes prepared
-- [x] stale pre-RC pull requests reconciled; no open pull requests remain at final RC audit
+- [x] stale pre-RC pull requests reconciled; no open P0 correctness issue is present
 - [ ] v0.1.0 tag/release created
 
 ## Dependency/license review
@@ -59,9 +62,12 @@ Before changing repository visibility:
 3. Ensure no production ReleaseEvidence, approval payloads or secrets are committed.
 4. Review provider names and integration examples for trademark/license concerns.
 5. Run `make verify-release` from a fresh clone.
-6. Run the live smoke profile in a controlled local environment and capture the outcome outside git.
-7. Run the executable v0.1 release gate, including isolated wheel installation and fresh-clone smoke.
-8. Confirm README claims are limited to behavior actually exercised.
+6. Run `make fresh-clone-kind-release-rehearsal` against a clean kind cluster.
+7. Verify the complete artifact set against
+   `docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md`.
+8. Run the executable v0.1 release gate, including isolated wheel installation,
+   public compatibility checks, fresh-clone package smoke, and full-history scan.
+9. Confirm README claims are limited to behavior actually exercised.
 
 ### Audit performed
 
@@ -74,7 +80,17 @@ Recent commit metadata was reviewed for suspicious credential/private-data wordi
 
 The final RC audit reconciled stale pre-RC pull requests after preserving the release-acceptance contract and Golden Slice trajectory replay proof on main.
 
-The executable v0.1 release gate now verifies the full test suite, deterministic Golden Incident, MCP Execution Contract proof, release wheel build, isolated wheel installation with declared dependencies, packaged schemas/CLI behavior, a clean local fresh-clone smoke, and a full-history Gitleaks scan.
+The executable v0.1 package release gate verifies the public compatibility
+snapshot, full test suite, deterministic Golden Incident, MCP Execution Contract
+proof, release wheel build, isolated wheel installation with declared
+dependencies, packaged schemas/CLI behavior, a clean local fresh-clone smoke,
+and a full-history Gitleaks scan.
+
+The Kubernetes release gate separately creates a kind cluster and runs the
+Deployment `20 -> 30` Golden Slice from a clean clone. It validates the full
+Acceptance Artifact Contract, verifies the serialized IndependentExecutionProof
+in a new process, and records the source commit plus required artifact file
+digests in `release-evidence.json`.
 
 ## Known limitations
 
@@ -82,8 +98,9 @@ The executable v0.1 release gate now verifies the full test suite, deterministic
 - CLI transports prove the integration boundary but are not a substitute for hardened SDK/service clients.
 - The standalone `make smoke` profile still requires a compatible Sandbox CRD and workflow worker. Separately, the v3.2 cross-repository Golden Slice does exercise real kind Pods plus Temporal for the binding/provenance contract; that proof is not equivalent to production Sandbox CRD coverage.
 - Secret management, quota/budget enforcement, tenant isolation and HA deployment are intentionally incomplete.
-- Provider prepare/execution contracts are still evolving; backward compatibility is not guaranteed before v1.
+- Internal provider adapters and coordinator implementation may still evolve before v1. The v0.1 compatibility promise is limited to the explicit public surface recorded in `release/v0.1-public-contract.json`; breaking that snapshot requires an explicit versioned contract change.
 - The project does not own or redefine Temporal continuation semantics, Kubernetes sandbox semantics, MCP semantics or harness behavior.
-- GitHub Actions has recently shown jobs failing before execution with no steps/logs; treat that as CI infrastructure state until runner execution is restored.
+- `ExecutionAttestation/v2` remains for compatibility but is not sufficient by itself for v0.1 release acceptance; the normative completed-execution artifact is `IndependentExecutionProof/v1`.
+- The separate hash file is a trusted-digest input, not a signer-authenticity mechanism. Production authenticity remains external (for example DSSE/Sigstore/KMS).
 
 See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the v0.1.0 candidate notes.

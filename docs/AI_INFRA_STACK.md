@@ -199,11 +199,24 @@ A single traceable chain must preserve or reference:
 6. **Synthetic demos and live proofs are labeled separately.**
 7. **v0.1 integration prefers one end-to-end Golden Slice over adding more providers or framework adapters.**
 
-## Near-term release sequence
+## v0.1 release boundary
 
-1. Freeze `gpu-compute-platform` v0.1 lifecycle/restart acceptance.
-2. Close `agent-control-plane` v0.1 live kind + Temporal smoke gap.
-3. Close `cloud-agent-runtime` sandbox replacement/rebind proof.
-4. Export `agent-decision-lab` benchmark result as a stable eval artifact consumed by Agent Control Plane.
-5. Keep `ai-factory-engineering` v0.1 synthetic acceptance separate from controlled hardware/lab proof.
-6. Run the cross-project Golden Slice and publish only claims backed by replayable evidence.
+For `agent-control-plane`, the v0.1.0 release-critical provider proof is now
+the clean-clone Kubernetes Deployment `20 -> 30` Acceptance Artifact path.
+Temporal, sandbox-runtime, Decision Lab, GPU Compute, and AI Factory integrations
+remain adjacent evidence/integration references and are not prerequisites for
+claiming the Kubernetes state-transition proof.
+
+The cross-project Golden Slice remains useful for portfolio-level integration,
+but it must not weaken or replace the repository-local release rule:
+
+```text
+exact authorized TransitionPlan
+  -> fenced durable execution
+  -> provider ownership proof
+  -> fresh independent verification
+  -> IndependentExecutionProof
+```
+
+Future cross-repository work should consume the released contracts rather than
+reopening v0.1 execution ownership or introducing a second runtime/control plane.

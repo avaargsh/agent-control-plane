@@ -18,6 +18,11 @@ on:
       - "src/agent_control_plane/cli_runtime_transports.py"
       - "scripts/kubernetes_transition_smoke.py"
       - "scripts/verify_execution_proof.py"
+      - "scripts/verify_v01_acceptance_artifacts.py"
+      - "scripts/fresh_clone_kind_release_rehearsal.sh"
+      - "release/v0.1-acceptance-artifact-contract.json"
+      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
+      - "Makefile"
       - ".github/workflows/kubernetes-transition-smoke.yml"
   push:
     branches: [main]
@@ -37,6 +42,11 @@ on:
       - "src/agent_control_plane/cli_runtime_transports.py"
       - "scripts/kubernetes_transition_smoke.py"
       - "scripts/verify_execution_proof.py"
+      - "scripts/verify_v01_acceptance_artifacts.py"
+      - "scripts/fresh_clone_kind_release_rehearsal.sh"
+      - "release/v0.1-acceptance-artifact-contract.json"
+      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
+      - "Makefile"
       - ".github/workflows/kubernetes-transition-smoke.yml"
   workflow_dispatch:
 
@@ -70,28 +80,46 @@ jobs:
       - name: Create kind cluster
         run: kind create cluster --name agent-transition --wait 120s
 
-      - name: Execute context-bound live transition
+      - name: Run fresh-clone v0.1 release rehearsal
         env:
           KUBE_CONTEXT: kind-agent-transition
         run: |
           set -o pipefail
-          mkdir -p .artifacts/kubernetes-transition
-          python scripts/kubernetes_transition_smoke.py \
-            | tee .artifacts/kubernetes-transition/summary.json
+          sh scripts/fresh_clone_kind_release_rehearsal.sh \
+            | tee /tmp/v01-fresh-clone-kind.txt
 
-      - name: Verify independent proof in a fresh process
+      - name: Stage verified acceptance proof
         run: |
-          python scripts/verify_execution_proof.py \
-            .artifacts/kubernetes-transition/independent-execution-proof.json \
-            --expected-hash-file \
-            .artifacts/kubernetes-transition/independent-execution-proof.json.sha256
+          set -euo pipefail
+          evidence=release-evidence/v0.1-kubernetes
+          for file in \
+            execution-attestation.json \
+            independent-execution-proof.json \
+            independent-execution-proof.json.sha256 \
+            execution-journal.db \
+            execution-leases.db \
+            work-context.db \
+            summary.json \
+            release-evidence.json \
+            source-commit.txt
+          do
+            test -f "$evidence/$file"
+          done
+          rm -rf /tmp/v01-kubernetes-acceptance-proof
+          mkdir -p /tmp/v01-kubernetes-acceptance-proof
+          cp -R "$evidence"/. /tmp/v01-kubernetes-acceptance-proof/
+          cp /tmp/v01-fresh-clone-kind.txt \
+            /tmp/v01-kubernetes-acceptance-proof/ci-rehearsal.log
+          find /tmp/v01-kubernetes-acceptance-proof -maxdepth 1 \
+            -type f -printf '%f\n' | sort
 
       - name: Upload transition proof
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kubernetes-transition-proof
-          path: .artifacts/kubernetes-transition/
+          name: v01-kubernetes-acceptance-proof
+          path: /tmp/v01-kubernetes-acceptance-proof/
+          if-no-files-found: error
 
       - name: Dump cluster state on failure
         if: failure()
