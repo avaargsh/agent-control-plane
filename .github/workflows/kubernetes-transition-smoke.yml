@@ -24,6 +24,8 @@ on:
     paths:
       - "src/agent_control_plane/state_transition_protocol.py"
       - "src/agent_control_plane/kubernetes_deployment_transition.py"
+      - "src/agent_control_plane/kubernetes_transition_plan.py"
+      - "src/agent_control_plane/independent_verifier.py"
       - "src/agent_control_plane/authority_reservation.py"
       - "src/agent_control_plane/execution_journal.py"
       - "src/agent_control_plane/execution_lifecycle.py"
