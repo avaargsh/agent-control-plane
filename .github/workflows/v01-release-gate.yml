@@ -13,6 +13,8 @@ on:
       - "scripts/fresh_clone_release_smoke.sh"
       - "release/**"
       - "pyproject.toml"
+      - "Makefile"
+      - "Makefile"
       - "RELEASE_NOTES.md"
       - "RELEASE_READINESS.md"
       - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
