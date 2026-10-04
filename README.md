@@ -1,10 +1,15 @@
 # Agent Control Plane
 
-An evidence-first control plane for safely authorizing, executing, verifying,
-recovering, and replaying AI-initiated state transitions.
+A thin, evidence-first control plane for **provable execution of AI-initiated state transitions**.
 
-The core authority object is a **StateTransition**, not a tool call or provider
-command:
+The project is built around three questions:
+
+1. **Was this exact change authorized?**
+2. **Did this exact operation own the provider side effect?**
+3. **Can an independent verifier prove the resulting state afterwards?**
+
+The core authority object is a **StateTransition / TransitionPlan**, not a prompt,
+tool call, model session, workflow step, or provider command.
 
 ```text
 LLM proposes.
@@ -15,103 +20,99 @@ Evidence proves.
 Verifier closes the loop.
 ```
 
-It deliberately does **not** become another Agent framework or durable runtime.
-Instead, it owns state-transition authorization, desired state, bindings,
-policy/approval, evidence, release decisions and replay while execution stays
-in specialized runtimes such as Temporal and Kubernetes sandboxes.
+Agent Control Plane deliberately does **not** become another Agent framework,
+MCP gateway, durable workflow engine, sandbox runtime, IAM product, or model
+serving layer. Those systems remain external. This repository owns the narrow
+execution boundary where an approved state transition becomes a real side
+effect and later has to be proven.
 
 ## Why this exists
 
-Production Agent systems usually span multiple execution domains:
-
-- a durable workflow engine owns continuation
-- a sandbox owns isolated compute
-- MCP/tool providers expose capabilities
-- a harness owns model/tool interaction semantics
-- release policy decides whether an execution is allowed to advance
-
-Without a control plane, those identities and decisions drift apart. This project keeps one provenance chain across them.
-
-## Golden incident
+Runtime authorization answers an important question:
 
 ```text
-GPU XID Alert
-  -> Frozen approved evidence
-  -> AgentRelease / Binding DAG
-  -> Kubernetes Sandbox
-  -> Temporal Workflow
-  -> Tool / Harness / Decision bindings
-  -> Eval Gate
-  -> ReleaseEvidence
-  -> Replay Verification
+May principal P call capability C?
 ```
 
-The important invariant is not "one framework owns everything". It is that the control plane can prove which release, workflow, sandbox, evidence snapshot and decision belong to the same run.
+That is not enough for high-impact state changes.
 
-## Five-minute demo
-
-Requirements: Python 3.11+.
-
-```bash
-make setup
-make test
-make demo
-```
-
-The deterministic demo uses in-memory execution and writes:
+A production control plane also has to answer:
 
 ```text
-.artifacts/demo/release-evidence-summary.json
+Which exact plan was approved?
+Was the live resource still the version that was approved?
+What happens if the provider committed but the ACK was lost?
+Can a retry create a second side effect?
+Did this operation actually cause the observed result?
+Can that claim be verified without trusting the original Agent process?
 ```
 
-It demonstrates approval freeze/resume, ordered binding execution, evaluation, sealed release evidence and replay verification.
+Two invariants define the project:
 
-## Live smoke boundary
+> **Desired state reached does not imply operation ownership proven.**
 
-The repository also includes SDK-neutral runtime clients plus CLI transports for Kubernetes and Temporal.
+> **A provider acknowledgement is not independent outcome evidence.**
+
+## Normative v0.1 execution chain
 
 ```text
-KubernetesSandboxExecutor
-  -> KubernetesSandboxClient
-  -> KubectlApi
-  -> kubectl
-  -> Kubernetes API
-
-TemporalWorkflowExecutor
-  -> TemporalWorkflowClient
-  -> TemporalCliApi
-  -> temporal CLI
-  -> Temporal service
+ObservationSnapshot
+  -> TransitionPlan
+  -> PlanAuthorizationBinding
+  -> PlanExecutionFence
+  -> durable PREPARED ExecutionAttempt
+  -> provider side effect
+  -> COMMITTED | ABORTED | UNKNOWN
+  -> reconciliation
+  -> fresh independent ObservationSnapshot
+  -> VerificationReport
+  -> IndependentExecutionProof
 ```
 
-Configure a local environment:
+The LLM, Agent session, workflow history, and hidden reasoning are not authority
+and are not required to verify a completed execution.
 
-```bash
-export KUBE_CONTEXT=kind-agent-control-plane
-export KUBE_NAMESPACE=agent-runtime
-export TEMPORAL_ADDRESS=127.0.0.1:7233
-make preflight
-make smoke
-```
+The frozen invariants and explicit non-goals are defined in
+[docs/V0.1_FREEZE.md](docs/V0.1_FREEZE.md).
 
-Normal unit CI does not imply that a live Kubernetes cluster or Temporal server was exercised.
+## What the control plane owns
 
-### Live StateTransition proof
+The v0.1 core owns:
 
-The repository also carries a dedicated kind smoke that exercises the
-state-transition protocol against a real Kubernetes API server rather than a
-fake transport:
+- exact-plan authorization;
+- execution fencing against stale generation / resource version / lease epoch;
+- durable PREPARED and terminal execution identity;
+- fail-closed handling of UNKNOWN provider outcomes;
+- reconciliation after crash, lost ACK, or takeover;
+- fresh provider observation after mutation;
+- operation-ownership verification;
+- canonical, out-of-process verifiable execution proof.
+
+It does **not** own:
+
+- Agent planning or chat/session orchestration;
+- Temporal/Restate continuation semantics;
+- Kubernetes or another sandbox runtime;
+- MCP/tool gateway semantics;
+- enterprise IAM or a new policy language;
+- model serving;
+- PKI/signing infrastructure;
+- production multi-tenancy, quota, or HA in v0.1.
+
+## Reference proof: Kubernetes Deployment 20 -> 30
+
+The live kind acceptance path exercises the full state-transition contract
+against a real Kubernetes API server:
 
 ```text
 live Deployment replicas=20
     -> acquire/project fenced execution lease
     -> fresh live generation/resourceVersion observation
     -> freeze EvidenceBundle + StateTransition 20 -> 30
-    -> ContextProjection / TransitionProposalBinding
-    -> deterministic PolicyDecision
-    -> signed TransitionApproval
-    -> AuthorizationBinding + ExecutionFence
-    -> durable PREPARED exact TransitionPlan
+    -> deterministic PolicyDecision + signed approval
+    -> exact TransitionPlan
+    -> PlanAuthorizationBinding + PlanExecutionFence
+    -> durable PREPARED ExecutionAttempt
     -> kubectl merge PATCH using that exact plan
     -> process-boundary reconciliation
     -> fresh Deployment + Pods + Events observation
@@ -119,134 +120,212 @@ live Deployment replicas=20
     -> DesiredStateReached + OperationOwnershipProven
     -> VerificationReport
     -> IndependentExecutionProof
-    -> fresh-process proof verification against trusted statement hash
+    -> fresh-process verification against trusted statement hash
     -> SUCCEEDED
 ```
 
-The CI workflow is `.github/workflows/kubernetes-transition-smoke.yml`. For a
-local kind cluster named `agent-transition`:
+Kubernetes operation ownership is derived from a **fresh observation** and is
+bound to durable execution identity through control-plane ownership markers,
+including operation, action, transition, plan, and authority-reservation
+hashes. A Deployment that merely happens to reach 30 replicas is insufficient.
+
+The same provider-neutral TransitionPlan / execution identity boundary is also
+exercised with a GitHub pull-request merge provider. Provider integrations must
+conform to the same control-plane contract rather than introduce their own
+authority model.
+
+## Quick start
+
+Requirements: Python 3.11+.
+
+For the deterministic developer path:
+
+```bash
+make setup
+make test
+make demo
+```
+
+The demo is useful for local development, but it is **not** the normative live
+provider acceptance proof.
+
+For the live Kubernetes acceptance path with a local kind cluster:
 
 ```bash
 export KUBE_CONTEXT=kind-agent-transition
 make kind-transition-smoke
 ```
 
-The normative v0.1 release evidence is the canonical
-`independent-execution-proof.json` plus its trusted statement-hash file.
-`execution-attestation.json` is retained only as a compatibility artifact.
-The proof binds the exact TransitionPlan, authorization, execution fence,
-durable terminal attempt, fresh provider observation, and VerificationReport.
-The workflow verifies that serialized proof again in a fresh Python process,
-without the original Agent session or execution process.
+For a clean-clone release rehearsal:
 
-Kubernetes operation ownership is proved from the fresh observation's
-control-plane annotations (operation id, action hash, transition hash, plan
-hash, and authority reservation hash), not from the mutation acknowledgement.
-**Desired state reached does not imply operation ownership proven.**
-
-The complete required file set, ownership inputs, statement-hash algorithm, and
-fresh-process verification command are frozen in
-[docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md](docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md).
-The live CI gate executes the Golden Slice from a clean clone and records the
-source commit plus artifact file digests in `release-evidence.json`.
-
-## Architecture
-
-```text
-                         Agent Control Plane
-
-┌─────────────────────────────────────────────────────────────┐
-│ AgentRelease / Desired State                                │
-│ Provider Bindings                                           │
-│ Policy / Approval                                           │
-│ Placement / Rollout                                         │
-│ Frozen Evidence                                             │
-│ Eval Gate                                                   │
-│ ReleaseEvidence / Replay                                    │
-└───────────────────────┬─────────────────────────────────────┘
-                        │ provider-neutral contracts
-          ┌─────────────┼───────────────┬────────────────┐
-          ▼             ▼               ▼                ▼
-      Harness        Workflow         Sandbox           Tools
-       Codex         Temporal       Kubernetes           MCP
-                        │               │
-                  workflowId/runId   sandbox UID
-                        └───────┬───────┘
-                                ▼
-                         ReleaseEvidence
-                                ▼
-                         Replay Verification
+```bash
+make fresh-clone-kind-release-rehearsal
 ```
 
-## Design principles
+Normal unit CI does not imply that a live Kubernetes API was exercised.
 
-- **Thin control plane.** Desired state, policy and release control stay here; provider execution semantics do not.
-- **Continuation ownership is explicit.** Temporal/Restate own durable workflow continuation.
-- **Sandbox ownership is explicit.** Kubernetes/Agent Sandbox owns isolated execution lifecycle.
-- **Evidence is immutable at approval boundaries.** Resume uses the frozen snapshot, not a live reread.
-- **Identity is first-class.** Release, workflow, sandbox, evidence and decision identities remain correlated.
-- **Replay beats hidden reasoning.** Auditing relies on structured evidence and receipts, not model chain-of-thought.
-- **Provider SDKs are optional.** Narrow protocols permit CLI, SDK or service transports.
+## Acceptance artifacts
 
-## Core primitives
+A successful Kubernetes Golden Slice must produce:
 
-- AgentBundle / AgentRelease
-- Federation Bindings
-- ResolvedReleasePlan
-- Provider Registry
-- Binding Executors
-- FrozenEvidence
-- Eval Gates
-- ReleaseEvidence
-- deterministic replay digest
-- AgentAuthorityEnvelope + Fleet/Agent authority inventory
-- deployment-time authority drift admission
+```text
+execution-attestation.json
+independent-execution-proof.json
+independent-execution-proof.json.sha256
+execution-journal.db
+execution-leases.db
+work-context.db
+summary.json
+```
 
-## Cross-agent context and execution provenance
+`IndependentExecutionProof/v1` is the normative completed-execution artifact.
+`execution-attestation.json` is retained for v0.1 compatibility only.
 
-The optional context path keeps **authoritative work state** separate from
+Verify the serialized proof in a fresh process:
+
+```bash
+python scripts/verify_execution_proof.py \
+  .artifacts/kubernetes-transition/independent-execution-proof.json \
+  --expected-hash-file \
+  .artifacts/kubernetes-transition/independent-execution-proof.json.sha256
+```
+
+Verify the complete artifact directory:
+
+```bash
+python scripts/verify_v01_acceptance_artifacts.py \
+  .artifacts/kubernetes-transition
+```
+
+The required file set, ownership inputs, statement-hash algorithm, and
+verification rules are frozen in
+[docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md](docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md).
+
+## Architecture boundary
+
+```text
+             proposal / policy / approval
+                        |
+                        v
+              +-------------------+
+              | Agent Control     |
+              | Plane             |
+              |-------------------|
+              | TransitionPlan    |
+              | Authorization     |
+              | ExecutionFence    |
+              | ExecutionJournal  |
+              | Reconciliation    |
+              | Verification      |
+              | ExecutionProof    |
+              +---------+---------+
+                        |
+              provider-neutral contract
+                        |
+          +-------------+-------------+
+          |                           |
+          v                           v
+   Kubernetes provider          GitHub provider
+          |                           |
+          v                           v
+  independent observation      independent observation
+          |                           |
+          +-------------+-------------+
+                        |
+                        v
+             IndependentExecutionProof
+```
+
+External systems can sit around this boundary without being absorbed into the
+control plane:
+
+- **Workflow:** Temporal / Restate
+- **Sandbox:** Kubernetes / specialized Agent sandboxes
+- **Tool transport:** MCP / provider APIs
+- **Policy:** OPA / Cedar / existing authorization systems
+- **Identity:** OIDC / workload identity systems
+- **Signing:** DSSE / Sigstore / KMS or another trusted digest channel
+- **Harness:** Codex, Claude Code, or another Agent runtime
+
+The repository supplies narrow bindings and proofs where useful; it does not
+reimplement those systems.
+
+## Core v0.1 invariants
+
+1. **Exact-plan authority.** Authorization and fences bind the canonical
+   TransitionPlan, not merely a resource or tool name.
+2. **Explicit authority generation.** Stale authority generation and stale lease
+   epochs are rejected before provider mutation.
+3. **Authority survives ambiguity.** Lease expiry alone does not release an
+   unresolved side-effect window.
+4. **At-least-once execution.** Provider adapters use deterministic identity and
+   idempotency; the project does not claim exactly-once side effects.
+5. **UNKNOWN fails closed.** Lost ACK or unverifiable provider state cannot be
+   converted into success by retry policy.
+6. **Independent observation.** Provider mutation ACKs are not outcome proof.
+7. **Ownership-aware verification.** Desired state and operation ownership are
+   separate verification conditions.
+8. **Independent proof.** A completed execution can be verified in a fresh
+   process without the original Agent session.
+
+## Public compatibility surface
+
+The v0.1 compatibility promise is deliberately narrow and machine-verifiable.
+
+Run:
+
+```bash
+python scripts/verify_v01_public_contract.py
+```
+
+The stable surface includes the installed console scripts, documented command
+names, snapshotted top-level Python exports and manifest schemas, plus the
+`IndependentExecutionProof/v1` wire identity.
+
+See
+[docs/V0.1_PUBLIC_COMPATIBILITY.md](docs/V0.1_PUBLIC_COMPATIBILITY.md) and
+[release/v0.1-public-contract.json](release/v0.1-public-contract.json).
+
+Internal coordinator classes, SQLite layouts, provider adapter class APIs,
+fault-injection helpers, and exact error/log strings are not promoted to v0.1
+public compatibility.
+
+## Secondary and compatibility surfaces
+
+The repository contains earlier and adjacent experiments that remain useful for
+compatibility or integration testing but **do not define the v0.1 product
+boundary**:
+
+- AgentBundle / AgentRelease and release-planning fixtures;
+- Federation / provider bindings and deterministic ReleaseEvidence demos;
+- EvalGate and decision-evaluation artifact ingestion;
+- AgentAuthorityEnvelope inventory / admission commands;
+- cross-agent work-context and optional MCP handoff;
+- AI Factory acceptance-evidence ingestion;
+- Temporal and sandbox reference bindings.
+
+These surfaces must not widen the frozen execution semantics before v0.1.0.
+New Agent lifecycle phases, authority abstractions, orchestration layers, or
+product surfaces require an explicit post-v0.1 design decision.
+
+### Optional cross-agent context handoff
+
+The optional work-context path keeps authoritative work state separate from
 semantic memory and prompt history:
 
 ```text
 WorkSnapshot + WorkEvent
-        ↓
-ContextProjection
-        ↓
-AuthorityHead + ContextOverlay
-        ↓
-TransitionProposalBinding/v3
-        ↓
-Policy / signed approval / authorization
-        ↓
-ExecutionContextProvenance
-        ↓
-PREPARED exact TransitionPlan
-        ↓
-provider side effect → reconcile
-        ↓
-COMMITTED result
-        ↓
-fresh observation + ownership-aware verification
-        ↓
-IndependentExecutionProof
+        -> ContextProjection
+        -> AuthorityHead + ContextOverlay
+        -> TransitionProposalBinding
+        -> Policy / approval / authorization
+        -> exact TransitionPlan
+        -> provider side effect + reconcile
+        -> fresh observation
+        -> IndependentExecutionProof
 ```
 
-Key properties:
-
-- work updates use version/CAS semantics and an append-only hash-linked event
-  history;
-- Claude Code, Codex, or another MCP client can share one work store while
-  retaining distinct principals;
-- the provider execution boundary rejects stale authority generation before
-  mutation and on owned replay;
-- crash recovery preserves the work/projection/proposal provenance in the
-  durable journal;
-- the completed-execution proof binds the exact plan, authorization, fence,
-  durable terminal attempt, fresh observation, and ownership-aware
-  VerificationReport. `ExecutionAttestation` remains only as a v0.1
-  compatibility artifact.
-
-The local MCP server is optional:
+An optional local MCP server is available for integration experiments:
 
 ```bash
 pip install -e '.[mcp]'
@@ -255,210 +334,58 @@ export AGENT_CONTEXT_PRINCIPAL_SUBJECT=claude-code
 agent-context-mcp
 ```
 
-See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md) for the protocol,
-host configuration, live handoff, and kind proof.
+See [docs/CROSS_AGENT_CONTEXT.md](docs/CROSS_AGENT_CONTEXT.md).
+
+## Status
+
+The `release/v0.1.0-hardening` line has frozen:
+
+- the provable-execution architecture;
+- the Acceptance Artifact Contract;
+- the public API/schema/CLI compatibility snapshot;
+- Kubernetes and GitHub provider-neutral proof shapes;
+- fresh-process proof verification and tamper rejection;
+- clean-clone package and Kubernetes acceptance rehearsals.
+
+The release checklist is tracked in
+[RELEASE_READINESS.md](RELEASE_READINESS.md). The release branch intentionally
+accepts only correctness/security fixes, falsification tests, release
+hardening, and provider adapters that conform to the existing contract.
 
 ## Repository boundary in the broader AI infrastructure stack
 
-This repository is the **primary Agent Infra control-plane product**. Adjacent repositories have narrower roles:
+This repository is the state-transition execution-control layer. Adjacent
+repositories have narrower responsibilities:
 
-- `cloud-agent-runtime`: reference Run ↔ Workflow ↔ Sandbox lifecycle binding.
-- `agent-decision-lab`: bounded-decision benchmark/gateway experiments.
-- `gpu-compute-platform`: lower-layer accelerator workload control plane.
+- `cloud-agent-runtime`: reference Run <-> Workflow <-> Sandbox lifecycle binding;
+- `agent-decision-lab`: bounded-decision benchmark/gateway experiments;
+- `gpu-compute-platform`: lower-layer accelerator workload control plane;
 - `ai-factory-engineering`: cross-layer infrastructure commissioning and acceptance.
 
-They share evidence/provenance patterns, but they do not share execution ownership or a single source of truth.
+They may exchange evidence and provenance artifacts, but they do not share
+execution ownership or a single source of truth.
 
-See [docs/AI_INFRA_STACK.md](docs/AI_INFRA_STACK.md) for the ownership matrix, integration rules, and the first cross-project Golden Slice.
+See [docs/AI_INFRA_STACK.md](docs/AI_INFRA_STACK.md).
 
-## Decision eval evidence gate
+## Development and release
 
-The control plane can consume a content-addressed `decision-eval/v1` artifact
-produced by `agent-decision-lab`. The artifact digest is verified before any
-provider mutation, and only metrics sealed inside the verified artifact are
-projected into Eval Gates.
+Useful entry points:
 
-This keeps model evaluation evidence separate from execution authorization:
-
-```text
-Decision Lab benchmark
-   -> decision-eval/v1 artifact
-   -> digest verification
-   -> metric projection
-   -> Eval Gate
-   -> promote / block / rollback
-
-Deterministic Policy / Approval
-   -> execution authorization
-```
-
-A gate may explicitly require `fallback_measured == 1` so an unmeasured
-placeholder System-2 fallback cannot satisfy a release criterion.
-
-## AI Factory acceptance evidence boundary
-
-The control plane can bind an AI Factory
-`aifactory.engineering/v1alpha1 AcceptanceArtifact` into
-`ReleaseEvidence`.
-
-The consumer verifies the artifact's canonical SHA-256 digest before any provider
-mutation, but **does not** treat `accepted=true`, `disposition=ACCEPT`, or
-per-gate PASS values as release authorization.
-
-```text
-AI Factory
-  -> AcceptanceArtifact + digest
-  -> Agent Control Plane integrity verification
-  -> ReleaseEvidence binding
-       integrity_verified = true
-       trusted = false
-       gate_eligible = false
-
-future trusted attestation verifier
-  -> may establish producer authenticity
-  -> only then may acceptance become gate-eligible
-```
-
-This distinction is deliberate: a content digest proves that bytes did not
-change; it does not prove which trusted system produced them.
-
-## Decision eval CLI handoff
-
-A measured Decision Lab artifact can be verified and gated without importing the
-Decision Lab package:
-
-```bash
-agent-control-plane decision-eval-verify decision-eval.json
-
-agent-control-plane decision-eval-gate \
-  examples/decision-system2-eval-gate.yaml \
-  --artifact decision-eval.json
-```
-
-The consumer validates the content digest and dataset provenance before exposing
-metrics to the gate. When `fallback_evaluation.measured=true`, the artifact must
-also carry the measured System-2 adapter, threshold, case counts, fallback rate,
-accuracy, p50/p95 latency, token usage, and per-case results.
-
-Projected gate metrics use the `system2_` prefix, for example:
-
-- `system2_accuracy`
-- `system2_fallback_rate`
-- `system2_p95_latency_ms`
-- `system2_mean_tokens_processed`
-
-This keeps the fast-path operating-point `fallback_rate` distinct from the
-measured System-2 execution metrics.
-
-## Trusted AI Factory acceptance
-
-An AI Factory `AcceptanceArtifact` remains evidence-only until a separate
-attestation is verified by an explicitly configured trust verifier.
-
-The reference verifier uses a key-id -> HMAC secret registry for controlled
-integration proofs:
-
-```text
-AcceptanceArtifact
-   -> digest verification
-AcceptanceAttestation
-   -> artifactDigest binding
-   -> keyId lookup in trusted registry
-   -> signature verification
-        |
-        v
-factory_acceptance_trusted = 1
-factory_accepted = 0 | 1
-        |
-        v
-EvalGate
-```
-
-Unsigned artifacts never project these metrics. An attestation with an unknown
-key, unsupported algorithm, mismatched artifact digest, or invalid signature
-blocks before provider mutation.
-
-The HMAC verifier is deliberately behind the `FactoryAttestationVerifier`
-interface. Production deployments should replace it with asymmetric
-KMS/Sigstore/Cosign verification rather than sharing HMAC secrets with the
-control plane.
-
-See `examples/factory-acceptance-gate.yaml`.
-
-## Live proof artifact admission
-
-The synthetic five-repository fixture proves the contracts compose. A separate
-fail-closed command admits artifacts for the **live** proof:
-
-```bash
-export AI_FACTORY_ATTESTATION_SECRET='...'
-
-agent-control-plane live-proof-verify \
-  --decision-artifact decision-eval.json \
-  --factory-artifact acceptance.json \
-  --factory-attestation acceptance.attestation.json \
-  --factory-key-id commissioning-lab
-```
-
-Admission requires all of the following:
-
-- the Decision Lab artifact passes its content-addressed digest/provenance checks;
-- `fallback_evaluation.measured=true`;
-- at least one System-2 fallback case actually executed;
-- no Decision Lab field contains the synthetic contract-fixture markers;
-- the AI Factory artifact passes its content digest check;
-- no AI Factory evidence reference is synthetic;
-- the AcceptanceAttestation verifies against the explicitly trusted key id.
-
-This command intentionally distinguishes a **live-shaped contract test** from a
-real live proof. Passing it with locally fabricated data does not establish that
-Qwen or hardware actually ran. The retained GitHub Actions/model artifact and
-controlled-lab commissioning provenance remain the evidence of execution.
-
-## Current status
-
-v0.1.0 release hardening with frozen provable-execution and acceptance-artifact contracts. See [docs/V0.1_FREEZE.md](docs/V0.1_FREEZE.md) and [docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md](docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md).
-
-Implemented:
-
-- manifest/binding planning
-- provider registry and executor boundary
-- apply + compensation semantics
-- FrozenEvidence approval/resume path
-- Fleet/Agent AuthorityEnvelope inventory and fail-closed drift admission
-- replay-verifiable ReleaseEvidence
-- evidence-bound StateTransition / Authorization / ExecutionFence protocol
-- provider-neutral `TransitionPlan` with exact-plan authorization and execution fencing
-- durable authority reservation across provider side-effect and crash/takeover windows
-- provider-neutral, plan-native `ExecutionJournal`
-- crash/lost-ACK and stale/concurrent authority falsification matrices
-- out-of-process `IndependentExecutionProof` verification from canonical artifacts
-- Kubernetes Deployment scale provider with generation/resourceVersion fencing
-- independent Deployment + Pods + Events observation and OutcomeContract verification
-- recovery modeled as a newly authorized StateTransition
-- deterministic Policy Replay contract
-- Kubernetes sandbox runtime client
-- Temporal workflow runtime client
-- kubectl and Temporal CLI transports
-- deterministic GPU XID Golden Incident
-- AgentOS v3.2 Binding / Policy Projection / Evidence Provenance / ToolContract schemas
-- CapabilityIntent → Rego v1 compilation with real OPA allow/deny enforcement
-- cross-repository policy-digest provenance proof through Temporal, Kubernetes sandbox replacement and Evidence replay
-- MCP stdio Execution Contract proof with lost-ACK, timeout, partial-commit and compensation fault injection
-- opt-in live smoke preflight
-- `make demo` / `make smoke` developer workflow
-
-Not yet claimed:
-
-- a production multi-tenant controller
-- HA control-plane deployment
-- live end-to-end testing against every supported provider
-- a new durable Agent runtime
-- ownership of Temporal/Sandbox provider semantics
-- production-grade secret, budget and tenancy backends
-
-See [DEVELOPMENT.md](DEVELOPMENT.md) and [RELEASE_READINESS.md](RELEASE_READINESS.md).
+- [DEVELOPMENT.md](DEVELOPMENT.md)
+- [docs/V0.1_FREEZE.md](docs/V0.1_FREEZE.md)
+- [docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md](docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md)
+- [docs/V0.1_PUBLIC_COMPATIBILITY.md](docs/V0.1_PUBLIC_COMPATIBILITY.md)
+- [RELEASE_READINESS.md](RELEASE_READINESS.md)
+- [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
 ## Non-goal
 
-This project is not trying to replace Temporal, Restate, OpenAI Agents, Codex, MCP, Kubernetes Agent Sandbox or agent gateways. Its job is to make those systems governable as one release/evidence plane.
+Agent Control Plane is not trying to replace Temporal, Restate, Codex,
+Claude Code, MCP gateways, Kubernetes Agent Sandbox, enterprise IAM/policy
+systems, or model-serving platforms.
+
+Its job is narrower:
+
+> **Authorize an exact state transition, fence the real side effect, and produce
+> independently verifiable evidence that the authorized operation owned the
+> observed outcome.**
