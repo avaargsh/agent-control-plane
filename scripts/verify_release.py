@@ -35,6 +35,7 @@ def main() -> int:
     if not (ROOT / "LICENSE").exists():
         raise SystemExit("LICENSE is missing")
 
+    run(sys.executable, "scripts/verify_v01_public_contract.py")
     run(sys.executable, "-m", "pytest", "-q")
     run(sys.executable, "examples/gpu_xid_golden_incident.py")
     run(sys.executable, "experiments/v3_2/mcp_execution_contract.py")
@@ -92,6 +93,7 @@ def main() -> int:
         "project": project["name"],
         "version": project["version"],
         "license": project["license"],
+        "publicContract": "passed",
         "tests": "passed",
         "demo": "passed",
         "mcpExecutionContract": "passed",
