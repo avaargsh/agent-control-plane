@@ -94,9 +94,8 @@ jobs:
         with:
           name: v01-kubernetes-acceptance-proof
           path: |
-            .artifacts/v0.1-fresh-clone-kind/
+            release-evidence/v0.1-kubernetes/
             /tmp/v01-fresh-clone-kind.txt
-          include-hidden-files: true
 
       - name: Dump cluster state on failure
         if: failure()
