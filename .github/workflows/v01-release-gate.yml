@@ -74,12 +74,21 @@ jobs:
           set -o pipefail
           sh scripts/fresh_clone_release_smoke.sh \
             | tee /tmp/fresh-clone-release.txt
+      - name: Stage release evidence
+        if: always()
+        run: |
+          rm -rf release-evidence/v0.1-package
+          mkdir -p release-evidence/v0.1-package
+          if [ -d .artifacts/release ]; then
+            cp -R .artifacts/release/. release-evidence/v0.1-package/
+          fi
+          if [ -f /tmp/fresh-clone-release.txt ]; then
+            cp /tmp/fresh-clone-release.txt release-evidence/v0.1-package/
+          fi
+
       - name: Upload release proof
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: v01-release-gate-proof
-          path: |
-            .artifacts/release/
-            /tmp/fresh-clone-release.txt
-          include-hidden-files: true
+          path: release-evidence/v0.1-package/
