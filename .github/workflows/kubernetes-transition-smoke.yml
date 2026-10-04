@@ -5,6 +5,8 @@ on:
     paths:
       - "src/agent_control_plane/state_transition_protocol.py"
       - "src/agent_control_plane/kubernetes_deployment_transition.py"
+      - "src/agent_control_plane/kubernetes_transition_plan.py"
+      - "src/agent_control_plane/independent_verifier.py"
       - "src/agent_control_plane/authority_reservation.py"
       - "src/agent_control_plane/execution_journal.py"
       - "src/agent_control_plane/execution_lifecycle.py"
@@ -15,6 +17,7 @@ on:
       - "src/agent_control_plane/policy_replay.py"
       - "src/agent_control_plane/cli_runtime_transports.py"
       - "scripts/kubernetes_transition_smoke.py"
+      - "scripts/verify_execution_proof.py"
       - ".github/workflows/kubernetes-transition-smoke.yml"
   push:
     branches: [main]
@@ -31,6 +34,7 @@ on:
       - "src/agent_control_plane/policy_replay.py"
       - "src/agent_control_plane/cli_runtime_transports.py"
       - "scripts/kubernetes_transition_smoke.py"
+      - "scripts/verify_execution_proof.py"
       - ".github/workflows/kubernetes-transition-smoke.yml"
   workflow_dispatch:
 
@@ -70,6 +74,13 @@ jobs:
         run: |
           mkdir -p .artifacts/kubernetes-transition
           python scripts/kubernetes_transition_smoke.py             | tee .artifacts/kubernetes-transition/summary.json
+
+      - name: Verify independent proof in a fresh process
+        run: |
+          python scripts/verify_execution_proof.py \
+            .artifacts/kubernetes-transition/independent-execution-proof.json \
+            --expected-hash-file \
+            .artifacts/kubernetes-transition/independent-execution-proof.json.sha256
 
       - name: Upload transition proof
         if: always()
