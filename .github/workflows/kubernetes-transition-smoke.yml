@@ -96,6 +96,7 @@ jobs:
           path: |
             .artifacts/v0.1-fresh-clone-kind/
             /tmp/v01-fresh-clone-kind.txt
+          include-hidden-files: true
 
       - name: Dump cluster state on failure
         if: failure()
