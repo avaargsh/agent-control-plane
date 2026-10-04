@@ -1,6 +1,12 @@
 # GPU XID Golden Incident
 
-The demo is an executable reference slice for the control-plane contract:
+This demo is a **synthetic composition/replay fixture** retained for v0.1.0.
+It is not the normative live provider acceptance path. The release-quality
+Kubernetes proof is defined by
+[`docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md`](../docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md).
+
+The demo remains an executable reference slice for the higher-level
+release/binding contract:
 
 ```text
 GPU XID Alert
@@ -22,7 +28,10 @@ Run:
 python examples/gpu_xid_golden_incident.py
 ```
 
-Executors are intentionally in-memory in this reference demo. The control-plane invariants are real; provider side effects are not. A deployment integration can replace each executor independently without changing the frozen-evidence or release-evidence contracts.
+Executors are intentionally in-memory in this reference demo. The
+FrozenEvidence/ReleaseEvidence composition invariants are exercised, but
+provider side effects are not. Do not use this demo as evidence that a
+StateTransition was executed or that provider operation ownership was proven.
 
 
 ## Five-repository contract fixture
@@ -59,8 +68,10 @@ receipt, and the canonical AgentRelease identity.
 
 This is a contract/integration proof only. Its decision measurements, compute
 refs and factory evidence are synthetic and must not be reported as a real Qwen,
-Kubernetes/GPU, NCCL/RDMA, or hardware commissioning result. The live evidence
-gaps remain tracked in issue #52.
+Kubernetes/GPU, NCCL/RDMA, or hardware commissioning result. The real v0.1.0 provider acceptance evidence is produced separately by the
+kind Deployment `20 -> 30` Golden Slice. That path requires
+`DesiredStateReached=TRUE` and `OperationOwnershipProven=TRUE` and emits an
+`IndependentExecutionProof/v1`.
 
 
 ## Inject externally produced artifacts
