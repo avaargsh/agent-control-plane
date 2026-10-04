@@ -110,7 +110,6 @@ def _proof_fixture(tmp_path):
     after = observation.snapshot
     verification = build_deployment_execution_verification(
         plan=plan,
-        fence=fence,
         after_observation=after,
         expected_operation_id=attempt.operation_id,
         expected_action_hash=attempt.action_hash,
@@ -318,7 +317,6 @@ def test_independent_proof_rejects_missing_live_ownership_marker(tmp_path):
 
     verification = build_deployment_execution_verification(
         plan=plan,
-        fence=fence,
         after_observation=after,
         expected_operation_id=attempt.operation_id,
         expected_action_hash=attempt.action_hash,
