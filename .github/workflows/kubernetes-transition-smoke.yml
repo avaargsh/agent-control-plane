@@ -74,8 +74,10 @@ jobs:
         env:
           KUBE_CONTEXT: kind-agent-transition
         run: |
+          set -o pipefail
           mkdir -p .artifacts/kubernetes-transition
-          python scripts/kubernetes_transition_smoke.py             | tee .artifacts/kubernetes-transition/summary.json
+          python scripts/kubernetes_transition_smoke.py \
+            | tee .artifacts/kubernetes-transition/summary.json
 
       - name: Verify independent proof in a fresh process
         run: |
