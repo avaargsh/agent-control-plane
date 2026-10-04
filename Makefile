@@ -26,6 +26,7 @@ quality-context:
 		src/agent_control_plane/kubernetes_transition_plan.py \
 		src/agent_control_plane/kubernetes_deployment_transition.py \
 		scripts/kubernetes_transition_smoke.py \
+		scripts/verify_execution_proof.py \
 		scripts/live_cross_agent_context_handoff.py \
 		tests/kubernetes_testkit.py \
 		tests/test_authority_reservation.py \
