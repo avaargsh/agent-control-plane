@@ -104,21 +104,22 @@ fake transport:
 
 ```text
 live Deployment replicas=20
-    -> freeze live EvidenceBundle
-    -> StateTransition 20 -> 30
+    -> acquire/project fenced execution lease
+    -> fresh live generation/resourceVersion observation
+    -> freeze EvidenceBundle + StateTransition 20 -> 30
     -> ContextProjection / TransitionProposalBinding
     -> deterministic PolicyDecision
     -> signed TransitionApproval
-    -> AuthorizationBinding
-    -> ExecutionFence
-    -> context freshness + live generation/resourceVersion validation
-    -> kubectl merge PATCH with resourceVersion precondition
+    -> AuthorizationBinding + ExecutionFence
+    -> durable PREPARED exact TransitionPlan
+    -> kubectl merge PATCH using that exact plan
+    -> process-boundary reconciliation
     -> fresh Deployment + Pods + Events observation
-    -> provider ownership markers projected into ObservationSnapshot
-    -> OutcomeContract: readyReplicas == 30
+    -> ownership markers projected into ObservationSnapshot
+    -> DesiredStateReached + OperationOwnershipProven
     -> VerificationReport
     -> IndependentExecutionProof
-    -> fresh-process proof verification
+    -> fresh-process proof verification against trusted statement hash
     -> SUCCEEDED
 ```
 
@@ -130,15 +131,24 @@ export KUBE_CONTEXT=kind-agent-transition
 make kind-transition-smoke
 ```
 
-The smoke retains the legacy execution attestation and now also emits a
-canonical `independent-execution-proof.json` plus its SHA-256 statement hash.
+The normative v0.1 release evidence is the canonical
+`independent-execution-proof.json` plus its trusted statement-hash file.
+`execution-attestation.json` is retained only as a compatibility artifact.
 The proof binds the exact TransitionPlan, authorization, execution fence,
 durable terminal attempt, fresh provider observation, and VerificationReport.
 The workflow verifies that serialized proof again in a fresh Python process,
-without the original Agent session or execution process. Kubernetes operation
-ownership is proved from the fresh observation's control-plane annotations
-(operation id, action hash, transition hash, plan hash, and authority
-reservation hash), not from the mutation acknowledgement.
+without the original Agent session or execution process.
+
+Kubernetes operation ownership is proved from the fresh observation's
+control-plane annotations (operation id, action hash, transition hash, plan
+hash, and authority reservation hash), not from the mutation acknowledgement.
+**Desired state reached does not imply operation ownership proven.**
+
+The complete required file set, ownership inputs, statement-hash algorithm, and
+fresh-process verification command are frozen in
+[docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md](docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md).
+The live CI gate executes the Golden Slice from a clean clone and records the
+source commit plus artifact file digests in `release-evidence.json`.
 
 ## Architecture
 
@@ -404,7 +414,7 @@ controlled-lab commissioning provenance remain the evidence of execution.
 
 ## Current status
 
-v0.1 release candidate with a frozen provable-execution architecture. See [docs/V0.1_FREEZE.md](docs/V0.1_FREEZE.md).
+v0.1.0 release hardening with frozen provable-execution and acceptance-artifact contracts. See [docs/V0.1_FREEZE.md](docs/V0.1_FREEZE.md) and [docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md](docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md).
 
 Implemented:
 
