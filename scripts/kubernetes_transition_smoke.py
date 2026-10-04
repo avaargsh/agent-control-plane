@@ -531,8 +531,13 @@ def main() -> int:
         caller=holder,
         now=datetime.now(timezone.utc),
         operation_id=attempt.operation_id,
+        execution_plan=prepared.plan,
         context_binding=context_binding,
     )
+    if receipt.plan_hash != prepared.plan.plan_hash:
+        raise RuntimeError(
+            "provider execution did not preserve the durable prepared plan"
+        )
     if not receipt.authority_reservation_hash:
         raise RuntimeError(
             "proposal v3 live transition did not use authority reservation"
