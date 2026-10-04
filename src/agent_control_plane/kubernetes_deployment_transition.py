@@ -25,7 +25,6 @@ from .kubernetes_transition_plan import (
 from .policy_replay import TransitionPolicyInput
 from .provable_execution import (
     ObservationSnapshot,
-    PlanExecutionFence,
     TransitionPlan,
     VerificationCondition,
     VerificationReport,
@@ -1024,7 +1023,6 @@ class KubernetesDeploymentObserver:
 def build_deployment_execution_verification(
     *,
     plan: TransitionPlan,
-    fence: PlanExecutionFence,
     after_observation: ObservationSnapshot,
     expected_operation_id: str,
     expected_action_hash: str,
@@ -1042,7 +1040,6 @@ def build_deployment_execution_verification(
     """
 
     plan.verify()
-    fence.verify()
     after_observation.verify()
     if after_observation.subject != plan.subject:
         raise ProtocolViolation(
@@ -1068,11 +1065,6 @@ def build_deployment_execution_verification(
         _TRANSITION_HASH_ANNOTATION: expected_transition_hash,
         _OPERATION_ID_ANNOTATION: expected_operation_id,
         _PLAN_HASH_ANNOTATION: plan.plan_hash,
-        _FENCE_EPOCH_ANNOTATION: str(fence.lease_epoch),
-        _FENCE_LEASE_ID_ANNOTATION: fence.lease_id,
-        _FENCE_HOLDER_ANNOTATION: (
-            f"{fence.lease_holder.type}:{fence.lease_holder.subject}"
-        ),
     }
     if expected_authority_reservation_hash is not None:
         expected_ownership[_AUTHORITY_RESERVATION_HASH_ANNOTATION] = (
