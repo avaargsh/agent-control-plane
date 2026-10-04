@@ -642,7 +642,6 @@ def main() -> int:
 
             proof_verification = build_deployment_execution_verification(
                 plan=prepared.plan,
-                fence=prepared.plan_fence,
                 after_observation=observation.snapshot,
                 expected_operation_id=committed_attempt.operation_id,
                 expected_action_hash=committed_attempt.action_hash,
