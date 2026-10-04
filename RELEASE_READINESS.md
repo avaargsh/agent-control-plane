@@ -20,6 +20,7 @@ A public v0.1 candidate should satisfy all of the following:
 - [x] provider side-effect crash/lost-ACK falsification matrix
 - [x] stale/concurrent authority falsification matrix
 - [x] independent out-of-process execution proof verification and tamper rejection
+- [x] live kind scale proof emits ownership-backed IndependentExecutionProof and re-verifies it in a fresh process
 - [x] v0.1 execution architecture freeze contract recorded
 - [x] known limitations documented
 - [x] repository license selected and added (Apache-2.0)
