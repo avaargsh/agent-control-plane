@@ -23,7 +23,14 @@ from .kubernetes_transition_plan import (
     validate_deployment_scale_plan_precondition,
 )
 from .policy_replay import TransitionPolicyInput
-from .provable_execution import ObservationSnapshot, TransitionPlan
+from .provable_execution import (
+    ObservationSnapshot,
+    PlanExecutionFence,
+    TransitionPlan,
+    VerificationCondition,
+    VerificationReport,
+    VerificationStatus as ProofVerificationStatus,
+)
 from .runtime_clients import (
     RuntimeMutationOwnershipUncertain,
     RuntimeMutationUncertain,
@@ -1012,6 +1019,123 @@ class KubernetesDeploymentObserver:
             evidence_items=items,
             evidence_bundle=bundle,
         )
+
+
+def build_deployment_execution_verification(
+    *,
+    plan: TransitionPlan,
+    fence: PlanExecutionFence,
+    after_observation: ObservationSnapshot,
+    expected_operation_id: str,
+    expected_action_hash: str,
+    expected_transition_hash: str,
+    expected_authority_reservation_hash: str | None,
+    verifier: Principal,
+    verified_at: datetime,
+) -> VerificationReport:
+    """Build the independently checkable postcondition report for scale.
+
+    The provider-neutral ObservationSnapshot retains only this control plane's
+    ownership annotations. This lets the serialized execution proof carry the
+    exact operation/plan/fence markers that justify
+    OperationOwnershipProven=TRUE instead of relying on a provider ACK.
+    """
+
+    plan.verify()
+    fence.verify()
+    after_observation.verify()
+    if after_observation.subject != plan.subject:
+        raise ProtocolViolation(
+            "deployment proof observation does not match transition plan"
+        )
+
+    desired_replicas = plan.desired.get("replicas")
+    desired_reached = (
+        isinstance(desired_replicas, int)
+        and not isinstance(desired_replicas, bool)
+        and after_observation.state.get("replicas") == desired_replicas
+        and after_observation.state.get("readyReplicas") == desired_replicas
+    )
+
+    raw_ownership = after_observation.state.get("controlPlaneOwnership")
+    ownership = (
+        raw_ownership
+        if isinstance(raw_ownership, Mapping)
+        else {}
+    )
+    expected_ownership = {
+        _ACTION_HASH_ANNOTATION: expected_action_hash,
+        _TRANSITION_HASH_ANNOTATION: expected_transition_hash,
+        _OPERATION_ID_ANNOTATION: expected_operation_id,
+        _PLAN_HASH_ANNOTATION: plan.plan_hash,
+        _FENCE_EPOCH_ANNOTATION: str(fence.lease_epoch),
+        _FENCE_LEASE_ID_ANNOTATION: fence.lease_id,
+        _FENCE_HOLDER_ANNOTATION: (
+            f"{fence.lease_holder.type}:{fence.lease_holder.subject}"
+        ),
+    }
+    if expected_authority_reservation_hash is not None:
+        expected_ownership[_AUTHORITY_RESERVATION_HASH_ANNOTATION] = (
+            expected_authority_reservation_hash
+        )
+
+    ownership_mismatches = tuple(
+        key
+        for key, expected in expected_ownership.items()
+        if ownership.get(key) != expected
+    )
+    ownership_proven = not ownership_mismatches
+
+    return VerificationReport.seal(
+        plan=plan,
+        after_observation=after_observation,
+        conditions=(
+            VerificationCondition(
+                condition_type="DesiredStateReached",
+                status=(
+                    ProofVerificationStatus.TRUE
+                    if desired_reached
+                    else ProofVerificationStatus.FALSE
+                ),
+                reason=(
+                    "DeploymentReady"
+                    if desired_reached
+                    else "DeploymentNotReady"
+                ),
+                message=(
+                    f"desired replicas={desired_replicas}; "
+                    f"observed replicas="
+                    f"{after_observation.state.get('replicas')}; "
+                    f"readyReplicas="
+                    f"{after_observation.state.get('readyReplicas')}"
+                ),
+                evidence_digest=after_observation.observation_hash,
+            ),
+            VerificationCondition(
+                condition_type="OperationOwnershipProven",
+                status=(
+                    ProofVerificationStatus.TRUE
+                    if ownership_proven
+                    else ProofVerificationStatus.FALSE
+                ),
+                reason=(
+                    "ProviderOwnershipMarkersVerified"
+                    if ownership_proven
+                    else "ProviderOwnershipMarkersMismatch"
+                ),
+                message=(
+                    "all expected Kubernetes execution ownership markers "
+                    "match the fresh observation"
+                    if ownership_proven
+                    else "mismatched ownership markers: "
+                    + ", ".join(ownership_mismatches)
+                ),
+                evidence_digest=after_observation.observation_hash,
+            ),
+        ),
+        verifier=verifier,
+        verified_at=verified_at,
+    )
 
 
 def _resolve_path(root: Mapping[str, Any], expression: str) -> Any:
