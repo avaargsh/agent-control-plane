@@ -118,3 +118,25 @@ Create the v0.1.0 tag only when all of the following are true:
 A provider ACK or `replicas=30` alone is not a release proof:
 
 > Desired state reached does not imply operation ownership proven.
+
+
+## 3. Published-release regression
+
+After v0.1.0, maintenance changes must remain able to verify the **already
+published** release proof rather than only proofs regenerated from the current
+source tree.
+
+Run:
+
+```bash
+bash scripts/verify_published_v01_release.sh
+```
+
+The check downloads the two public v0.1.0 GitHub Release assets, verifies their
+pinned SHA-256 digests, confirms the acceptance artifact is bound to release
+source commit `62da9f33035e29ec5d29c224a7d676a687141ac5`, and re-runs the current
+IndependentExecutionProof and Acceptance Artifact verifiers against those
+published bytes.
+
+This is a maintenance compatibility gate. It does not create a new proof format
+or widen the v0.1 product boundary.
