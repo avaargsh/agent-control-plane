@@ -2,15 +2,6 @@ name: agentos-v32-mcp-execution-contract
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "src/agent_control_plane/tool_contract.py"
-      - "src/agent_control_plane/mcp_fault_service.py"
-      - "src/agent_control_plane/mcp_subprocess.py"
-      - "experiments/v3_2/mcp_execution_contract.py"
-      - "tests/test_mcp_execution_contract.py"
-      - "docs/v3.2-mcp-execution-contract.md"
-      - ".github/workflows/agentos-v32-mcp-execution-contract.yml"
   pull_request:
     paths:
       - "src/agent_control_plane/tool_contract.py"
@@ -23,6 +14,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: agentos-v32-mcp-execution-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   execution-contract:

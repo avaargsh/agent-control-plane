@@ -2,12 +2,6 @@ name: agentos-v32-cross-repo
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "src/agent_control_plane/opa_provider.py"
-      - "experiments/v3_2/opa_real_enforcement.py"
-      - ".github/workflows/agentos-v32-cross-repo.yml"
-      - "docs/v3.2-cross-repo-golden.md"
   pull_request:
     paths:
       - "src/agent_control_plane/opa_provider.py"
@@ -20,6 +14,10 @@ permissions:
 
 env:
   RUNTIME_SHA: 8dafeb1e8ec5f91e9b2ee7d787903f9ff0b0d401
+
+concurrency:
+  group: agentos-v32-cross-repo-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cross-repo-golden:

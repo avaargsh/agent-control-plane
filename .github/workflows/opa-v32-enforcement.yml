@@ -2,16 +2,15 @@ name: opa-v32-enforcement
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "src/agent_control_plane/opa_provider.py"
-      - "experiments/v3_2/opa_real_enforcement.py"
-      - ".github/workflows/opa-v32-enforcement.yml"
   pull_request:
     paths:
       - "src/agent_control_plane/opa_provider.py"
       - "experiments/v3_2/opa_real_enforcement.py"
       - ".github/workflows/opa-v32-enforcement.yml"
+
+concurrency:
+  group: opa-v32-enforcement-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   enforce:

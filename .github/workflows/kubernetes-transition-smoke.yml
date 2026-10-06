@@ -24,34 +24,14 @@ on:
       - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
       - "Makefile"
       - ".github/workflows/kubernetes-transition-smoke.yml"
-  push:
-    branches: [main]
-    paths:
-      - "src/agent_control_plane/state_transition_protocol.py"
-      - "src/agent_control_plane/kubernetes_deployment_transition.py"
-      - "src/agent_control_plane/kubernetes_transition_plan.py"
-      - "src/agent_control_plane/independent_verifier.py"
-      - "src/agent_control_plane/authority_reservation.py"
-      - "src/agent_control_plane/execution_journal.py"
-      - "src/agent_control_plane/execution_lifecycle.py"
-      - "src/agent_control_plane/terminal_reservation_repair.py"
-      - "src/agent_control_plane/transition_approval.py"
-      - "src/agent_control_plane/work_context.py"
-      - "src/agent_control_plane/context_transition.py"
-      - "src/agent_control_plane/policy_replay.py"
-      - "src/agent_control_plane/cli_runtime_transports.py"
-      - "scripts/kubernetes_transition_smoke.py"
-      - "scripts/verify_execution_proof.py"
-      - "scripts/verify_v01_acceptance_artifacts.py"
-      - "scripts/fresh_clone_kind_release_rehearsal.sh"
-      - "release/v0.1-acceptance-artifact-contract.json"
-      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
-      - "Makefile"
-      - ".github/workflows/kubernetes-transition-smoke.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: kubernetes-transition-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   live-transition:

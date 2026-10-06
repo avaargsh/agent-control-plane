@@ -14,7 +14,6 @@ on:
       - "release/**"
       - "pyproject.toml"
       - "Makefile"
-      - "Makefile"
       - "RELEASE_NOTES.md"
       - "RELEASE_READINESS.md"
       - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
@@ -22,28 +21,12 @@ on:
       - "docs/V0.1_FREEZE.md"
       - "docs/RELEASE_VERIFICATION.md"
       - ".github/workflows/v01-release-gate.yml"
-  push:
-    branches: [main]
-    paths:
-      - "src/**"
-      - "schemas/**"
-      - "examples/**"
-      - "experiments/**"
-      - "scripts/verify_release.py"
-      - "scripts/verify_v01_public_contract.py"
-      - "scripts/fresh_clone_release_smoke.sh"
-      - "release/**"
-      - "pyproject.toml"
-      - "RELEASE_NOTES.md"
-      - "RELEASE_READINESS.md"
-      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
-      - "docs/V0.1_PUBLIC_COMPATIBILITY.md"
-      - "docs/V0.1_FREEZE.md"
-      - "docs/RELEASE_VERIFICATION.md"
-      - ".github/workflows/v01-release-gate.yml"
-
 permissions:
   contents: read
+
+concurrency:
+  group: v01-release-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   release-gate:
