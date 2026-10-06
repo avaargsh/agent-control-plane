@@ -3,12 +3,14 @@ name: agentos-v32-cross-repo
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - "src/agent_control_plane/opa_provider.py"
       - "experiments/v3_2/opa_real_enforcement.py"
       - ".github/workflows/agentos-v32-cross-repo.yml"
       - "docs/v3.2-cross-repo-golden.md"
   pull_request:
+    branches: [main]
     paths:
       - "src/agent_control_plane/opa_provider.py"
       - "experiments/v3_2/opa_real_enforcement.py"
