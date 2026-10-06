@@ -3,6 +3,7 @@ name: agentos-v32-mcp-execution-contract
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - "src/agent_control_plane/tool_contract.py"
       - "src/agent_control_plane/mcp_fault_service.py"
@@ -12,6 +13,7 @@ on:
       - "docs/v3.2-mcp-execution-contract.md"
       - ".github/workflows/agentos-v32-mcp-execution-contract.yml"
   pull_request:
+    branches: [main]
     paths:
       - "src/agent_control_plane/tool_contract.py"
       - "src/agent_control_plane/mcp_fault_service.py"
