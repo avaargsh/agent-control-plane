@@ -247,3 +247,91 @@ class KubectlDeploymentApi:
             for item in items
             if isinstance(item, Mapping)
         ]
+
+
+class GitHubCliPullRequestApi:
+    """gh CLI transport for the provider-neutral pull-request merge proof."""
+
+    @staticmethod
+    def _endpoint(*, owner: str, repo: str, suffix: str) -> str:
+        return f"/repos/{owner}/{repo}/{suffix.lstrip('/')}"
+
+    @staticmethod
+    def _is_not_found(stderr: str) -> bool:
+        message = stderr.lower()
+        return "http 404" in message or "not found" in message
+
+    def _get(self, endpoint: str) -> Mapping[str, Any] | None:
+        completed = subprocess.run(
+            ["gh", "api", endpoint],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            if self._is_not_found(completed.stderr):
+                return None
+            completed.check_returncode()
+        return json.loads(completed.stdout)
+
+    def get_pull_request(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        number: int,
+    ) -> Mapping[str, Any] | None:
+        return self._get(
+            self._endpoint(
+                owner=owner,
+                repo=repo,
+                suffix=f"pulls/{number}",
+            )
+        )
+
+    def merge_pull_request(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        number: int,
+        head_sha: str,
+        merge_method: str,
+        commit_message: str,
+    ) -> Mapping[str, Any]:
+        endpoint = self._endpoint(
+            owner=owner,
+            repo=repo,
+            suffix=f"pulls/{number}/merge",
+        )
+        completed = subprocess.run(
+            ["gh", "api", "--method", "PUT", endpoint, "--input", "-"],
+            input=json.dumps(
+                {
+                    "sha": head_sha,
+                    "merge_method": merge_method,
+                    "commit_message": commit_message,
+                }
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            _raise_mutation_failure(completed)
+        return json.loads(completed.stdout)
+
+    def get_commit(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        sha: str,
+    ) -> Mapping[str, Any] | None:
+        return self._get(
+            self._endpoint(
+                owner=owner,
+                repo=repo,
+                suffix=f"commits/{sha}",
+            )
+        )
