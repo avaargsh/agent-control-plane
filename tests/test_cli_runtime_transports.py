@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_control_plane.cli_runtime_transports import (\n    GitHubCliPullRequestApi,\n    KubectlApi,\n    TemporalCliApi,\n)
+from agent_control_plane.cli_runtime_transports import (
+    GitHubCliPullRequestApi,
+    KubectlApi,
+    TemporalCliApi,
+)
 from agent_control_plane.runtime_clients import RuntimeMutationUncertain
 
 
