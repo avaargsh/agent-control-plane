@@ -289,6 +289,55 @@ def test_provider_receipt_is_not_outcome_proof():
     assert receipt.receipt_hash != report.report_hash
 
 
+
+
+@pytest.mark.parametrize(
+    "message_case",
+    ("operation_suffix", "plan_suffix", "operation_inline", "plan_inline"),
+)
+def test_ownership_markers_require_complete_lines(message_case):
+    api, provider, _, plan = build_plan()
+    operation_id = "op-ours"
+    operation_marker = f"agent-control-plane-operation:{operation_id}"
+    plan_marker = f"agent-control-plane-plan:{plan.plan_hash}"
+    messages = {
+        "operation_suffix": f"{operation_marker}-different\\n{plan_marker}",
+        "plan_suffix": f"{operation_marker}\\n{plan_marker}-different",
+        "operation_inline": f"quoted {operation_marker}\\n{plan_marker}",
+        "plan_inline": f"{operation_marker}\\nquoted {plan_marker}",
+    }
+    api.pull_request["state"] = "closed"
+    api.pull_request["merged"] = True
+    api.pull_request["merge_commit_sha"] = "merge-collision"
+    api.commits["merge-collision"] = {
+        "sha": "merge-collision",
+        "commit": {"message": messages[message_case]},
+    }
+    fresh = provider.observe(
+        subject(), observer=VERIFIER,
+        observed_at=NOW + timedelta(seconds=3),
+    )
+    result = provider.reconcile(
+        plan,
+        attempt_id="attempt-marker-collision",
+        operation_id=operation_id,
+        fresh_observation=fresh,
+        reconciled_at=NOW + timedelta(seconds=3),
+    )
+    report = provider.verify_outcome(
+        plan, operation_id=operation_id, observation=fresh,
+        verifier=VERIFIER, verified_at=NOW + timedelta(seconds=3),
+    )
+
+    assert result.status is ReconciliationStatus.UNKNOWN
+    assert not report.succeeded
+    with pytest.raises(RuntimeMutationOwnershipUncertain, match="ownership is unknown"):
+        provider.apply(
+            plan, operation_id=operation_id,
+            actor=ACTOR, now=NOW + timedelta(seconds=4),
+        )
+
+
 def test_merge_by_other_actor_is_unknown_even_if_desired_state_exists():
     api = FakeGitHubPullRequestApi()
     _, provider, _, plan = build_plan(api)
