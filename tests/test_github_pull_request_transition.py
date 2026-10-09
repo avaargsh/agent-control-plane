@@ -289,8 +289,6 @@ def test_provider_receipt_is_not_outcome_proof():
     assert receipt.receipt_hash != report.report_hash
 
 
-
-
 @pytest.mark.parametrize(
     "message_case",
     ("operation_suffix", "plan_suffix", "operation_inline", "plan_inline"),
