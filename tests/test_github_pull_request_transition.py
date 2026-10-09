@@ -301,10 +301,10 @@ def test_ownership_markers_require_complete_lines(message_case):
     operation_marker = f"agent-control-plane-operation:{operation_id}"
     plan_marker = f"agent-control-plane-plan:{plan.plan_hash}"
     messages = {
-        "operation_suffix": f"{operation_marker}-different\\n{plan_marker}",
-        "plan_suffix": f"{operation_marker}\\n{plan_marker}-different",
-        "operation_inline": f"quoted {operation_marker}\\n{plan_marker}",
-        "plan_inline": f"{operation_marker}\\nquoted {plan_marker}",
+        "operation_suffix": f"{operation_marker}-different\n{plan_marker}",
+        "plan_suffix": f"{operation_marker}\n{plan_marker}-different",
+        "operation_inline": f"quoted {operation_marker}\n{plan_marker}",
+        "plan_inline": f"{operation_marker}\nquoted {plan_marker}",
     }
     api.pull_request["state"] = "closed"
     api.pull_request["merged"] = True
