@@ -162,9 +162,14 @@ def _message_owns_operation(
     operation_id: str,
     plan_hash: str,
 ) -> bool:
+    # Commit messages are line-oriented evidence. Substring matching can
+    # confuse op-123 with op-123-extra, or a hash with its longer prefix.
+    # This rejects accidental marker collisions; it does not authenticate
+    # the writer of a matching commit message.
+    lines = set(message.splitlines())
     return (
-        _operation_marker(operation_id) in message
-        and _plan_marker(plan_hash) in message
+        _operation_marker(operation_id) in lines
+        and _plan_marker(plan_hash) in lines
     )
 
 
