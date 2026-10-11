@@ -166,10 +166,19 @@ def _message_owns_operation(
     # confuse op-123 with op-123-extra, or a hash with its longer prefix.
     # This rejects accidental marker collisions; it does not authenticate
     # the writer of a matching commit message.
-    lines = set(message.splitlines())
+    # The record must contain exactly one marker for each kind. A mixed
+    # commit message carrying markers for two operations/plans is ambiguous,
+    # even if it also contains the two expected exact lines.
+    lines = message.splitlines()
+    operation_lines = [
+        line for line in lines if line.startswith(_OPERATION_MARKER_PREFIX)
+    ]
+    plan_lines = [
+        line for line in lines if line.startswith(_PLAN_MARKER_PREFIX)
+    ]
     return (
-        _operation_marker(operation_id) in lines
-        and _plan_marker(plan_hash) in lines
+        operation_lines == [_operation_marker(operation_id)]
+        and plan_lines == [_plan_marker(plan_hash)]
     )
 
 
