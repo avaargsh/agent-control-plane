@@ -291,7 +291,12 @@ def test_provider_receipt_is_not_outcome_proof():
 
 @pytest.mark.parametrize(
     "message_case",
-    ("operation_suffix", "plan_suffix", "operation_inline", "plan_inline"),
+    (
+        "operation_suffix", "plan_suffix",
+        "operation_inline", "plan_inline",
+        "operation_competing", "plan_competing",
+        "operation_duplicate", "plan_duplicate",
+    ),
 )
 def test_ownership_markers_require_complete_lines(message_case):
     api, provider, _, plan = build_plan()
@@ -303,6 +308,14 @@ def test_ownership_markers_require_complete_lines(message_case):
         "plan_suffix": f"{operation_marker}\n{plan_marker}-different",
         "operation_inline": f"quoted {operation_marker}\n{plan_marker}",
         "plan_inline": f"{operation_marker}\nquoted {plan_marker}",
+        "operation_competing": (
+            f"{operation_marker}\nagent-control-plane-operation:op-other\n{plan_marker}"
+        ),
+        "plan_competing": (
+            f"{operation_marker}\n{plan_marker}\nagent-control-plane-plan:other-plan"
+        ),
+        "operation_duplicate": f"{operation_marker}\n{operation_marker}\n{plan_marker}",
+        "plan_duplicate": f"{operation_marker}\n{plan_marker}\n{plan_marker}",
     }
     api.pull_request["state"] = "closed"
     api.pull_request["merged"] = True
