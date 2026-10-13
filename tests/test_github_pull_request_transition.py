@@ -8,6 +8,7 @@ from agent_control_plane.github_pull_request_transition import (
 )
 from agent_control_plane.provable_execution import (
     ReconciliationStatus,
+    VerificationStatus,
 )
 from agent_control_plane.runtime_clients import (
     RuntimeMutationOwnershipUncertain,
@@ -207,6 +208,51 @@ def test_head_drift_is_rejected_before_merge_side_effect():
 
     assert api.merge_calls == 0
 
+
+
+def test_merged_matching_markers_with_changed_head_cannot_replay_as_owned():
+    api, provider, _, plan = build_plan()
+    operation_id = "op-frozen-head"
+    merge_sha = "merge-different-head"
+    api.pull_request["head"]["sha"] = "def456"
+    api.pull_request["state"] = "closed"
+    api.pull_request["merged"] = True
+    api.pull_request["merge_commit_sha"] = merge_sha
+    api.commits[merge_sha] = {
+        "sha": merge_sha,
+        "commit": {
+            "message": (
+                f"agent-control-plane-operation:{operation_id}\n"
+                f"agent-control-plane-plan:{plan.plan_hash}"
+            ),
+        },
+    }
+    fresh = provider.observe(
+        subject(), observer=VERIFIER,
+        observed_at=NOW + timedelta(seconds=3),
+    )
+    reconciliation = provider.reconcile(
+        plan, attempt_id="attempt-stale-head",
+        operation_id=operation_id, fresh_observation=fresh,
+        reconciled_at=NOW + timedelta(seconds=3),
+    )
+    report = provider.verify_outcome(
+        plan, operation_id=operation_id, observation=fresh,
+        verifier=VERIFIER, verified_at=NOW + timedelta(seconds=3),
+    )
+    assert reconciliation.status is ReconciliationStatus.UNKNOWN
+    assert not report.succeeded
+    ownership = next(
+        c.status for c in report.conditions
+        if c.condition_type == "OperationOwnershipProven"
+    )
+    assert ownership is VerificationStatus.UNKNOWN
+    with pytest.raises(RuntimeMutationOwnershipUncertain, match="ownership is unknown"):
+        provider.apply(
+            plan, operation_id=operation_id, actor=ACTOR,
+            now=NOW + timedelta(seconds=4),
+        )
+    assert api.merge_calls == 0
 
 def test_lost_ack_reconciles_when_commit_proves_operation_ownership():
     api = LostAckGitHubApi()

@@ -380,10 +380,13 @@ class GitHubPullRequestMergeProvider:
             message = str(
                 live.state.get("merge_commit_message") or ""
             )
-            if _message_owns_operation(
-                message,
-                operation_id=operation_id,
-                plan_hash=plan.plan_hash,
+            if (
+                live.state.get("head_sha") == head_sha
+                and _message_owns_operation(
+                    message,
+                    operation_id=operation_id,
+                    plan_hash=plan.plan_hash,
+                )
             ):
                 return ProviderReceipt.capture(
                     operation_id=operation_id,
@@ -593,7 +596,7 @@ class GitHubPullRequestMergeProvider:
         message = str(
             observation.state.get("merge_commit_message") or ""
         )
-        ownership_proven = _message_owns_operation(
+        ownership_proven = desired_reached and _message_owns_operation(
             message,
             operation_id=operation_id,
             plan_hash=plan.plan_hash,
