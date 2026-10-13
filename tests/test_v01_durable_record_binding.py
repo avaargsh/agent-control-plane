@@ -2,12 +2,23 @@
 
 import json
 import sqlite3
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 
 import pytest
 
-from scripts.verify_v01_acceptance_artifacts import (
-    verify_durable_execution_records,
+# The scripts/ directory is not installed as a Python package by hatchling;
+# load the release CLI directly, without changing import paths globally.
+_SCRIPT = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "verify_v01_acceptance_artifacts.py"
 )
+_SPEC = spec_from_file_location("v01_acceptance_verifier", _SCRIPT)
+assert _SPEC is not None and _SPEC.loader is not None
+_MODULE = module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE)
+verify_durable_execution_records = _MODULE.verify_durable_execution_records
 
 
 def _fixture(tmp_path):
