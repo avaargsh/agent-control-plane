@@ -12,6 +12,23 @@ import { verifyLive } from "../../../tools/settlement.mjs";
 
 const journalScript = fileURLToPath(new URL("../../../tools/admission-journal.py", import.meta.url));
 const journalPath = fileURLToPath(new URL("../../../receipts/admission.db", import.meta.url));
+const prechargeScript = fileURLToPath(new URL("../../../tools/charge-attempt-journal.py", import.meta.url));
+const prechargePath = fileURLToPath(new URL("../../../receipts/charge-attempts.db", import.meta.url));
+
+export function inspectPrecharge(paymentNonce, opts = {}) {
+  if (!/^0x[0-9a-f]{64}$/.test(paymentNonce || "")) {
+    throw Error("verified settlement missing EIP-3009 payment nonce");
+  }
+  const job = spawnSync(opts.python || "python3", [prechargeScript, "inspect", paymentNonce], {
+    encoding: "utf8", maxBuffer: 1_048_576, timeout: 15_000,
+    env: { ...process.env, AGENTLEDGER_CHARGE_DB: opts.dbPath ||
+      process.env.AGENTLEDGER_CHARGE_DB || prechargePath },
+  });
+  if (job.error) throw job.error;
+  if (job.status !== 0) throw Error("missing or unreadable pre-charge reservation");
+  return JSON.parse(job.stdout);
+}
+
 
 export function reserveAdmission(candidate, opts = {}) {
   const job = spawnSync(opts.python || "python3", [journalScript, "prepare"], {
@@ -37,12 +54,30 @@ export async function prepareRecord({approval, pendingReceipt, expectedPayTo}, d
   const verifiedTransfer = await (deps.verifySettlement || verifyLive)(
     pendingReceipt, process.env.MONAD_RPC_URL
   );
+  if (!verifiedTransfer?.paymentNonce ||
+      verifiedTransfer.paymentNonce !== pendingReceipt.paymentNonce?.toLowerCase()) {
+    throw Error("EIP-3009 authorization nonce absent or not anchored in transaction receipt");
+  }
   const recordProposal = bindApprovedSettlement(approval, verifiedTransfer, task, expectedPayTo);
   const typed = verifiedApproval;
   const quoteDigest = hashTypedData({
     domain: typed.domain, types: typed.types,
     primaryType: typed.primaryType, message: typed.message
   }).toLowerCase();
+  // Match the on-chain consumed nonce to the earlier signed authorization's
+  // durable PRE-CHARGE reservation, before preparing any recorder candidate.
+  const precharge = (deps.inspectPrecharge || inspectPrecharge)(verifiedTransfer.paymentNonce);
+  const held = precharge?.admission;
+  if (precharge?.result !== "PRECHARGE_RECORD_FOUND" ||
+      held?.status !== "RESERVED_RECONCILE_ONLY" ||
+      held.ledger !== approval.ledger.toLowerCase() ||
+      held.task_id !== task.taskId.toLowerCase() ||
+      held.payer !== approval.payer.toLowerCase() ||
+      held.approval_nonce !== approval.nonce.toLowerCase() ||
+      held.payment_nonce !== verifiedTransfer.paymentNonce ||
+      held.quote_digest !== quoteDigest) {
+    throw Error("pre-charge reservation does not match signed task and consumed payment nonce");
+  }
   const candidate = {
     schemaVersion: "agentledger.admission.v1",
     ledger: approval.ledger.toLowerCase(),
@@ -59,6 +94,7 @@ export async function prepareRecord({approval, pendingReceipt, expectedPayTo}, d
     status: "PREPARED_FOR_RECORDER_REVIEW_NOT_SUBMITTED",
     taskId: task.taskId, approvalSigner: approval.payer,
     transfer: verifiedTransfer, recordProposal,
+    precharge: {status: held.status, paymentNonce: held.payment_nonce},
     journal,
     warning: "No chain write or exactly-once payment guarantee. UNKNOWN rows must be reconciled, not recharged."
   };
