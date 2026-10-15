@@ -21,6 +21,7 @@ and the frozen v0.1 acceptance contract.
 | Durable admission journal | tools/admission-journal.py | Post-settlement SQLite PREPARED/UNKNOWN, replay/nonce conflict fences; no payment broadcast |\n| Pre-charge attempt journal | tools/charge-attempt-journal.py | Before x402 settlement, atomically allows one signed payer authorization per task; fail-closed on retries |
 | Off-chain execution demo | examples/verifier/tools/run-demo-task.mjs | Paid-only deterministic tool with input binding and Evidence output |
 | Browser verifier UI | examples/verifier/ | Read-only task query, browser-local Evidence SHA-256; no signing or payments |\n| Lost-ACK reconciliation | examples/verifier/tools/reconcile-task.mjs | No-signing review of paid Transfer + consumed nonce + precharge + chain Created/Paid/Proven |
+| Local EVM lifecycle acceptance | examples/verifier/tools/anvil-acceptance.mjs | Real Anvil deployment/transactions → deterministic tool → Evidence → UI readback; payment attestation is SIMULATED |
 
 **Critical distinction:** the HTTP gate now checks payer-signed task intent
 against an EIP-3009 payment signature **before settlement**, and reserves
@@ -350,3 +351,26 @@ task state, then returns one of:
 
 This does not assert chain finality or independently correct Agent execution.
 See [lost-ACK recovery runbook](docs/lost-ack-reconciliation.md).
+
+## Repeatable local Anvil lifecycle verification
+
+The `anvil-acceptance` CI job compiles the actual Solidity contract,
+generates ephemeral local-only accounts, deploys to an Anvil EVM configured
+with chain ID 10143, creates a task and verifies it cannot execute before
+payment attestation. A **simulated recorder** changes task state to Paid,
+then the existing deterministic off-chain tool generates canonical Evidence.
+An authorized creator submits its digest to the local contract. Viem,
+browser WebCrypto and the actual read-only HTTP endpoint independently
+confirm status Proven and hash equality.
+
+The acceptance manifest is uploaded by GitHub Actions with an explicit
+`ANVIL_LOCAL_SIMULATION_NOT_MONAD_TESTNET` network field and
+`SIMULATED_RECORDER_ATTESTATION_NO_USDC_TRANSFER` payment mode.
+
+**This is not a live x402 transaction.** It uses no USDC and proves
+no Monad Testnet Facilitator settlement, transaction finality, true task
+ownership or independent Agent runtime attestation.
+
+See [Anvil acceptance instructions](docs/anvil-local-acceptance.md)
+and the `anvil-acceptance` CI job before attempting the separate
+wallet-authorized live Testnet milestone.
