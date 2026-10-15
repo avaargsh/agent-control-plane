@@ -20,7 +20,7 @@ and the frozen v0.1 acceptance contract.
 | On-chain receipt verifier | tools/settlement.mjs | Read-only chain/USDC/log verification, NOT payment intent authorization |\n| Task payment intent | examples/verifier/lib/payment-approval.mjs | EIP-712 payer signature verification; no automatic payment admission |
 | Durable admission journal | tools/admission-journal.py | Post-settlement SQLite PREPARED/UNKNOWN, replay/nonce conflict fences; no payment broadcast |\n| Pre-charge attempt journal | tools/charge-attempt-journal.py | Before x402 settlement, atomically allows one signed payer authorization per task; fail-closed on retries |
 | Off-chain execution demo | examples/verifier/tools/run-demo-task.mjs | Paid-only deterministic tool with input binding and Evidence output |
-| Browser verifier UI | examples/verifier/ | Read-only task query, browser-local Evidence SHA-256; no signing or payments |
+| Browser verifier UI | examples/verifier/ | Read-only task query, browser-local Evidence SHA-256; no signing or payments |\n| Lost-ACK reconciliation | examples/verifier/tools/reconcile-task.mjs | No-signing review of paid Transfer + consumed nonce + precharge + chain Created/Paid/Proven |
 
 **Critical distinction:** the HTTP gate now checks payer-signed task intent
 against an EIP-3009 payment signature **before settlement**, and reserves
@@ -320,3 +320,33 @@ npm test
 challenge and paid retry, externally verified finality and transaction
 receipts, authorized recorder contract write, real runtime completion,
 Evidence anchoring and independent readback/reconciliation.
+
+## Crash/lost-ACK read-only reconciliation
+
+A payment may settle successfully even if the HTTP response is lost,
+and a trusted recorder may record it on-chain later. **Never replay a
+paid request to find out.** The verifier has a read-only recovery command:
+
+```bash
+cd experiments/agentledger/examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+export AGENTLEDGER_CHARGE_DB="$(pwd)/../../receipts/charge-attempts.db"
+node tools/reconcile-task.mjs ./approval.json \
+  ../../receipts/0xORIGINAL_PAID_TRANSACTION.json \
+  0xEXPECTED_USDC_RECEIVER
+```
+
+It verifies the payer signature, consumed EIP-3009 nonce in a matching
+USDC receipt, the local pre-charge reservation and the deployed ledger
+task state, then returns one of:
+
+- `SETTLEMENT_OBSERVED_LEDGER_CREATED` — receipt matches but on-chain
+  task still Created: **manual recorder review**, no second charge;
+- `PAID_PAYMENT_MATCH` — already recorded payment matches;
+- `PROVEN_PAYMENT_MATCH` — payment record matches; Evidence still needs
+  its independent bytes verification;
+- **Error/UNKNOWN** — mismatch or missing input. Fail closed, investigate
+  without resubmitting payment or ledger writes.
+
+This does not assert chain finality or independently correct Agent execution.
+See [lost-ACK recovery runbook](docs/lost-ack-reconciliation.md).
