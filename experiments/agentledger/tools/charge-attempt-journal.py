@@ -107,15 +107,24 @@ def reserve(db, payload):
             db.execute("ROLLBACK")
         raise
 
+def inspect(db, payment_nonce):
+    if not isinstance(payment_nonce, str) or not HEX32.fullmatch(payment_nonce):
+        raise ValueError("invalid payment nonce")
+    row = db.execute("SELECT * FROM charge_attempts WHERE payment_nonce=?",
+                     (payment_nonce,)).fetchone()
+    if row is None:
+        raise ValueError("no precharge reservation exists for this authorization")
+    return {"result": "PRECHARGE_RECORD_FOUND", "admission": dict(row)}
+
 def main(args):
-    if args != ["reserve"]:
-        raise ValueError("usage: charge-attempt-journal.py reserve  (JSON on stdin)")
+    if args != ["reserve"] and not (len(args) == 2 and args[0] == "inspect"):
+        raise ValueError("usage: charge-attempt-journal.py reserve | inspect PAYMENT_NONCE")
     path = os.environ.get("AGENTLEDGER_CHARGE_DB", "receipts/charge-attempts.db")
     with connect(path) as db:
-        result = reserve(db, json.load(sys.stdin))
+        result = reserve(db, json.load(sys.stdin)) if args == ["reserve"] else inspect(db, args[1])
     print(json.dumps(result, sort_keys=True))
     # Conflict must be an error, otherwise middleware may settle again.
-    if result["result"] != "RESERVED_FIRST_ATTEMPT":
+    if args == ["reserve"] and result["result"] != "RESERVED_FIRST_ATTEMPT":
         sys.exit(3)
 
 if __name__ == "__main__":
