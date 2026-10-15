@@ -22,11 +22,14 @@ and the frozen v0.1 acceptance contract.
 | Off-chain execution demo | examples/verifier/tools/run-demo-task.mjs | Paid-only deterministic tool with input binding and Evidence output |
 | Browser verifier UI | examples/verifier/ | Read-only task query, browser-local Evidence SHA-256; no signing or payments |
 
-**Critical distinction:** x402 payments can be scoped to a fixed task path, but
-settlement-to-**authorized**-task binding is not yet implemented. The local
-journal captures unverified settlement notices. It is NOT wired to
-recordPayment or submitEvidence. Never present a paid API response as
-AgentLedger payment→execution→proof. See [receipt reconciliation](docs/receipt-reconciliation.md).
+**Critical distinction:** the HTTP gate now checks payer-signed task intent
+against an EIP-3009 payment signature **before settlement**, and reserves
+one local payment attempt. However, a reservation is **not a settled payment**;
+the journaled settlement response is unverified until independent RPC review,
+and finality/recorder admission remain separate. This demo still does NOT
+auto-call recordPayment or submitEvidence. See
+[precharge gate](docs/precharge-x402-gate.md) and
+[receipt reconciliation](docs/receipt-reconciliation.md).
 
 ## Threat model and invariants
 
@@ -163,23 +166,26 @@ curl -i "http://127.0.0.1:4021/tasks/$TASK_ID/run"
 An x402 v2-compatible client needs testnet USDC and a valid
 PAYMENT-SIGNATURE to purchase a response. This server uses the Monad
 facilitator, an explicit testnet USDC address and fail-closed /supported
-checks. Its task-scoped route journals **unverified** payment responses; it
-still **does not** cryptographically bind a payer-approved quote to the task,
-call recordPayment, run an Agent, or anchor execution evidence.
+checks. Its task-scoped route requires a verified EIP-712 task quote and EIP-3009
+x402 transfer authorization before settlement. It journals **unverified**
+payment responses, but does not autonomously call recordPayment, run a
+general Agent, or anchor Evidence. It does not bind the exact serialized 402
+challenge bytes to the EIP-712 quote.
 
 The read-only verification path is documented in
 [docs/receipt-reconciliation.md](docs/receipt-reconciliation.md).
 
 ## Next milestones (not yet done)
 
-1. P1: Bind signed quote/taskId and payer-approved payment intent to x402
-   settlement; use the new read-only USDC Transfer receipt verifier as one
-   input to durable, idempotent payment reconciliation (not yet built).
-2. P1: Connect a real minimal Agent job execution and attestation generator.
-3. P1: CLI or minimal Web page for task query, wallet flow, evidence upload
-   and local digest comparison.
-4. P2: Budget reservation, refunds/disputes, multi-recorder security, expiry,
-   and integration with ACP execution authority and independent proof.
+1. P1: Demonstrate signed quote + x402 paid retry **live on Monad Testnet**,
+   reconcile settlement to the pre-charge reservation, and prove finality
+   without replaying a charge after lost ACK.
+2. P1: Provide authorized test-only recordPayment and submitEvidence flow
+   with transaction receipts and independent readback.
+3. P1: Replace the deterministic tool demo with an actual small Agent
+   runtime execution linked to ACP IndependentExecutionProof.
+4. P2: Distributed budgets, refunds/disputes, multi-recorder security,
+   payment recovery across instances, and production-grade audit.
 
 Do not merge this experimental implementation into ACP core without separate
 security review, repeatable mainnet-disabled testnet acceptance evidence,
