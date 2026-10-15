@@ -31,6 +31,11 @@ export async function inspectPhase0(request, deps={}) {
     throw Error("invalid ledger or taskId");
   }
   const attempt = request.attempt || "NotEstablished";
+  // Read-only CLI/client JSON is NOT a trusted ACP assertion. A caller
+  // cannot manufacture NotStarted by selecting a string in the request.
+  if (attempt === "NotStarted" && deps.acpAuthoritativeNotStarted !== true) {
+    throw Error("NotStarted requires authenticated ACP-owned context");
+  }
   let task=null, chainError=null, paymentError=null, evidenceError=null;
   let reconciliation=null, evidence="NotSupplied";
   try {
@@ -90,7 +95,7 @@ export async function inspectPhase0(request, deps={}) {
       paymentDiagnostic:paymentError,
       evidenceDiagnostic:evidenceError,
       chainDiagnostic:chainError,
-      liveTestnetPaymentAccepted: Boolean(reconciliation),
+      paymentEventCheckedByExistingReconciler: Boolean(reconciliation),
       sourceClaims:["verified-USDC-Transfer-plus-AuthorizationUsed",
         "independent-SHA256-of-evidence-and-optional-original-bytes"],
     },
