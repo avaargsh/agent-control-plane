@@ -68,6 +68,7 @@ export function projectPhase0({task, attempt="NotEstablished", reconciliation=nu
   let paymentFact="Unverified";
   let paymentStatus=STATES.UNKNOWN;
   let discrepancy=null;
+  let paymentFactValid=false;
   const chainAttested=status==="Paid"||status==="Proven";
   const paymentEvidence=reconciliation!==null;
   if(reconciliation!==null) {
@@ -85,6 +86,7 @@ export function projectPhase0({task, attempt="NotEstablished", reconciliation=nu
       discrepancy="on-chain attested settlement reference does not match independently observed transfer";
     } else {
       paymentFact="VerifiedEip3009TransferAndNonce";
+      paymentFactValid=true;
       paymentStatus=status==="Created"?STATES.OBSERVED:STATES.RECORDED;
     }
   } else if(status==="Created" && attempt==="NotStarted") {
@@ -117,7 +119,7 @@ export function projectPhase0({task, attempt="NotEstablished", reconciliation=nu
     payment:{
       fact:paymentFact,
       recorderAttestationObserved:chainAttested,
-      eventIndependentlyChecked:paymentEvidence && discrepancy===null,
+      eventIndependentlyChecked:paymentFactValid,
       transaction:paymentEvidence?reconciliation.observedTransaction:null,
       authorizationNonce:paymentEvidence?reconciliation.paymentNonce:null,
       settlementRef:paymentEvidence?reconciliation.settlementRef:null,
