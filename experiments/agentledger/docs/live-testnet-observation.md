@@ -278,3 +278,20 @@ Agent execution.
 A registry entry with a link to a PR is not itself proof that an
 independent human/source audit actually occurred. The maintainer must
 verify that review before accepting the provenance assertion.
+
+
+### One RPC authority within each acceptance pass
+
+The Phase 0 live verifier now explicitly passes the already-pinned
+official HTTPS Monad Testnet RPC URL into **both** the on-chain
+`getTask` reader and the lower-level USDC transfer/nonce receipt
+verifier. This avoids splicing a valid task read from one provider
+with a USDC receipt fetched from an unrelated ambient environment
+configuration. The recovery-only CLI can still use its chosen RPC,
+but cannot thereby create a **live-acceptance** claim.
+
+This is **consistency of one observation source**, not proof that the
+source itself is independent or final. Human review should subsequently
+re-check recorded transaction and block hashes against another reputable
+provider. If any RPC disagrees, classify the outcome as
+`PaymentUnknown`/investigation, not authorization to recharge.
