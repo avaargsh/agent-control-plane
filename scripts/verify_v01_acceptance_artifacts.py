@@ -44,9 +44,124 @@ def verify_sqlite(path: Path) -> None:
             fail(f"{path.name} is not a SQLite database")
     try:
         with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
-            connection.execute("PRAGMA schema_version").fetchone()
+            check = connection.execute("PRAGMA integrity_check").fetchone()
+            if check is None or check[0] != "ok":
+                fail(f"{path.name} failed SQLite integrity_check")
     except sqlite3.DatabaseError as exc:
         fail(f"{path.name} cannot be opened read-only: {exc}")
+
+
+
+def verify_durable_execution_records(
+    artifact_dir: Path,
+    predicate: Mapping[str, Any],
+) -> None:
+    """Bind the three durable SQLite files to the independently verified proof.
+
+    A SQLite header and successful schema_version query do not demonstrate a
+    durable COMMITTED execution: an empty valid database previously passed.
+    These are read-only, parameterized checks; they do not trust or rewrite
+    any proof from database contents.
+    """
+    attempt = require_mapping(
+        predicate.get("execution_attempt"), "execution_attempt"
+    )
+    plan = require_mapping(predicate.get("transition_plan"), "transition_plan")
+    attempt_id = attempt.get("attempt_id")
+    operation_id = attempt.get("operation_id")
+    lease_id = attempt.get("lease_id")
+    reservation_hash = attempt.get("authority_reservation_hash")
+    if not all(
+        isinstance(value, str) and value
+        for value in (attempt_id, operation_id, lease_id, reservation_hash)
+    ):
+        fail("proof is missing durable execution identity")
+
+    journal_path = artifact_dir / "execution-journal.db"
+    lease_path = artifact_dir / "execution-leases.db"
+    context_path = artifact_dir / "work-context.db"
+
+    try:
+        with sqlite3.connect(f"file:{journal_path}?mode=ro", uri=True) as db:
+            db.row_factory = sqlite3.Row
+            row = db.execute(
+                """SELECT attempt_id, operation_id, resource_uid,
+                          transition_hash, action_hash, authorization_hash,
+                          lease_id, lease_epoch, transition_plan_hash,
+                          plan_authorization_hash, plan_fence_hash,
+                          authority_reservation_hash, attempt_hash,
+                          state, completed_at, result_hash, result_json
+                   FROM execution_attempts WHERE attempt_id=?""",
+                (attempt_id,),
+            ).fetchone()
+            if row is None:
+                fail("durable execution attempt missing from journal")
+            expected = {
+                "attempt_id": attempt_id,
+                "operation_id": operation_id,
+                "resource_uid": attempt.get("resource_uid"),
+                "transition_hash": attempt.get("transition_hash"),
+                "action_hash": attempt.get("action_hash"),
+                "authorization_hash": attempt.get("authorization_hash"),
+                "lease_id": lease_id,
+                "lease_epoch": attempt.get("lease_epoch"),
+                "transition_plan_hash": plan.get("plan_hash"),
+                "plan_authorization_hash": attempt.get("plan_authorization_hash"),
+                "plan_fence_hash": attempt.get("plan_fence_hash"),
+                "authority_reservation_hash": reservation_hash,
+                "attempt_hash": attempt.get("attempt_hash"),
+                "state": "COMMITTED",
+                "completed_at": attempt.get("completed_at"),
+                "result_hash": attempt.get("result_hash"),
+            }
+            for field, value in expected.items():
+                if row[field] != value:
+                    fail(f"durable execution journal mismatch: {field}")
+            if row["result_json"] is None:
+                fail("durable execution journal has no terminal result")
+            if json.loads(row["result_json"]) != attempt.get("result"):
+                fail("durable execution journal terminal result mismatch")
+
+        with sqlite3.connect(f"file:{lease_path}?mode=ro", uri=True) as db:
+            db.row_factory = sqlite3.Row
+            lease = db.execute(
+                """SELECT resource_uid, lease_id, epoch
+                   FROM execution_leases WHERE lease_id=?""",
+                (lease_id,),
+            ).fetchone()
+            if (
+                lease is None
+                or lease["resource_uid"] != attempt.get("resource_uid")
+                or lease["epoch"] != attempt.get("lease_epoch")
+            ):
+                fail("durable execution lease missing or mismatched")
+
+        with sqlite3.connect(f"file:{context_path}?mode=ro", uri=True) as db:
+            db.row_factory = sqlite3.Row
+            reservation = db.execute(
+                """SELECT reservation_hash, operation_id, resource_uid,
+                          lease_id, lease_epoch, state, work_id
+                   FROM work_authority_reservations
+                   WHERE reservation_hash=?""",
+                (reservation_hash,),
+            ).fetchone()
+            if (
+                reservation is None
+                or reservation["operation_id"] != operation_id
+                or reservation["resource_uid"] != attempt.get("resource_uid")
+                or reservation["lease_id"] != lease_id
+                or reservation["lease_epoch"] != attempt.get("lease_epoch")
+                or reservation["state"] != "RELEASED"
+            ):
+                fail("durable authority reservation missing, not released or mismatched")
+            work = db.execute(
+                "SELECT 1 FROM work_snapshots WHERE work_id=?",
+                (reservation["work_id"],),
+            ).fetchone()
+            if work is None:
+                fail("authority reservation has no durable work snapshot")
+    except (sqlite3.DatabaseError, ValueError, TypeError) as exc:
+        fail(f"durable execution database validation failed: {exc}")
 
 
 def git_commit() -> str:
@@ -109,6 +224,7 @@ def main() -> int:
         fail("statement hash file does not match serialized proof")
 
     predicate = require_mapping(proof_payload.get("predicate"), "predicate")
+    verify_durable_execution_records(artifact_dir, predicate)
     if set(predicate) != set(proof_contract["requiredPredicateFields"]):
         fail(
             "IndependentExecutionProof predicate fields changed: "
