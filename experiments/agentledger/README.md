@@ -37,6 +37,36 @@ Business OutcomeContract and `independent-execution-proof.json`.
 Do not extract a generalized signing/payment SDK before a true
 Monad Testnet payment→execution→anchor acceptance is independently verified.
 
+## Real Monad Testnet observation gate (read-only)
+
+A new acceptance command is available **only after** a genuine dedicated
+Testnet wallet payment and separate authorized `recordPayment` /
+`submitEvidence` transactions. It does **not** create any transaction.
+
+```bash
+cd experiments/agentledger/examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+export MONAD_RPC_URL=https://testnet-rpc.monad.xyz
+export AGENTLEDGER_CHARGE_DB="$(pwd)/../../receipts/charge-attempts.db"
+node tools/live-acceptance.mjs ./live-request.json ./live-observation.json
+```
+
+The command refuses localhost Anvil even with chain ID 10143; validates
+the signed payer quote, on-chain USDC Transfer + EIP-3009 nonce,
+pre-charge reservation, and payment block against the current canonical
+block; verifies a real `PaymentAttested` Recorder event and a distinct
+`EvidenceAnchored` event; checks current on-chain task state and the
+SHA-256 of original Evidence, input and output bytes.
+
+Any missing/contradictory observation leaves **no success artifact** and
+must not initiate another charge. Success is strictly
+`PASS_OBSERVED_NOT_FINALITY`: observed chain events, not irreversible
+settlement, ACP execution ownership or business result correctness.
+**No real Monad Testnet paid acceptance has yet been claimed.**
+
+See [live Testnet observation-only runbook](docs/live-testnet-observation.md).
+SDK extraction remains deferred until actual reviewed live acceptance.
+
 ## What exists now
 
 | Component | Implementation | Important limit |
