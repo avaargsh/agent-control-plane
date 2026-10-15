@@ -61,6 +61,8 @@ jobs:
           node --input-type=module -e "import('@x402/express').then(m => { if(typeof m.paymentMiddleware !== 'function') process.exit(1) })"
           node --input-type=module -e "import('@x402/core/server').then(m => { if(typeof m.x402ResourceServer !== 'function') process.exit(1) })"
           node --input-type=module -e "import('@x402/evm/exact/server').then(m => { if(typeof m.ExactEvmScheme !== 'function') process.exit(1) })"
+          node --check lib/challenge-guard.mjs
+          node --test test/*.test.mjs
 
   verifier:
     name: Read-only UI and contract query smoke
