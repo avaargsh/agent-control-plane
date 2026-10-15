@@ -50,6 +50,36 @@ function equalAddress(a,b) {
 function equalHash(a,b) {
   return typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
 }
+function strictIndex(value,label) {
+  check(Number.isSafeInteger(value) && value >= 0, label + " transaction index missing or invalid");
+  return value;
+}
+function strictHeight(value,label) {
+  check(typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value), label + " block height invalid");
+  return BigInt(value);
+}
+export function assertOrderedEvents(payment,recorder,anchor) {
+  const witnesses=[
+    ["USDC",payment],["Recorder",recorder],["Evidence",anchor],
+  ];
+  const observedHashes=new Set();
+  const positions=witnesses.map(([label,witness])=>{
+    check(HASH.test(witness?.transaction || ""), label + " transaction hash missing");
+    const hash=witness.transaction.toLowerCase();
+    check(!observedHashes.has(hash),"payment/recorder/evidence transactions must be distinct");
+    observedHashes.add(hash);
+    check(HASH.test(witness.blockHash || ""), label + " block hash missing");
+    return {label,height:strictHeight(witness.blockNumber,label),
+      index:strictIndex(witness.transactionIndex,label)};
+  });
+  for(let n=1;n<positions.length;n++) {
+    const before=positions[n-1],after=positions[n];
+    check(after.height>before.height ||
+      (after.height===before.height && after.index>before.index),
+    "onchain event chronology mismatch: "+before.label+" must precede "+after.label);
+  }
+  return true;
+}
 export async function verifyLedgerEvent(client,{ledger,txHash,eventName,eventAbi,checkArgs}) {
   const hash = txHash.toLowerCase();
   const receipt = await client.getTransactionReceipt({hash});
@@ -61,7 +91,17 @@ export async function verifyLedgerEvent(client,{ledger,txHash,eventName,eventAbi
   check(canonical && equalHash(canonical.hash,receipt.blockHash),
     eventName + " receipt block is no longer canonical");
   check(canonical.number === receipt.blockNumber, eventName + " block height mismatch");
-  const contractLogs = receipt.logs.filter(log => equalAddress(log.address,ledger));
+  strictIndex(receipt.transactionIndex,eventName);
+  check(Array.isArray(receipt.logs),eventName+" receipt logs absent");
+  // Never accept an event that is reported in a different transaction,
+  // block, or explicitly removed by the RPC provider.
+  const contractLogs = receipt.logs.filter(log =>
+    equalAddress(log.address,ledger) &&
+    log.removed !== true &&
+    equalHash(log.transactionHash,hash) &&
+    equalHash(log.blockHash,receipt.blockHash));
+  check(receipt.logs.filter(log=>equalAddress(log?.address,ledger))
+    .length === contractLogs.length,eventName+" contract logs inconsistent with receipt");
   const events = parseEventLogs({
     abi:[eventAbi],logs:contractLogs,eventName,strict:true,
   });
@@ -69,6 +109,7 @@ export async function verifyLedgerEvent(client,{ledger,txHash,eventName,eventAbi
   checkArgs(events[0].args);
   return {
     transaction:hash,blockNumber:receipt.blockNumber.toString(),
+    transactionIndex:receipt.transactionIndex,
     blockHash:receipt.blockHash.toLowerCase(),
     canonicalBlockCheckedAtObservation:true,
     event:eventName,
@@ -107,6 +148,8 @@ export async function runLiveAcceptance(request, deps={}) {
     HASH.test(payment.transaction || "") &&
     equalHash(payment.transaction,inspected.payment.transaction),
     "verified USDC canonical block witness unavailable");
+  strictHeight(payment.blockNumber,"USDC");
+  strictIndex(payment.transactionIndex,"USDC");
   const task=await (deps.readTask || readTask)(client,request.ledger,request.taskId);
   check(task.status==="Proven" &&
     equalHash(task.taskId,request.taskId) &&
@@ -141,12 +184,36 @@ export async function runLiveAcceptance(request, deps={}) {
         "Evidence submitted by unapproved actor");
     },
   });
+  assertOrderedEvents(payment,recorder,anchor);
+  // A reorg can occur between the initial payment receipt read and the
+  // later Recorder/Evidence queries. Re-read all three canonical headers at
+  // the end of acceptance to avoid reporting a stale mixed-chain snapshot.
+  const witnesses=[payment,recorder,anchor];
+  for(const [i,witness] of witnesses.entries()){
+    const block=await client.getBlock({blockNumber:strictHeight(witness.blockNumber,"witness")});
+    check(block && block.number===BigInt(witness.blockNumber) &&
+      equalHash(block.hash,witness.blockHash),
+      "canonical block changed during acceptance; PaymentUnknown, do not recharge");
+  }
+  // The ledger state may change while event receipts are inspected. Re-read
+  // before emitting success and stop if the confirmed hashes drift.
+  const finalTask=await (deps.readTask || readTask)(client,request.ledger,request.taskId);
+  check(finalTask.status==="Proven" &&
+    equalHash(finalTask.taskId,task.taskId) &&
+    equalHash(finalTask.settlementRef,task.settlementRef) &&
+    equalHash(finalTask.evidenceHash,task.evidenceHash) &&
+    equalAddress(finalTask.payer,task.payer) &&
+    finalTask.amountAtomic===task.amountAtomic,
+    "ledger task changed during acceptance; PaymentUnknown, no recharge");
   return {
     schemaVersion:"agentledger.phase0.live-observation.v1",
     result:"PASS_OBSERVED_NOT_FINALITY",
     network:"MONAD_TESTNET_ONLY",
     chainId:10143,
     rpcPinnedToOfficialHTTPS:true,
+    canonicalBlocksRecheckedAtEnd:true,
+    orderedEventsVerified:true,
+    taskReadbackRecheckedAtEnd:true,
     taskId:task.taskId,
     ledger:request.ledger,
     phase0State:inspected.state,
