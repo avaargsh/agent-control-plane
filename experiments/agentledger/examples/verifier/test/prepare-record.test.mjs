@@ -14,13 +14,13 @@ const taskId = "0x" + "55".repeat(32);
 const descriptionHash = "0x" + "66".repeat(32);
 const settlementRef = "0x" + "77".repeat(32);
 const tx = "0x" + "88".repeat(32);
-const token = "0x534b2f3A21130d7a60830c2Df862319e593943A3";
+const usdcContract = "0x534b2f3A21130d7a60830c2Df862319e593943A3";
 
 async function signed() {
   const signer = privateKeyToAccount(generatePrivateKey());
   const approval = {
     schemaVersion: "agentledger.task-payment.v1",
-    ledger, chainId: 10143, taskId, descriptionHash, token,
+    ledger, chainId: 10143, taskId, descriptionHash, token: usdcContract,
     payTo, payer: signer.address, amountAtomic: "1000",
     expiresAt: String(Math.floor(Date.now() / 1000) + 3600),
     nonce: "0x" + "99".repeat(32)
@@ -35,7 +35,7 @@ function fixture(approval, journalPath, overrides = {}) {
     taskId, descriptionHash, status: "Created", maxBudgetAtomic: "1000"
   };
   const receipt = {
-    taskId, transaction: tx, payer: approval.payer, payTo, token,
+    taskId, transaction: tx, payer: approval.payer, payTo, token: usdcContract,
     network: "eip155:10143", amountAtomic: "1000",
     settlementRef
   };
