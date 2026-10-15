@@ -190,7 +190,7 @@ export async function runLiveAcceptance(request, deps={}) {
     payment:request.payment,
     evidence:request.evidence,
   };
-  const inspected=await (deps.inspect || inspectPhase0)(phase0Request,{chain:client});
+  const inspected=await (deps.inspect || inspectPhase0)(phase0Request,{chain:client,settlementRpcUrl:rpc});
   check(inspected.schemaVersion==="agentledger.phase0.status.v1","unexpected Phase0 schema");
   check(inspected.state==="EvidenceAnchored" &&
     inspected.payment?.eventIndependentlyChecked === true &&
