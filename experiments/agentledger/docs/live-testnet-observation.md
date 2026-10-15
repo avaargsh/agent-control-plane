@@ -91,10 +91,19 @@ The acceptance layer additionally:
   projection from being used after a state change.
 - Queries the actual `recordPayment` transaction and validates exactly
   one `PaymentAttested` event from the configured ledger, matching the
-  current task, payer, amount and settlement reference.
+  current task, payer, amount and settlement reference. In addition,
+  it reads the transaction's `from/to/input`: the direct caller must
+  match `paymentRecorder()`, the transaction target must be the expected
+  Ledger contract, and the decoded function/arguments must exactly
+  match `recordPayment(taskId, payer, amount, settlementRef)`.
 - Queries the actual `submitEvidence` transaction and validates exactly
   one `EvidenceAnchored` event from that ledger, matching task and
-  SHA-256 hash, submitted by creator or trusted Recorder.
+  SHA-256 hash, submitted by creator or trusted Recorder. The
+  transaction's `from/to/input` must match that authorized submitter,
+  the Ledger address and the exact `submitEvidence(taskId,evidenceHash)`
+  selector and parameters. This Phase 0 verifier deliberately accepts
+  **direct contract calls only**; multisig/proxy wrappers require a
+  separately reviewed extension, not an implicit bypass.
 - Checks each transaction receipt's block hash against the **current**
   RPC canonical block at the same height; wrong/missing/reorged receipts
   are rejected.
@@ -185,3 +194,27 @@ new charge based on a failed read-only acceptance.
   `Transfer` and EIP-3009 `AuthorizationUsed` remain mandatory.
 - Nothing in `EvidenceAnchored` proves a correct Agent business outcome:
   ACP owns independent-execution-proof and OutcomeContract.
+
+## Calls as independent evidence
+
+The Recorder event is a contract-emitted claim. The live verifier now
+also examines the outer EVM transaction to verify **who invoked which
+function on which contract with which parameters**. For a successful
+live-observation report:
+
+- `recordPayment` transaction: `to == ledger`,
+  `from == paymentRecorder()`, expected selector and exact
+  task/payer/atomic amount/settlement reference;
+- `submitEvidence` transaction: `to == ledger`,
+  `from == event submitter`, that submitter is the task's
+  creator or trusted Recorder, expected selector and exact
+  task/evidence hash;
+- Each decoded event must appear once in the corresponding canonical
+  receipt and its log's transaction and block must equal that receipt.
+  A syntactically similar log outside that transaction is rejected.
+
+These checks improve task attribution but do **not** make the contract's
+deployed source/bytecode provenance automatically trustworthy. Verify
+contract deployment against reviewed Solidity code separately. Ledger
+still has no authority over ACP leases, retries, resume, execution
+correctness or independent-execution-proof.
