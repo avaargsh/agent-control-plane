@@ -5,3 +5,9 @@
 # Current code uses USDC_CONTRACT, avoiding another rule match.
 # Never allowlist an entire file, directory, branch, rule or commit here.
 9d594c71c29511245e4f2104d48f5192a967dd5b:experiments/agentledger/tools/settlement.mjs:generic-api-key:10
+
+# Historical, public Monad Testnet USDC ERC-20 address only; two exact
+# generic-api-key false positives from the temporary constant name TOKEN.
+# Current source has been corrected to USDC_CONTRACT.
+a9eceb902311e3a9855a37edfa044ef9d2b95f5c:experiments/agentledger/examples/verifier/lib/payment-approval.mjs:generic-api-key:20
+31072daabe6a424e4ea27c7c2ed4f321868e0a9b:experiments/agentledger/examples/verifier/test/approval.test.mjs:generic-api-key:12
