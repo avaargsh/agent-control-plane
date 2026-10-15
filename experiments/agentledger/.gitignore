@@ -6,3 +6,4 @@ broadcast/
 *.secret
 evidence.json
 receipts/
+approval.json\n
