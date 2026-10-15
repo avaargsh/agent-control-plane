@@ -32,7 +32,7 @@ jobs:
           node --check tools/settlement.mjs
           node --check examples/x402-gate/server.mjs
           node --test test/*.test.mjs
-          python3 -m unittest discover -s test -p 'test_admission_journal.py' -v
+          python3 -m unittest discover -s test -p 'test_*journal.py' -v
 
   solidity:
     name: Foundry task-ledger tests
