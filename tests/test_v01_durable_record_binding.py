@@ -157,12 +157,15 @@ def test_v01_rejects_live_sqlite_wal_sidecar_until_closed(tmp_path, name):
         connection.commit()
         assert path.with_name(path.name + "-wal").exists()
         with pytest.raises(SystemExit, match="has a WAL sidecar"):
-            _MODULE.verify_sqlite(path)
+            _MODULE.verify_sqlite(path, require_closed_wal=True)
+        # The immutable v0.1 compatibility verifier remains permissive;
+        # a historical release may carry a WAL sidecar.
+        _MODULE.verify_sqlite(path)
     finally:
         connection.close()
 
     # Closing the final writer checkpoints the committed rows into the .db.
     assert not path.with_name(path.name + "-wal").exists()
-    _MODULE.verify_sqlite(path)
+    _MODULE.verify_sqlite(path, require_closed_wal=True)
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
         assert db.execute("SELECT value FROM wal_record").fetchone()[0] == "committed-in-wal"
