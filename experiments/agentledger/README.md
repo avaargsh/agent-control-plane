@@ -7,6 +7,36 @@ It combines a task ledger, an experimental Monad Testnet x402 paid endpoint,
 and a content-addressed evidence CLI. It is deliberately outside src/, release/,
 and the frozen v0.1 acceptance contract.
 
+## Phase 0: stable external observation contract
+
+**Read [Phase 0 contract](docs/phase0-contract.md) before using this
+prototype as an ACP settlement adapter.** Public statuses are
+`Created / PaymentUnknown / PaymentObserved / PaymentRecorded /
+EvidenceAnchored / Conflict`. They are a **read-only projection of
+independent payment and evidence facts**. They do not change the existing
+Solidity `Created/Paid/Proven` storage status.
+
+`PaymentUnknown` is NOT payment failure or proof of no charge: never
+automatically re-charge, re-use the authorization nonce, or release a
+reservation. Chain `Paid` alone is only recorder attestation and
+`Proven` alone only shows a digest anchor, not independent execution
+correctness.
+
+Read-only inspection (requires live Testnet RPC and optional signed
+payment/Evidence files):
+
+```bash
+cd experiments/agentledger/examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+node tools/phase0-inspect.mjs ./phase0-request.json
+```
+
+The existing ACP retains task ownership, execution, leases, retry/resume,
+Business OutcomeContract and `independent-execution-proof.json`.
+**Ledger is a settlement/attestation adapter, not a second control plane.**
+Do not extract a generalized signing/payment SDK before a true
+Monad Testnet payment→execution→anchor acceptance is independently verified.
+
 ## What exists now
 
 | Component | Implementation | Important limit |
@@ -17,10 +47,13 @@ and the frozen v0.1 acceptance contract.
 | Tests | test/AgentLedger.t.sol + Node evidence/settlement tests | Foundry and Node tests, plus CI |
 | x402 HTTP gate | examples/x402-gate/server.mjs | Pre-settlement signature/quote gate and one-time charge reservation; no ledger mutation |
 | Facilitator check | tools/facilitator-preflight.mjs | Read-only /supported; fails closed for missing network/scheme |
-| On-chain receipt verifier | tools/settlement.mjs | Read-only chain/USDC/log verification, NOT payment intent authorization |\n| Task payment intent | examples/verifier/lib/payment-approval.mjs | EIP-712 payer signature verification; no automatic payment admission |
-| Durable admission journal | tools/admission-journal.py | Post-settlement SQLite PREPARED/UNKNOWN, replay/nonce conflict fences; no payment broadcast |\n| Pre-charge attempt journal | tools/charge-attempt-journal.py | Before x402 settlement, atomically allows one signed payer authorization per task; fail-closed on retries |
+| On-chain receipt verifier | tools/settlement.mjs | Read-only chain/USDC/log verification, NOT payment intent authorization |
+| Task payment intent | examples/verifier/lib/payment-approval.mjs | EIP-712 payer signature verification; no automatic payment admission |
+| Durable admission journal | tools/admission-journal.py | Post-settlement SQLite PREPARED/UNKNOWN, replay/nonce conflict fences; no payment broadcast |
+| Pre-charge attempt journal | tools/charge-attempt-journal.py | Before x402 settlement, atomically allows one signed payer authorization per task; fail-closed on retries |
 | Off-chain execution demo | examples/verifier/tools/run-demo-task.mjs | Paid-only deterministic tool with input binding and Evidence output |
-| Browser verifier UI | examples/verifier/ | Read-only task query, browser-local Evidence SHA-256; no signing or payments |\n| Lost-ACK reconciliation | examples/verifier/tools/reconcile-task.mjs | No-signing review of paid Transfer + consumed nonce + precharge + chain Created/Paid/Proven |
+| Browser verifier UI | examples/verifier/ | Read-only task query, browser-local Evidence SHA-256; no signing or payments |
+| Lost-ACK reconciliation | examples/verifier/tools/reconcile-task.mjs | No-signing review of paid Transfer + consumed nonce + precharge + chain Created/Paid/Proven |
 | Local EVM lifecycle acceptance | examples/verifier/tools/anvil-acceptance.mjs | Real Anvil deployment/transactions → deterministic tool → Evidence → UI readback; payment attestation is SIMULATED |
 
 **Critical distinction:** the HTTP gate now checks payer-signed task intent
@@ -159,7 +192,11 @@ cd experiments/agentledger
 node tools/facilitator-preflight.mjs
 cd examples/x402-gate
 npm install
-export TASK_ID=0xYOUR_EXISTING_BYTES32_TASK_ID\nexport LEDGER_ADDRESS=0xYOUR_DEPLOYED_LEDGER_CONTRACT\nexport PAY_TO_ADDRESS=0xYOUR_TESTNET_USDC_RECEIVER\nexport PUBLIC_ORIGIN=http://127.0.0.1:4021\nnpm start
+export TASK_ID=0xYOUR_EXISTING_BYTES32_TASK_ID
+export LEDGER_ADDRESS=0xYOUR_DEPLOYED_LEDGER_CONTRACT
+export PAY_TO_ADDRESS=0xYOUR_TESTNET_USDC_RECEIVER
+export PUBLIC_ORIGIN=http://127.0.0.1:4021
+npm start
 # A fresh request should return HTTP 402 (not 200):
 curl -i "http://127.0.0.1:4021/tasks/$TASK_ID/run"
 ~~~
