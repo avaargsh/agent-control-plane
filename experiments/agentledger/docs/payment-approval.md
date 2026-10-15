@@ -65,7 +65,7 @@ x402 `receipts/<tx>.json`.
 cd experiments/agentledger/examples/verifier
 npm install --no-audit --no-fund --ignore-scripts
 node tools/prepare-record.mjs ./approval.json \
-  ../x402-gate/receipts/0xTRANSACTION_HASH.json \
+  ../../receipts/0xTRANSACTION_HASH.json \
   0xTRUSTED_TESTNET_USDC_RECEIVER
 ```
 
