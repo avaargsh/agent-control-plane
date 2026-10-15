@@ -105,3 +105,11 @@ test("explicit ledger conflict returns Conflict without second charge",async()=>
   assert.equal(result.state,"Conflict");
   assert.equal(result.retryPolicy.chargeAgain,false);
 });
+
+test("untrusted caller cannot claim authoritative ACP NotStarted",async()=>{
+  let reads=0;
+  await assert.rejects(()=>inspectPhase0(req({attempt:"NotStarted"}),{
+    chain:{},readTask:async()=>{reads++;return TASK;}
+  }),/requires authenticated ACP-owned context/);
+  assert.equal(reads,0);
+});
