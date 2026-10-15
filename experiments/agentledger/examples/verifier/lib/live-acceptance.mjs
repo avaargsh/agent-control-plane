@@ -6,7 +6,7 @@
 import { decodeFunctionData, parseAbiItem, parseEventLogs } from "viem";
 import { makeClient, readTask } from "./task-reader.mjs";
 import { inspectPhase0 } from "./phase0-inspect.mjs";
-import { verifyReviewedDeployment } from "../../../phase0/reviewed-deployment.mjs";
+import { verifyReviewedDeployment } from "./reviewed-deployment.mjs";
 
 const PINNED_RPC = "https://testnet-rpc.monad.xyz/";
 const HASH = /^0x[0-9a-fA-F]{64}$/;
