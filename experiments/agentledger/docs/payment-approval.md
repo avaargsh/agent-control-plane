@@ -40,7 +40,7 @@ EIP-712 domain. Example shape (placeholders, NOT valid signatures):
   "ledger": "0x...40_hex",
   "taskId": "0x...64_hex",
   "descriptionHash": "0x...64_hex",
-  "token": "0x534b2f3A21130d7a60830c2Df862319e593943A3",
+  "token": "0xOFFICIAL_MONAD_TESTNET_USDC_ADDRESS",
   "payTo": "0x...40_hex",
   "payer": "0x...40_hex",
   "amountAtomic": "1000",
