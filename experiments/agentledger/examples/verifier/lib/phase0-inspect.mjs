@@ -99,6 +99,7 @@ export async function inspectPhase0(request, deps={}) {
       paymentWitness: reconciliation ? {
         transaction: reconciliation.observedTransaction,
         blockNumber: reconciliation.blockNumber,
+        transactionIndex: reconciliation.transactionIndex,
         blockHash: reconciliation.blockHash,
         canonicalBlockCheckedAtObservation: reconciliation.canonicalBlockCheckedAtObservation,
         observedHeadBlockNumber: reconciliation.observedHeadBlockNumber,
