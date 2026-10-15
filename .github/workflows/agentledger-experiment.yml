@@ -29,7 +29,8 @@ jobs:
         run: |
           node --check tools/evidence.mjs
           node --check tools/facilitator-preflight.mjs
-          node --check tools/settlement.mjs\n          node --check phase0/status.mjs
+          node --check tools/settlement.mjs
+          node --check phase0/status.mjs
           node --check examples/x402-gate/server.mjs
           node --test test/*.test.mjs
           python3 -m unittest discover -s test -p 'test_*journal.py' -v
@@ -84,7 +85,9 @@ jobs:
           node --check lib/task-reader.mjs
           node --check lib/payment-approval.mjs
           node --check tools/prepare-record.mjs
-          node --check lib/reconcile-task.mjs\n          node --check lib/phase0-inspect.mjs\n          node --check tools/phase0-inspect.mjs
+          node --check lib/reconcile-task.mjs
+          node --check lib/phase0-inspect.mjs
+          node --check tools/phase0-inspect.mjs
           node --check tools/reconcile-task.mjs
           node --check public/evidence-browser.mjs
           node --check public/app.mjs
