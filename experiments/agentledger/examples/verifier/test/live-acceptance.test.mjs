@@ -121,7 +121,11 @@ function harness({phase0={},payEvent={},proofEvent={},reorg=false}={}) {
         reviewReference:"https://github.com/avaargsh/agent-control-plane/pull/157",
         finalityProven:false
       }),
-      inspect:async()=>{inspected++;return phase;},
+      inspect:async (_request,opts)=>{
+        assert.equal(opts.settlementRpcUrl,"https://testnet-rpc.monad.xyz/");
+        assert.equal(opts.chain,client);
+        inspected++;return phase;
+      },
       readTask:async()=>task,
     },
     count:()=>({inspected,chainReads}),
