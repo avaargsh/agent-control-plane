@@ -113,6 +113,14 @@ function harness({phase0={},payEvent={},proofEvent={},reorg=false}={}) {
   };
   return {
     deps:{rpc:"https://testnet-rpc.monad.xyz",client,
+      verifyDeployment:async()=>({
+        schemaVersion:"agentledger.reviewed-deployment-witness.v1",
+        address:LEDGER,recorder:RECORDER,
+        blockNumber:"98",blockHash:RECORDER_BLOCK,
+        runtimeKeccak:"0x"+"ab".repeat(32),
+        reviewReference:"https://github.com/avaargsh/agent-control-plane/pull/157",
+        finalityProven:false
+      }),
       inspect:async()=>{inspected++;return phase;},
       readTask:async()=>task,
     },
@@ -193,6 +201,24 @@ test("Recorder/Evidence transaction signing identity, target and calldata must m
       return args.hash===txHash?{...tx,...patch}:tx;
     };
     await assert.rejects(()=>runLiveAcceptance(request,h.deps));
+  }
+});
+test("deployment must be PR-reviewed before invoking payer receipt inspector",async()=>{
+  const h=harness();
+  h.deps.verifyDeployment=async()=>{throw Error("no PR-reviewed Monad Testnet Ledger deployment");};
+  await assert.rejects(()=>runLiveAcceptance(request,h.deps),/PR-reviewed/);
+  assert.deepEqual(h.count(),{inspected:0,chainReads:0});
+});
+test("mismatched reviewed deployment recorder/runtime witness cannot pass",async()=>{
+  for(const replacement of [
+    {address:CREATOR},{recorder:CREATOR},{runtimeKeccak:"no"},
+    {schemaVersion:"unreviewed"}
+  ]){
+    const h=harness();
+    const original=h.deps.verifyDeployment;
+    h.deps.verifyDeployment=async()=>({...await original(),...replacement});
+    await assert.rejects(()=>runLiveAcceptance(request,h.deps),/reviewed Ledger deployment/);
+    assert.deepEqual(h.count(),{inspected:0,chainReads:0});
   }
 });
 test("fake local Anvil, even with chain ID 10143, cannot masquerade as public Testnet",async()=>{
