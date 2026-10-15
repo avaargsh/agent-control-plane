@@ -110,7 +110,9 @@ export function verifyReceipt(receipt, expected, currentBlock, opts = {}) {
   return {
     schemaVersion: 'agentledger.settlement.v1', taskId, network: NETWORK, token,
     transaction, payer, payTo, amountAtomic: amount.toString(), settlementRef,
-    logIndex, blockNumber: block.toString(), confirmations: (head - block + 1n).toString(),
+    logIndex, blockNumber: block.toString(),
+    blockHash: receipt.blockHash.toLowerCase(),
+    confirmations: (head - block + 1n).toString(),
     ...(paymentNonce ? {paymentNonce} : {}),
     note: paymentNonce ?
       'Transfer + AuthorizationUsed nonce match. Task intent, finality and delivery still need independent evidence.' :
@@ -147,8 +149,24 @@ export async function verifyLive(expected, rpcUrl = DEFAULT_RPC, fetchImpl = fet
   requireMatch(hexQuantity(chainId, 'chainId') === 10143n, 'RPC is not Monad Testnet');
   if (expected.paymentResponse) validatePaymentResponse(expected.paymentResponse, expected);
   const receipt = await rpc('eth_getTransactionReceipt', [normalizeHash(expected.transaction, 'transaction')]);
+  requireMatch(receipt && typeof receipt === 'object', 'transaction receipt missing; PaymentUnknown');
+  const height = hexQuantity(receipt.blockNumber, 'receipt.blockNumber');
   const currentBlock = await rpc('eth_blockNumber');
-  return verifyReceipt(receipt, expected, currentBlock, opts);
+  const result = verifyReceipt(receipt, expected, currentBlock, opts);
+  // A receipt and its logs may refer to an orphaned block. Independently
+  // query the currently canonical block at the receipt height. This is
+  // a point-in-time inclusion check, NOT a finality guarantee.
+  const canonical = await rpc('eth_getBlockByNumber', ['0x' + height.toString(16), false]);
+  requireMatch(canonical && typeof canonical === 'object', 'canonical block unavailable; PaymentUnknown');
+  requireMatch(hexQuantity(canonical.number, 'canonical block number') === height, 'canonical block height mismatch');
+  requireMatch(normalizeHash(canonical.hash, 'canonical block hash') === result.blockHash,
+    'receipt block is no longer canonical; PaymentUnknown');
+  return {
+    ...result,
+    canonicalBlockCheckedAtObservation: true,
+    observedHeadBlockNumber: hexQuantity(currentBlock, 'latest block').toString(),
+    note: result.note + ' Canonical block was checked at observation time; reorgs and finality still require follow-up.',
+  };
 }
 
 async function main(args) {
