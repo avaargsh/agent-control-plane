@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export const NETWORK = 'eip155:10143';
-export const TOKEN = '0x534b2f3A21130d7a60830c2Df862319e593943A3';
+export const USDC_CONTRACT = '0x534b2f3A21130d7a60830c2Df862319e593943A3';
 export const DEFAULT_RPC = 'https://testnet-rpc.monad.xyz';
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -52,8 +52,8 @@ export function verifyReceipt(receipt, expected, currentBlock, opts = {}) {
   const transaction = normalizeHash(expected.transaction, 'transaction');
   const payer = normalizeAddress(expected.payer, 'payer');
   const payTo = normalizeAddress(expected.payTo, 'payTo');
-  const token = normalizeAddress(expected.token || TOKEN, 'token');
-  requireMatch(token === TOKEN.toLowerCase(), 'only official Monad Testnet USDC is supported');
+  const token = normalizeAddress(expected.token || USDC_CONTRACT, 'token');
+  requireMatch(token === USDC_CONTRACT.toLowerCase(), 'only official Monad Testnet USDC is supported');
   const taskId = normalizeHash(expected.taskId, 'taskId');
   requireMatch(expected.network === NETWORK, 'incorrect network');
   const amount = nonnegativeInteger(expected.amountAtomic, 'amountAtomic');
