@@ -10,6 +10,8 @@ export const NETWORK = 'eip155:10143';
 export const USDC_CONTRACT = '0x534b2f3A21130d7a60830c2Df862319e593943A3';
 export const DEFAULT_RPC = 'https://testnet-rpc.monad.xyz';
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+// EIP-3009 AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce).
+export const AUTH_USED_TOPIC = '0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/;
 const HEX_QUANTITY = /^0x[0-9a-fA-F]+$/;
@@ -83,13 +85,36 @@ export function verifyReceipt(receipt, expected, currentBlock, opts = {}) {
   requireMatch(normalizeHash(log.transactionHash, 'log.transactionHash') === transaction, 'log transaction mismatch');
   requireMatch(normalizeHash(log.blockHash, 'log.blockHash') === receipt.blockHash.toLowerCase(), 'log block mismatch');
   const logIndex = safeLogIndex(log.logIndex);
+  // When a payment nonce is supplied, a same-amount unrelated Transfer is
+  // insufficient. The token itself must also have consumed THAT nonce in
+  // THIS receipt. This applies only to EIP-3009 settlement mode.
+  let paymentNonce;
+  if (Object.hasOwn(expected, 'paymentNonce')) {
+    paymentNonce = normalizeHash(expected.paymentNonce, 'paymentNonce');
+    const authLogs = receipt.logs.filter(entry => entry &&
+      entry.removed !== true &&
+      typeof entry.address === 'string' && entry.address.toLowerCase() === token &&
+      Array.isArray(entry.topics) && entry.topics.length === 3 &&
+      entry.topics[0]?.toLowerCase() === AUTH_USED_TOPIC &&
+      entry.topics[1]?.toLowerCase() === topicAddress(payer) &&
+      entry.topics[2]?.toLowerCase() === paymentNonce &&
+      typeof entry.transactionHash === 'string' &&
+      entry.transactionHash.toLowerCase() === transaction &&
+      typeof entry.blockHash === 'string' &&
+      entry.blockHash.toLowerCase() === receipt.blockHash.toLowerCase()
+    );
+    requireMatch(authLogs.length === 1, 'expected exactly one matching USDC AuthorizationUsed event');
+  }
   const material = JSON.stringify(['agentledger.settlement.v1', NETWORK, token, transaction, logIndex]);
   const settlementRef = '0x' + createHash('sha256').update(material, 'utf8').digest('hex');
   return {
     schemaVersion: 'agentledger.settlement.v1', taskId, network: NETWORK, token,
     transaction, payer, payTo, amountAtomic: amount.toString(), settlementRef,
     logIndex, blockNumber: block.toString(), confirmations: (head - block + 1n).toString(),
-    note: 'Valid transfer only: task authorization, finality and service delivery require separate evidence.',
+    ...(paymentNonce ? {paymentNonce} : {}),
+    note: paymentNonce ?
+      'Transfer + AuthorizationUsed nonce match. Task intent, finality and delivery still need independent evidence.' :
+      'Valid transfer only: payment authorization nonce, task intent and finality were NOT established.',
   };
 }
 
