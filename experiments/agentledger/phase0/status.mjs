@@ -59,6 +59,24 @@ export function projectPhase0({task, attempt="NotEstablished", reconciliation=nu
     check(task!==null && task!==undefined, "payment reconciliation needs chain state");
     check(validReconciliation.has(reconciliation.classification), "unknown reconciliation class");
     check(reconciliation.taskId===task.taskId, "reconciliation task mismatch");
+    // Task IDs are only unique *within* a specific Ledger deployment. A
+    // second contract can legitimately use the same bytes32 taskId.
+    // Never combine its USDC receipt with this contract's Evidence anchor.
+    check(address(reconciliation.ledger,"reconciliation ledger") ===
+      address(task.contract,"chain Ledger contract"),
+      "reconciliation Ledger contract mismatch");
+    check(reconciliation.chainId===task.chainId,"reconciliation chain mismatch");
+    check(hex32(reconciliation.descriptionHash,"reconciliation description") ===
+      task.descriptionHash,"reconciliation task description mismatch");
+    check(address(reconciliation.payer,"reconciliation payer") !==
+      "0x"+"0".repeat(40),"invalid payer");
+    check(uint(reconciliation.amountAtomic,"reconciliation amount") > 0n,"invalid payment amount");
+    if(status==="Paid"||status==="Proven"){
+      check(address(reconciliation.payer,"reconciliation payer")===
+        address(task.payer,"chain payer"),"reconciliation payer mismatch");
+      check(uint(reconciliation.amountAtomic,"reconciliation amount")===
+        uint(task.amountAtomic,"chain amount"),"reconciliation amount mismatch");
+    }
     hex32(reconciliation.settlementRef,"verified settlement reference");
     hex32(reconciliation.paymentNonce,"verified EIP-3009 nonce");
     hex32(reconciliation.observedTransaction,"verified transaction");
