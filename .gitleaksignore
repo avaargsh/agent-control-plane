@@ -1,0 +1,7 @@
+# Precisely scoped historical false positive; NOT a secret or credential.
+# Monad Testnet USDC ERC-20 contract address published at:
+# https://docs.monad.xyz/guides/x402
+# Commit 9d594c71 used the variable name TOKEN for the public contract address.
+# Current code uses USDC_CONTRACT, avoiding another rule match.
+# Never allowlist an entire file, directory, branch, rule or commit here.
+9d594c71c29511245e4f2104d48f5192a967dd5b:experiments/agentledger/tools/settlement.mjs:generic-api-key:10
