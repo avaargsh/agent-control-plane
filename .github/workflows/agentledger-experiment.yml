@@ -1,0 +1,43 @@
+name: agentledger-experiment
+
+on:
+  push:
+    branches:
+      - "feat/agentledger-*"
+    paths:
+      - "experiments/agentledger/**"
+      - ".github/workflows/agentledger-experiment.yml"
+  pull_request:
+    paths:
+      - "experiments/agentledger/**"
+      - ".github/workflows/agentledger-experiment.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    name: Evidence CLI unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Node evidence contract
+        working-directory: experiments/agentledger
+        run: |
+          node --check tools/evidence.mjs
+          node --check tools/facilitator-preflight.mjs
+          node --check examples/x402-gate/server.mjs
+          node --test test/evidence.test.mjs
+
+  solidity:
+    name: Foundry task-ledger tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Forge tests
+        working-directory: experiments/agentledger
+        run: forge test -vvv
