@@ -169,3 +169,31 @@ def test_v01_rejects_live_sqlite_wal_sidecar_until_closed(tmp_path, name):
     _MODULE.verify_sqlite(path, require_closed_wal=True)
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
         assert db.execute("SELECT value FROM wal_record").fetchone()[0] == "committed-in-wal"
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("execution-journal.db", "execution-leases.db", "work-context.db"),
+)
+def test_v01_strict_durable_queries_do_not_recreate_wal(tmp_path, name):
+    """Strict validation reads only captured .db bytes, not a new WAL reader."""
+    predicate = _fixture(tmp_path)
+    path = tmp_path / name
+    # Convert the real fixture file into WAL mode, then checkpoint and close
+    # to make a self-contained .db release artifact.
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        assert connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0] == 0
+    finally:
+        connection.close()
+    assert not path.with_name(path.name + "-wal").exists()
+
+    for database in ("execution-journal.db", "execution-leases.db", "work-context.db"):
+        _MODULE.verify_sqlite(tmp_path / database, require_closed_wal=True)
+    verify_durable_execution_records(
+        tmp_path, predicate, require_closed_wal=True
+    )
+    # Previously these three proof lookups used mode=ro even in strict mode.
+    # A strict verifier must not create an omitted WAL sidecar itself.
+    assert not path.with_name(path.name + "-wal").exists()
