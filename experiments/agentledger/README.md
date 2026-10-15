@@ -17,7 +17,7 @@ and the frozen v0.1 acceptance contract.
 | Tests | test/AgentLedger.t.sol + Node evidence/settlement tests | Foundry and Node tests, plus CI |
 | x402 HTTP gate | examples/x402-gate/server.mjs | Fixed task-ID route; journals unverified settlement notices, no ledger mutation |
 | Facilitator check | tools/facilitator-preflight.mjs | Read-only /supported; fails closed for missing network/scheme |
-| On-chain receipt verifier | tools/settlement.mjs | Read-only chain/USDC/log verification, NOT payment intent authorization |
+| On-chain receipt verifier | tools/settlement.mjs | Read-only chain/USDC/log verification, NOT payment intent authorization |\n| Task payment intent | examples/verifier/lib/payment-approval.mjs | EIP-712 payer signature verification; no automatic payment admission |
 | Browser verifier UI | examples/verifier/ | Read-only task query, browser-local Evidence SHA-256; no signing or payments |
 
 **Critical distinction:** x402 payments can be scoped to a fixed task path, but
@@ -220,3 +220,19 @@ but cannot change the expected chain ID in the API request.
 
 See `docs/receipt-reconciliation.md` for the remaining payment-intent
 binding and idempotency gaps. Testnet only.
+
+## Payer-signed payment intent preflight (implemented, no broadcasting)
+
+To avoid accepting an unrelated USDC Transfer for a different task, an
+EIP-712 `TaskPaymentApproval` must bind the payer's signature to the Monad
+Testnet chain ID, deployed ledger contract, task ID, description hash,
+recipient, official USDC, exact amount, nonce and short expiry.
+
+`examples/verifier/tools/prepare-record.mjs` checks a payer-signed
+approval against the **on-chain Created task** and independently checked
+USDC receipt. It prints candidate `recordPayment` args tagged
+`ELIGIBLE_FOR_RECORDER_REVIEW_NOT_SUBMITTED`. It NEVER signs or submits
+a transaction and does not yet implement durable nonce reservations.
+
+See [docs/payment-approval.md](docs/payment-approval.md) for the precise
+EIP-712 struct, CLI invocation and known replay/reconciliation gaps.
