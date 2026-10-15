@@ -15,10 +15,10 @@ and the frozen v0.1 acceptance contract.
 | Lifecycle | Created → Paid → Proven | No durable offchain Executing / Failed / Expired orchestration yet |
 | Evidence | tools/evidence.mjs | SHA-256 of canonical metadata; NOT proof of truthful execution |
 | Tests | test/AgentLedger.t.sol + Node evidence/settlement tests | Foundry and Node tests, plus CI |
-| x402 HTTP gate | examples/x402-gate/server.mjs | Fixed task-ID route; journals unverified settlement notices, no ledger mutation |
+| x402 HTTP gate | examples/x402-gate/server.mjs | Pre-settlement signature/quote gate and one-time charge reservation; no ledger mutation |
 | Facilitator check | tools/facilitator-preflight.mjs | Read-only /supported; fails closed for missing network/scheme |
 | On-chain receipt verifier | tools/settlement.mjs | Read-only chain/USDC/log verification, NOT payment intent authorization |\n| Task payment intent | examples/verifier/lib/payment-approval.mjs | EIP-712 payer signature verification; no automatic payment admission |
-| Durable admission journal | tools/admission-journal.py | SQLite PREPARED/UNKNOWN, replay/nonce conflict fences; no payment broadcast |
+| Durable admission journal | tools/admission-journal.py | Post-settlement SQLite PREPARED/UNKNOWN, replay/nonce conflict fences; no payment broadcast |\n| Pre-charge attempt journal | tools/charge-attempt-journal.py | Before x402 settlement, atomically allows one signed payer authorization per task; fail-closed on retries |
 | Off-chain execution demo | examples/verifier/tools/run-demo-task.mjs | Paid-only deterministic tool with input binding and Evidence output |
 | Browser verifier UI | examples/verifier/ | Read-only task query, browser-local Evidence SHA-256; no signing or payments |
 
@@ -155,9 +155,7 @@ cd experiments/agentledger
 node tools/facilitator-preflight.mjs
 cd examples/x402-gate
 npm install
-export TASK_ID=0xYOUR_EXISTING_BYTES32_TASK_ID
-export PAY_TO_ADDRESS=0xYOUR_TESTNET_USDC_RECEIVER
-npm start
+export TASK_ID=0xYOUR_EXISTING_BYTES32_TASK_ID\nexport LEDGER_ADDRESS=0xYOUR_DEPLOYED_LEDGER_CONTRACT\nexport PAY_TO_ADDRESS=0xYOUR_TESTNET_USDC_RECEIVER\nexport PUBLIC_ORIGIN=http://127.0.0.1:4021\nnpm start
 # A fresh request should return HTTP 402 (not 200):
 curl -i "http://127.0.0.1:4021/tasks/$TASK_ID/run"
 ~~~
@@ -277,3 +275,42 @@ A persistent SQLite journal prevents conflicting **recording candidates**
 within one local DB; it does **not** guarantee exactly-once x402 charges,
 a distributed budget lock or replay protection across separate workstations.
 The UNKNOWN status requires manual chain reconciliation, never blind retry.
+
+## Pre-settlement x402 authorization boundary (implemented)
+
+The task-scoped x402 demo now requires a payer-signed EIP-712
+`TaskPaymentApproval` as a Base64 `X-AgentLedger-Approval` header on
+**both** the challenge request and its paid retry. The server reads the
+live on-chain Created task and independently verifies its description,
+budget, network, payee, exact amount and payer signature. The paid retry
+also checks x402 v2 `PAYMENT-SIGNATURE`, exact public resource URL, asset
+and EIP-3009 USDC `TransferWithAuthorization` signature **before**
+passing control to the x402 payment middleware.
+
+A separate SQLite pre-charge journal atomically reserves **one attempt**
+per task/quote nonce/payment nonce. Any retry, including an identical
+paid retry after a lost ACK, is blocked and must be reconciled before
+a new purchase can be safely arranged.
+
+This is deliberately a single-workstation / single-database safety
+boundary. It is **not** globally exactly-once charging or a guarantee
+that a facilitator settled the payment. A reserved attempt is not a paid
+task; the after-settlement receipt notice is not independently verified.
+The recorder-review path and manual ledger writes remain separate.
+
+See [signed x402 precharge runbook](docs/precharge-x402-gate.md)
+and [local admission/execution runbook](docs/admission-and-local-execution.md).
+Run both hermetic journal suites and the x402 gate tests:
+
+```bash
+cd experiments/agentledger
+python3 -m unittest discover -s test -p 'test_*journal.py' -v
+cd examples/x402-gate
+npm install --no-audit --no-fund --ignore-scripts
+npm test
+```
+
+**Still required for real acceptance:** a live Monad Testnet x402 402
+challenge and paid retry, externally verified finality and transaction
+receipts, authorized recorder contract write, real runtime completion,
+Evidence anchoring and independent readback/reconciliation.
