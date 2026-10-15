@@ -140,3 +140,82 @@ def test_v01_missing_sqlite_tables_are_not_valid_durable_evidence(tmp_path):
         db.execute("DROP TABLE execution_attempts")
     with pytest.raises(SystemExit, match="database validation failed"):
         verify_durable_execution_records(tmp_path, predicate)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("execution-journal.db", "execution-leases.db", "work-context.db"),
+)
+def test_v01_rejects_live_sqlite_wal_sidecar_until_closed(tmp_path, name):
+    """A readable WAL database is not a self-contained .db release artifact."""
+    path = tmp_path / name
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        connection.execute("CREATE TABLE wal_record (value TEXT NOT NULL)")
+        connection.execute("INSERT INTO wal_record VALUES ('committed-in-wal')")
+        connection.commit()
+        assert path.with_name(path.name + "-wal").exists()
+        with pytest.raises(SystemExit, match="has a WAL sidecar"):
+            _MODULE.verify_sqlite(path, require_closed_wal=True)
+        # The immutable v0.1 compatibility verifier remains permissive;
+        # a historical release may carry a WAL sidecar.
+        _MODULE.verify_sqlite(path)
+    finally:
+        connection.close()
+
+    # Closing the final writer checkpoints the committed rows into the .db.
+    assert not path.with_name(path.name + "-wal").exists()
+    _MODULE.verify_sqlite(path, require_closed_wal=True)
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+        assert db.execute("SELECT value FROM wal_record").fetchone()[0] == "committed-in-wal"
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("execution-journal.db", "execution-leases.db", "work-context.db"),
+)
+def test_v01_strict_durable_queries_do_not_recreate_wal(tmp_path, name):
+    """Strict validation reads only captured .db bytes, not a new WAL reader."""
+    predicate = _fixture(tmp_path)
+    path = tmp_path / name
+    # Convert the real fixture file into WAL mode, then checkpoint and close
+    # to make a self-contained .db release artifact.
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        assert connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0] == 0
+    finally:
+        connection.close()
+    assert not path.with_name(path.name + "-wal").exists()
+
+    for database in ("execution-journal.db", "execution-leases.db", "work-context.db"):
+        _MODULE.verify_sqlite(tmp_path / database, require_closed_wal=True)
+    verify_durable_execution_records(
+        tmp_path, predicate, require_closed_wal=True
+    )
+    # Previously these three proof lookups used mode=ro even in strict mode.
+    # A strict verifier must not create an omitted WAL sidecar itself.
+    assert not path.with_name(path.name + "-wal").exists()
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("execution-journal.db", "execution-leases.db", "work-context.db"),
+)
+def test_v01_strict_rejects_symlinked_sqlite_artifacts(tmp_path, name):
+    """A path to a live/external DB is not a standalone captured evidence file."""
+    predicate = _fixture(tmp_path)
+    path = tmp_path / name
+    moved = tmp_path / ("external-" + name)
+    path.rename(moved)
+    path.symlink_to(moved)
+
+    # The v0.1 published-proof compatibility path is deliberately unchanged.
+    _MODULE.verify_sqlite(path)
+    verify_durable_execution_records(tmp_path, predicate)
+
+    with pytest.raises(SystemExit, match="symlink; strict evidence requires standalone"):
+        _MODULE.verify_sqlite(path, require_closed_wal=True)
+    with pytest.raises(SystemExit, match="symlink; strict evidence requires standalone"):
+        verify_durable_execution_records(tmp_path, predicate, require_closed_wal=True)
