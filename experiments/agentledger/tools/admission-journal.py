@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
+import time
 
 HEX32 = re.compile(r"^0x[0-9a-f]{64}$")
 ADDRESS = re.compile(r"^0x[0-9a-f]{40}$")
@@ -62,10 +63,20 @@ def connect(filename: Path) -> sqlite3.Connection:
     db = sqlite3.connect(str(filename), timeout=10, isolation_level=None)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA busy_timeout=10000")
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("PRAGMA synchronous=FULL")
-    db.execute(SCHEMA)
-    return db
+    # Schema/WAL initialization can return SQLITE_BUSY on simultaneous process
+    # startup, even before BEGIN IMMEDIATE obtains its transaction lock.
+    for attempt in range(40):
+        try:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA synchronous=FULL")
+            db.execute(SCHEMA)
+            return db
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == 39:
+                db.close()
+                raise
+            time.sleep(0.05)
+    raise AssertionError("unreachable")
 
 def row_dict(row: sqlite3.Row) -> dict:
     return dict(row)
