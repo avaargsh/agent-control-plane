@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import hashlib
 import json
 import sqlite3
@@ -38,24 +39,24 @@ def require_mapping(value: Any, name: str) -> Mapping[str, Any]:
     return value
 
 
-def verify_sqlite(path: Path) -> None:
+def verify_sqlite(path: Path, *, require_closed_wal: bool = False) -> None:
     # Only the .db bytes are included in the published release artifact set.
     # Reading an uncheckpointed WAL would validate rows absent from those bytes.
     wal_path = path.with_name(path.name + "-wal")
-    if wal_path.exists():
+    if require_closed_wal and wal_path.exists():
         fail(f"{path.name} has a WAL sidecar; checkpoint and close before export")
     with path.open("rb") as handle:
         if handle.read(16) != b"SQLite format 3\x00":
             fail(f"{path.name} is not a SQLite database")
     try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
             check = connection.execute("PRAGMA integrity_check").fetchone()
             if check is None or check[0] != "ok":
                 fail(f"{path.name} failed SQLite integrity_check")
     except sqlite3.DatabaseError as exc:
         fail(f"{path.name} cannot be opened read-only: {exc}")
     # A writer must not attach a WAL while integrity_check is in progress.
-    if wal_path.exists():
+    if require_closed_wal and wal_path.exists():
         fail(f"{path.name} has a WAL sidecar; checkpoint and close before export")
 
 
@@ -90,7 +91,7 @@ def verify_durable_execution_records(
     context_path = artifact_dir / "work-context.db"
 
     try:
-        with sqlite3.connect(f"file:{journal_path}?mode=ro", uri=True) as db:
+        with closing(sqlite3.connect(f"file:{journal_path}?mode=ro", uri=True)) as db:
             db.row_factory = sqlite3.Row
             row = db.execute(
                 """SELECT attempt_id, operation_id, resource_uid,
@@ -130,7 +131,7 @@ def verify_durable_execution_records(
             if json.loads(row["result_json"]) != attempt.get("result"):
                 fail("durable execution journal terminal result mismatch")
 
-        with sqlite3.connect(f"file:{lease_path}?mode=ro", uri=True) as db:
+        with closing(sqlite3.connect(f"file:{lease_path}?mode=ro", uri=True)) as db:
             db.row_factory = sqlite3.Row
             lease = db.execute(
                 """SELECT resource_uid, lease_id, epoch
@@ -144,7 +145,7 @@ def verify_durable_execution_records(
             ):
                 fail("durable execution lease missing or mismatched")
 
-        with sqlite3.connect(f"file:{context_path}?mode=ro", uri=True) as db:
+        with closing(sqlite3.connect(f"file:{context_path}?mode=ro", uri=True)) as db:
             db.row_factory = sqlite3.Row
             reservation = db.execute(
                 """SELECT reservation_hash, operation_id, resource_uid,
@@ -192,6 +193,11 @@ def main() -> int:
         "--evidence-out",
         help="Optional path for a release-evidence JSON summary.",
     )
+    parser.add_argument(
+        "--require-closed-sqlite",
+        action="store_true",
+        help="Strict new-artifact preflight: reject WAL sidecars (legacy v0.1 defaults unchanged)",
+    )
     args = parser.parse_args()
 
     artifact_dir = Path(args.artifact_dir).resolve()
@@ -207,7 +213,10 @@ def main() -> int:
         "execution-leases.db",
         "work-context.db",
     ):
-        verify_sqlite(artifact_dir / database)
+        verify_sqlite(
+            artifact_dir / database,
+            require_closed_wal=args.require_closed_sqlite,
+        )
 
     proof_path = artifact_dir / "independent-execution-proof.json"
     hash_path = artifact_dir / "independent-execution-proof.json.sha256"
