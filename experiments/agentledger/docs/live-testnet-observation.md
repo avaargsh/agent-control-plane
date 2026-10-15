@@ -98,6 +98,15 @@ The acceptance layer additionally:
 - Checks each transaction receipt's block hash against the **current**
   RPC canonical block at the same height; wrong/missing/reorged receipts
   are rejected.
+- Verifies strict **USDC settlement → Recorder payment attestation →
+  Evidence anchor** transaction chronology, using block number and
+  within-block transaction index. Missing indexes, reordered events, or
+  duplicate transaction hashes fail closed, including when two valid
+  transactions appear in the same block.
+- Before declaring an observed PASS, **rechecks all three canonical
+  block hashes** and re-reads the live task once more. If a reorg or task
+  drift happens during verification, report an uncertain outcome and
+  do not recharge.
 - Emits only a factual observation report and **never** signs,
   broadcasts, changes the journal, or modifies ACP execution state.
 
@@ -140,3 +149,39 @@ exist. If none exists, report `NOT_RUN_LIVE_TESTNET`, not PASS.
 Only after independently reviewed true live acceptance and ACP owner
 boundaries should a stable **read-only** receipt/Evidence verification SDK
 be considered. Do not SDK-ize signing, settlement or execution ownership.
+
+## Event-ordering and observation window
+
+A matching event is necessary but not sufficient: a genuine payer
+authorization must precede `PaymentAttested`, and the Recorder
+attestation must precede `EvidenceAnchored`. The live verifier
+checks ordered pair `(blockNumber, transactionIndex)` for each of
+the three transactions; a missing transaction index is **not**
+interpreted as zero. It also rejects any reused transaction hash
+across these three independent event types.
+
+Canonical headers are validated once while examining each receipt,
+then fetched **again at the end** before writing the immutable report.
+The on-chain task is also re-read at the end, and its payer, amount,
+settlement reference, evidence hash, and Proven state must still agree.
+This closes a basic read-skew/reorg window, but does not provide a
+cryptographically atomic multi-RPC snapshot or chain finality.
+
+A valid observation remains weaker than independently verified
+execution ownership. `PaymentUnknown` is the default whenever
+the wallet charge or canonical chain outcome cannot be established.
+Do not release a reserved budget, re-sign a payment, or start a
+new charge based on a failed read-only acceptance.
+
+### Remaining trust assumptions
+
+- The caller supplies the expected deployed contract address and
+  original authorization. The verifier checks that address and events,
+  **not** complete deployed-bytecode provenance or source verification.
+  Validate the deployment provenance separately.
+- The pinned RPC is one observation source, not an independent
+  multi-provider quorum or finality oracle.
+- Nothing in `PaymentAttested` proves USDC by itself: real USDC
+  `Transfer` and EIP-3009 `AuthorizationUsed` remain mandatory.
+- Nothing in `EvidenceAnchored` proves a correct Agent business outcome:
+  ACP owns independent-execution-proof and OutcomeContract.
