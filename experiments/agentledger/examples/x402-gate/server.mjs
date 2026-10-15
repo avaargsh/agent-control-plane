@@ -8,6 +8,7 @@ import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { authorizeHttpRequest, guardConfig } from "./lib/challenge-guard.mjs";
 
 const NETWORK = "eip155:10143";
 const USDC = "0x534b2f3A21130d7a60830c2Df862319e593943A3";
@@ -23,7 +24,12 @@ if (new URL(facilitatorUrl).protocol !== "https:") throw new Error("Facilitator 
 
 // Only one exact-price, task-addressed route in this hackathon process.
 const amountAtomic = "1000"; // $0.001 USDC (6 decimals)
-const resourcePath = `/tasks/${taskId}/run`;
+const guard = guardConfig({
+  ledger: process.env.LEDGER_ADDRESS,
+  payTo, taskId,
+  publicOrigin: process.env.PUBLIC_ORIGIN || "http://127.0.0.1:" + (process.env.PORT || "4021"),
+});
+const resourcePath = guard.resourcePath;
 const receiptsDir = fileURLToPath(new URL("../../receipts/", import.meta.url));
 mkdirSync(receiptsDir, { recursive: true, mode: 0o700 });
 
@@ -84,6 +90,22 @@ server.onAfterSettle(async ({ result }) => {
 });
 
 const app = express();
+// This middleware runs BEFORE x402's paymentMiddleware on both 402 and
+// paid retry. Pre-payment quote checks are mandatory. Paid attempts require a
+// second EIP-3009 signature + an atomic precharge reservation.
+app.get(resourcePath, async (req, res, next) => {
+  try {
+    await authorizeHttpRequest(req.headers, guard);
+    next();
+  } catch (error) {
+    console.error("PRE-SETTLEMENT DENIED:", error.message);
+    const conflict = /reservation|reconcile|locked/i.test(error.message);
+    res.status(conflict ? 409 : 403).json({
+      error: conflict ? "Payment attempt exists or needs reconciliation; no second charge" :
+        "Task or payment authorization rejected; settlement not attempted",
+    });
+  }
+});
 app.get("/healthz", (_req, res) => res.json({ ok: true, network: NETWORK }));
 app.use(paymentMiddleware({
   [`GET ${resourcePath}`]: {
