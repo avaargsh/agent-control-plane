@@ -11,7 +11,7 @@ export const USDC_CONTRACT = '0x534b2f3A21130d7a60830c2Df862319e593943A3';
 export const DEFAULT_RPC = 'https://testnet-rpc.monad.xyz';
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 // EIP-3009 AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce).
-export const AUTH_USED_TOPIC = '0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5';
+export const ERC3009_EVENT0 = '0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/;
 const HEX_QUANTITY = /^0x[0-9a-fA-F]+$/;
@@ -95,7 +95,7 @@ export function verifyReceipt(receipt, expected, currentBlock, opts = {}) {
       entry.removed !== true &&
       typeof entry.address === 'string' && entry.address.toLowerCase() === token &&
       Array.isArray(entry.topics) && entry.topics.length === 3 &&
-      entry.topics[0]?.toLowerCase() === AUTH_USED_TOPIC &&
+      entry.topics[0]?.toLowerCase() === ERC3009_EVENT0 &&
       entry.topics[1]?.toLowerCase() === topicAddress(payer) &&
       entry.topics[2]?.toLowerCase() === paymentNonce &&
       typeof entry.transactionHash === 'string' &&
