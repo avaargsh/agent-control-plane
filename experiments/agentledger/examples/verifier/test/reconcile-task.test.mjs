@@ -115,3 +115,17 @@ test("missing transaction nonce fails closed, preventing a blind second payment"
   await assert.rejects(()=>reconcileTask(args,deps),/missing pending EIP-3009 nonce/);
   assert.equal(counts.receipt,0);
 });
+
+test("live acceptance can explicitly bind settlement RPC to trusted task RPC",async()=>{
+  const {args,deps}=await setup("Proven");
+  const observed=[];
+  deps.settlementRpcUrl="https://testnet-rpc.monad.xyz/";
+  const original=deps.verifySettlement;
+  deps.verifySettlement=async (pending,rpc)=>{
+    observed.push(rpc);
+    return original(pending,rpc);
+  };
+  const state=await reconcileTask(args,deps);
+  assert.equal(state.classification,"PROVEN_PAYMENT_MATCH");
+  assert.deepEqual(observed,["https://testnet-rpc.monad.xyz/"]);
+});
