@@ -1,0 +1,27 @@
+{
+  "name": "@agentledger/x402",
+  "version": "0.1.0-sdk.0",
+  "description": "AgentLedger Express x402 HTTP 402 payment middleware (Monad Testnet exact scheme)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test test/*.test.mjs",
+    "lint": "echo \"skip\""
+  },
+  "dependencies": {
+    "@x402/core": "2.28.0",
+    "@x402/evm": "2.28.0",
+    "@x402/express": "2.28.0",
+    "express": "5.1.0",
+    "viem": "2.57.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20"
+  }
+}

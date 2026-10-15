@@ -1,0 +1,13 @@
+{
+  "name": "@agentledger/demo-web",
+  "private": true,
+  "description": "AgentLedger SDK demo web — Monad Testnet Pay → Execute → Prove read-only observer",
+  "version": "0.1.0-sdk.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "python3 -m http.server 8080",
+    "serve": "python3 -m http.server 8080"
+  }
+}

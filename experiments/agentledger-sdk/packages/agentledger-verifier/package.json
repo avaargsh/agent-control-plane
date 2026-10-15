@@ -1,0 +1,23 @@
+{
+  "name": "@agentledger/verifier",
+  "version": "0.1.0-sdk.0",
+  "description": "AgentLedger read-only verifier service and browser UI (Monad Testnet)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "public"],
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "node --test test/*.test.mjs",
+    "lint": "echo \"skip\""
+  },
+  "dependencies": {
+    "viem": "2.57.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^20"
+  }
+}

@@ -1,0 +1,57 @@
+name: agentledger-sdk
+
+on:
+  push:
+    branches: ["main", "feat/agentledger-*"]
+    paths:
+      - "experiments/agentledger-sdk/**"
+      - ".github/workflows/agentledger-sdk.yml"
+  pull_request:
+    paths:
+      - "experiments/agentledger-sdk/**"
+      - ".github/workflows/agentledger-sdk.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  node-packages:
+    name: Node SDK packages tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install workspace dependencies
+        working-directory: experiments/agentledger-sdk
+        run: npm ci
+      - name: TypeScript build
+        working-directory: experiments/agentledger-sdk
+        run: npm run build
+      - name: Run all package tests
+        working-directory: experiments/agentledger-sdk
+        run: npm run test:workspaces
+
+  solidity:
+    name: Foundry task-ledger tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Forge build + tests
+        working-directory: experiments/agentledger-sdk/contracts
+        run: |
+          forge build
+          forge test -vvv
+
+  python-journals:
+    name: Python SQLite journal tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Python journal tests
+        working-directory: experiments/agentledger-sdk/packages/agentledger-journal-py
+        run: |
+          python3 -m unittest discover -s tests -v

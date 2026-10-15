@@ -207,3 +207,33 @@ Only consider extracting a public SDK after:
 
 Until then expose the **read-only inspector/protocol**, not a generalized
 signing/payment SDK.
+
+
+## Contract-domain isolation: taskId is not a global identifier
+
+Each Ledger contract has its own `bytes32 taskId` namespace. Two separate
+deployments can contain the **same taskId**, matching Evidence digest and
+even matching on-chain settlement references. The external inspector MUST
+NOT combine a payer authorization and USDC receipt for Ledger A with a
+`Proven` task/Evidence anchor from Ledger B.
+
+Phase 0 now enforces identity at three separate boundaries:
+
+1. The task returned by `getTask` must match the requested
+   `(chainId=10143, ledgerContract, taskId)`; a mismatch marks chain
+   context unavailable and prevents payment or Evidence verification.
+2. The original EIP-712 approval's `(ledger, taskId)` must match the
+   inspected contract **before** any settlement reconciliation is attempted.
+3. The independently verified reconciliation result carries
+   `ledger, chainId, descriptionHash, payer, amountAtomic, taskId`.
+   Both the inspector and the pure Phase 0 projection compare these
+   fields against the chain-read task; a forged result or mismatched
+   contract cannot become `PaymentRecorded`/`EvidenceAnchored`.
+
+A mismatch is **`Conflict`** (or **`PaymentUnknown`** when the chain
+read context itself is inconsistent). The independent Evidence byte fact
+can remain visible when the *payment* quote is mismatched, but no
+cross-contract payment success is inferred and no recharge is allowed.
+
+This is orthogonal to chain finality, deployment provenance or ACP
+independent execution ownership; all remain separate acceptance gates.

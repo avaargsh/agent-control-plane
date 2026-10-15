@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLedger — Pay → Execute → Prove（Monad 测试网演示观察台）</title>
+  <meta name="description" content="AgentLedger SDK 演示站：Monad 测试网支付 → 执行 → 证明的只读观察台，阶段状态机与证据锚点核查。">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@16..64,400;16..64,600;16..64,800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="titlebar">
+    <a href="#" class="brand"><div class="brandmark">A</div> Agent<span style="font-weight:450;color:var(--muted)">Ledger</span></a>
+    <div class="titlecenter">Monad Testnet · read-only observer</div>
+    <div class="title-actions">
+      <span style="font-size:11px;color:var(--sub)"><span class="status-ind"></span>chainId 10143</span>
+      <button class="active" title="阶段" aria-label="阶段">Pay→Execute→Prove</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <aside class="sidebar">
+      <div class="side-label">WORKSPACE</div>
+      <button class="nav active" data-stage="created" onclick="goStage('created')"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/></svg><span>Created</span></button>
+      <button class="nav" data-stage="payment-unknown" onclick="goStage('payment-unknown')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span>PaymentUnknown</span></button>
+      <button class="nav" data-stage="payment-observed" onclick="goStage('payment-observed')"><svg viewBox="0 0 24 24"><path d="M22 12h-4"/><path d="M5 12h14"/></svg><span>PaymentObserved</span></button>
+      <button class="nav" data-stage="payment-recorded" onclick="goStage('payment-recorded')"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg><span>PaymentRecorded</span></button>
+      <button class="nav" data-stage="evidence-anchored" onclick="goStage('evidence-anchored')"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/></svg><span>EvidenceAnchored</span></button>
+      <button class="nav" data-stage="conflict" onclick="goStage('conflict')"><svg viewBox="0 0 24 24"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg><span>Conflict</span></button>
+      <div class="side-bottom">
+        <div class="mini-profile"><div class="avatar">AL</div><span>Ledger Demo<br/><small>只读观察台</small></span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="content">
+
+        <!-- Hero -->
+        <section class="reveal">
+          <div class="topline">
+            <div class="topline-left">
+              <div class="eyebrow">AGENTLEDGER SDK · DEMO</div>
+              <h1>Pay<span class="arrow" style="color:var(--chain);font-weight:800">→</span>Execute<span class="arrow" style="color:var(--chain);font-weight:800">→</span>Prove</h1>
+              <p class="subtitle">Monad 测试网（chainId 10143）的只读观察台。无主网、无资金托管、无自动写入。输入任务 ID，核查每一阶段的支付事实与证据事实。</p>
+            </div>
+            <div class="btn-group-toolbar">
+              <a href="#inspector" class="btn outline" style="padding:9px 13px;font-size:13px;">开始观察任务</a>
+              <a href="#stages" class="btn quiet">了解阶段</a>
+            </div>
+          </div>
+
+          <section class="card hero reveal">
+            <div>
+              <div class="eyebrow" style="color:var(--chain);font-weight:800;">GET STARTED</div>
+              <h2>你的链上支付与证据，<br/>现在都在一个工作空间。</h2>
+              <p>数据、结算、执行、证明。保留每一笔交易的来源与证据，不再反复切换终端和多个浏览器。</p>
+              <div class="hero-actions">
+                <a href="#inspector" class="btn primary">开始观察任务</a>
+                <a href="#stages" class="btn outline">了解阶段</a>
+              </div>
+            </div>
+            <div class="hero-graphic">
+              <svg viewBox="0 0 310 150" fill="none">
+                <g stroke="var(--chain)" stroke-width="1.4" opacity="0.7">
+                  <path d="M50 76C83-26 171 167 263 56"/>
+                  <path d="M50 96C92 176 200-30 263 76"/>
+                </g>
+                <circle cx="54" cy="77" r="6" fill="var(--chain)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="73" cy="65" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="92" cy="61" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="111" cy="70" r="6" fill="var(--chain)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="130" cy="88" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="149" cy="104" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="168" cy="110" r="6" fill="var(--chain)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="187" cy="105" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="206" cy="92" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="225" cy="77" r="6" fill="var(--chain)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="244" cy="65" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="263" cy="56" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="54" cy="97" r="5" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="73" cy="109" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="92" cy="114" r="5" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="111" cy="110" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="130" cy="98" r="5" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="149" cy="84" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="168" cy="72" r="5" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="187" cy="66" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="206" cy="68" r="5" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="225" cy="77" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="244" cy="87" r="5" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+                <circle cx="263" cy="96" r="4" fill="var(--card)" stroke="var(--chain)" opacity="0.8"/>
+              </svg>
+            </div>
+          </section>
+
+          <!-- Stats -->
+          <div class="stats reveal">
+            <div class="card metric"><span>阶段状态</span><b>6</b><span>Created → Conflict</span></div>
+            <div class="card metric"><span>网络</span><b>10143</b><span>Monad Testnet</span></div>
+            <div class="card metric"><span>代币</span><b>USDC</b><span>EIP-3009 授权</span></div>
+            <div class="card metric"><span>写入权限</span><b>只读</b><span>不发送交易</span></div>
+          </div>
+        </section>
+
+        <!-- Three stages -->
+        <section id="stages" class="reveal">
+          <div class="section reveal">
+            <h2>三阶段：支付 → 执行 → 证明</h2>
+            <button class="quiet" style="margin-left:auto;">查看全部 →</button>
+          </div>
+          <div class="grid three reveal">
+            <article class="card template-card reveal">
+              <div class="row between">
+                <div class="tool-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4"/><path d="M5 12h14"/></svg></div>
+                <span class="tag chain">Pay · USDC</span>
+              </div>
+              <h3 style="margin-top:12px;font-size:15px;">Pay — 支付观察</h3>
+              <p style="color:var(--sub);font-size:12px;">签署 EIP-712 任务批准，经 x402 网关预付，链上观察到 USDC Transfer + EIP-3009 AuthorizationUsed。</p>
+              <div style="margin-top:auto;color:var(--chain);font-size:11px;font-weight:650">进入阶段 →</div>
+            </article>
+            <article class="card template-card reveal">
+              <div class="row between">
+                <div class="tool-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+                <span class="tag">Execute · ACP-owned</span>
+              </div>
+              <h3 style="margin-top:12px;font-size:15px;">Execute — 执行决策</h3>
+              <p style="color:var(--sub);font-size:12px;">支付记录匹配后，由 ACP 决定是否执行任务；Ledger 本身从不执行、不调度、不重试。</p>
+              <div style="margin-top:auto;color:var(--chain);font-size:11px;font-weight:650">进入阶段 →</div>
+            </article>
+            <article class="card template-card reveal">
+              <div class="row between">
+                <div class="tool-icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/></svg></div>
+                <span class="tag anchor">Prove · SHA-256</span>
+              </div>
+              <h3 style="margin-top:12px;font-size:15px;">Prove — 证据锚点</h3>
+              <p style="color:var(--sub);font-size:12px;">证据字节重新哈希，与链上锚点的 Evidence digest 比对；匹配即 EvidenceAnchored，仅证明摘要一致。</p>
+              <div style="margin-top:auto;color:var(--chain);font-size:11px;font-weight:650">进入阶段 →</div>
+            </article>
+          </div>
+        </section>
+
+        <!-- State machine timeline -->
+        <section class="reveal">
+          <div class="section reveal">
+            <h2>状态机：每一步都是可读观察</h2>
+            <p class="subtitle" style="margin-top:8px;">不确定时保持 PaymentUnknown，矛盾时标记 Conflict，绝不自动充值。</p>
+          </div>
+          <div class="timeline reveal" id="timeline">
+            <div class="tl-items">
+              <div class="tl-item done reveal">
+                <div class="tl-dot"></div>
+                <div class="tl-line"></div>
+                <div class="tl-meta">Created</div>
+                <div class="tl-title">ACP 声明 NotStarted，链上 Created</div>
+                <div class="tl-desc">未知任何授权的支出；Ledger 自身从不授权。</div>
+              </div>
+              <div class="tl-item active reveal">
+                <div class="tl-dot"></div>
+                <div class="tl-line"></div>
+                <div class="tl-meta">PaymentUnknown</div>
+                <div class="tl-title">首次授权的 x402 尝试已预留</div>
+                <div class="tl-desc">结果不确定 ≠ 支付失败；不自动充值，不重发签名。</div>
+              </div>
+              <div class="tl-item reveal">
+                <div class="tl-dot"></div>
+                <div class="tl-line"></div>
+                <div class="tl-meta">PaymentObserved</div>
+                <div class="tl-title">独立验证的 Transfer + AuthorizationUsed nonce</div>
+                <div class="tl-desc">等待链上可信记录器确认匹配。</div>
+              </div>
+              <div class="tl-item reveal">
+                <div class="tl-dot"></div>
+                <div class="tl-line"></div>
+                <div class="tl-meta">PaymentRecorded</div>
+                <div class="tl-title">记录器链上 Paid 与观察到的事件匹配</div>
+                <div class="tl-desc">执行结果仍由 ACP 拥有。</div>
+              </div>
+              <div class="tl-item reveal">
+                <div class="tl-dot"></div>
+                <div class="tl-meta">EvidenceAnchored</div>
+                <div class="tl-title">证据字节 SHA-256 与链上 anchor 匹配</div>
+                <div class="tl-desc">仅证明摘要一致，不证明执行正确。</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Inspector -->
+        <section id="inspector" class="reveal">
+          <div class="section reveal">
+            <h2>演示检查器：按任务 ID 观察阶段</h2>
+            <p class="subtitle" style="margin-top:8px;">本地模拟，不发送任何交易，不连接真实钱包。仅用于演示 SDK 的 read-only 投影。</p>
+          </div>
+          <div class="inspector reveal">
+            <div class="inspector-grid reveal">
+              <div>
+                <h3 style="font-size:15px;margin-bottom:8px;">输入任务 ID</h3>
+                <div class="field">
+                  <label>taskId（bytes32，十六进制）</label>
+                  <input type="text" id="taskId" placeholder="0x..." value="0xcafe...">
+                </div>
+                <div class="btn-group" id="stageBtns"></div>
+                <div class="btn-group" id="sceneBtns" style="margin-top:0.9rem;"></div>
+                <p class="hint" id="hint">选择一个阶段，右侧将展示该阶段下应独立核查的支付事实与证据事实。</p>
+              </div>
+              <div class="facts" id="facts"></div>
+            </div>
+            <!-- 验证详情面板 -->
+            <div class="verify-panel reveal" id="verifyPanel">
+              <div class="verify-head">
+                <h3 id="verifyTitle">阶段详情</h3>
+                <span class="verify-chip" id="verifyChip">—</span>
+              </div>
+              <div class="verify-cols">
+                <div class="verify-col">
+                  <h4>支付事实</h4>
+                  <div class="verify-list" id="verifyPayment"></div>
+                </div>
+                <div class="verify-col">
+                  <h4>证据事实</h4>
+                  <div class="verify-list" id="verifyEvidence"></div>
+                </div>
+              </div>
+              <div class="verify-hash" id="verifyHash" style="display:none;">
+                <h4>哈希比对</h4>
+                <div class="hash-row">
+                  <span class="hash-label">本地计算 SHA-256</span>
+                  <span class="hash-value" id="hashLocal">—</span>
+                  <span class="hash-match" id="hashStatus">—</span>
+                </div>
+                <div class="hash-row">
+                  <span class="hash-label">链上 anchor</span>
+                  <span class="hash-value" id="hashChain">—</span>
+                </div>
+              </div>
+              <p class="note" id="verifyNote"></p>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <footer class="foot">
+    <span>AgentLedger SDK · 演示观察台</span>
+    <span>Local-first · Read-only · No patient data</span>
+  </footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
