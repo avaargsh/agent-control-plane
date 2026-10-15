@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { NETWORK, TOKEN, TRANSFER_TOPIC, verifyReceipt, verifyLive, validatePaymentResponse } from '../tools/settlement.mjs';
+import { NETWORK, USDC_CONTRACT, TRANSFER_TOPIC, verifyReceipt, verifyLive, validatePaymentResponse } from '../tools/settlement.mjs';
 
 const transaction = '0x' + 'c1'.repeat(32);
 const taskId = '0x' + '01'.repeat(32);
@@ -10,7 +10,7 @@ const payer = '0x' + '22'.repeat(20);
 const payTo = '0x' + '33'.repeat(20);
 const topic = addr => '0x' + '0'.repeat(24) + addr.slice(2);
 const log = {
-  address:TOKEN, topics:[TRANSFER_TOPIC, topic(payer), topic(payTo)],
+  address:USDC_CONTRACT, topics:[TRANSFER_TOPIC, topic(payer), topic(payTo)],
   data:'0x'+'0'.repeat(61)+'3e8', transactionHash:transaction, blockHash,
   logIndex:'0x5', removed:false
 };
