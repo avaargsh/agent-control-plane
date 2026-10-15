@@ -105,6 +105,7 @@ export async function reconcileTask({approval, pendingReceipt, expectedPayTo}, d
     paymentNonce: verified.paymentNonce,
     observedTransaction: verified.transaction,
     blockNumber: verified.blockNumber,
+    transactionIndex: verified.transactionIndex ?? null,
     blockHash: verified.blockHash ?? null,
     canonicalBlockCheckedAtObservation: verified.canonicalBlockCheckedAtObservation === true,
     observedHeadBlockNumber: verified.observedHeadBlockNumber ?? null,
