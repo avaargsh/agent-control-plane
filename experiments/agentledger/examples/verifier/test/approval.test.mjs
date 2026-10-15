@@ -9,7 +9,7 @@ const HASH = "0x" + "23".repeat(32);
 const REF = "0x" + "34".repeat(32);
 const LEDGER = "0x" + "45".repeat(20);
 const PAYEE = "0x" + "67".repeat(20);
-const TOKEN = "0x534b2f3A21130d7a60830c2Df862319e593943A3";
+const USDC_CONTRACT = "0x534b2f3A21130d7a60830c2Df862319e593943A3";
 const NOW = 1800000000n;
 
 async function signedApproval(overrides = {}) {
@@ -18,7 +18,7 @@ async function signedApproval(overrides = {}) {
   const quote = {
     schemaVersion: "agentledger.task-payment.v1", chainId: 10143,
     ledger: LEDGER, taskId: ID, descriptionHash: HASH,
-    token: TOKEN, payTo: PAYEE, payer: signer.address,
+    token: USDC_CONTRACT, payTo: PAYEE, payer: signer.address,
     amountAtomic: "1000", expiresAt: (NOW + 3600n).toString(),
     nonce: "0x" + "ab".repeat(32), ...overrides
   };
@@ -31,7 +31,7 @@ async function signedApproval(overrides = {}) {
 }
 const chainTask = { status:"Created", taskId:ID, descriptionHash:HASH, maxBudgetAtomic:"2000" };
 const settled = payer => ({
-  network:"eip155:10143", taskId:ID, token:TOKEN, payer, payTo:PAYEE,
+  network:"eip155:10143", taskId:ID, token:USDC_CONTRACT, payer, payTo:PAYEE,
   amountAtomic:"1000", settlementRef:REF
 });
 
@@ -86,7 +86,7 @@ test("cross task / payee / payer / amount settlement substitution fails", async 
 
 test("non-USDC, wrong chain and malformed approval are rejected", () => {
   const good = {schemaVersion:"agentledger.task-payment.v1",chainId:10143,ledger:LEDGER,taskId:ID,descriptionHash:HASH,
-    token:TOKEN,payTo:PAYEE,payer:PAYEE,amountAtomic:"1000",expiresAt:"1800003600",nonce:REF};
+    token:USDC_CONTRACT,payTo:PAYEE,payer:PAYEE,amountAtomic:"1000",expiresAt:"1800003600",nonce:REF};
   assert.throws(()=>buildApprovalData({...good,chainId:1}),/network/);
   assert.throws(()=>buildApprovalData({...good,token:LEDGER}),/USDC/);
   assert.throws(()=>buildApprovalData({...good,amountAtomic:"-1"}),/amountAtomic/);
