@@ -87,8 +87,12 @@ export async function reconcileTask({approval, pendingReceipt, expectedPayTo}, d
   check(task.chainId === 10143, "wrong chain for task");
   check(pendingReceipt?.paymentNonce &&
     typeof pendingReceipt.paymentNonce === "string", "missing pending EIP-3009 nonce");
+  // Public live acceptance injects its pinned official RPC. Never read a
+  // different ambient RPC URL after the ledger task came from a verified
+  // client: that would splice two unrelated chain observations together.
+  const settlementRpcUrl = deps.settlementRpcUrl ?? process.env.MONAD_RPC_URL;
   const verified = await (deps.verifySettlement || verifyLive)(
-    pendingReceipt, process.env.MONAD_RPC_URL
+    pendingReceipt, settlementRpcUrl
   );
   check(verified.paymentNonce === pendingReceipt.paymentNonce.toLowerCase(),
     "nonce not consumed in verified USDC transaction");
