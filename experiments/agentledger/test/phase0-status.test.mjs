@@ -5,19 +5,21 @@ import { PHASE0_SCHEMA, STATES, projectPhase0 } from "../phase0/status.mjs";
 
 const ZERO="0x"+"0".repeat(64);
 const ID="0x"+"11".repeat(32);
+const LEDGER="0x"+"a1".repeat(20);
 const DESCRIPTION="0x"+"22".repeat(32);
 const HASH="0x"+"33".repeat(32);
 const REF="0x"+"44".repeat(32);
 const PAYER="0x"+"55".repeat(20);
 const task=(state="Created")=>({
-  chainId:10143,taskId:ID,descriptionHash:DESCRIPTION,
+  chainId:10143,contract:LEDGER,taskId:ID,descriptionHash:DESCRIPTION,
   status:state,payer:state==="Created"?"0x"+"0".repeat(40):PAYER,
   amountAtomic:state==="Created"?"0":"1000",
   settlementRef:state==="Created"?ZERO:REF,
   evidenceHash:state==="Proven"?HASH:ZERO,
 });
 const reconcile=(state="Created")=>({
-  status:"READ_ONLY_NO_RECHARGE",taskId:ID,settlementRef:REF,
+  status:"READ_ONLY_NO_RECHARGE",taskId:ID,ledger:LEDGER,chainId:10143,
+  descriptionHash:DESCRIPTION,payer:PAYER,amountAtomic:"1000",settlementRef:REF,
   classification:{Created:"SETTLEMENT_OBSERVED_LEDGER_CREATED",
     Paid:"PAID_PAYMENT_MATCH",Proven:"PROVEN_PAYMENT_MATCH"}[state],
   paymentNonce:"0x"+"66".repeat(32),
@@ -91,4 +93,26 @@ test("fail closed on fabricated reconciliation or hash match without anchor",()=
   assert.throws(()=>projectPhase0({task:task(),evidence:"HashMatched"}),/cannot mark/);
   assert.throws(()=>projectPhase0({task:{...task(),chainId:1}}),/wrong chain/);
   assert.throws(()=>projectPhase0({task:task(),attempt:"Failed"}),/attempt/);
+});
+
+test("a matching taskId and settlementRef on a DIFFERENT Ledger cannot authorize payment fact",()=>{
+  const stolen={...reconcile("Proven"),ledger:"0x"+"b2".repeat(20)};
+  assert.throws(()=>projectPhase0({
+    task:task("Proven"),attempt:"Reserved",reconciliation:stolen,evidence:"HashMatched"
+  }),/Ledger contract mismatch/);
+  assert.throws(()=>projectPhase0({
+    task:task("Proven"),attempt:"Reserved",
+    reconciliation:{...reconcile("Proven"),chainId:1},evidence:"HashMatched"
+  }),/chain mismatch/);
+  assert.throws(()=>projectPhase0({
+    task:task("Proven"),attempt:"Reserved",
+    reconciliation:{...reconcile("Proven"),descriptionHash:HASH},evidence:"HashMatched"
+  }),/task description mismatch/);
+});
+test("valid settlement from same Ledger still requires matching payer and atomic amount",()=>{
+  for(const bad of [{payer:"0x"+"cd".repeat(20)},{amountAtomic:"1001"}]){
+    assert.throws(()=>projectPhase0({
+      task:task("Paid"),reconciliation:{...reconcile("Paid"),...bad}
+    }),/reconciliation (payer|amount) mismatch/);
+  }
 });
