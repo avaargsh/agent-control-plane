@@ -15,3 +15,8 @@ a9eceb902311e3a9855a37edfa044ef9d2b95f5c:experiments/agentledger/examples/verifi
 # Exact historical false positive: a *public* Monad Testnet USDC contract
 # address in a JSON example, not an API token or sensitive credential.
 06dcc2c701392386a56ac81ae76508125db80680:experiments/agentledger/docs/payment-approval.md:generic-api-key:43
+
+# Public testnet USDC ERC-20 contract address misidentified as API key by
+# gitleaks generic-api-key in an old hermetic test constant. Exact historical
+# fingerprint only. No broad exclusions or scan disable.
+e15cfce98e0e73a1bbd52285acaf897c142d77aa:experiments/agentledger/examples/verifier/test/prepare-record.test.mjs:generic-api-key:17
