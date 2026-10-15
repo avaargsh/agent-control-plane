@@ -3,7 +3,7 @@
  * Phase-0 public Monad TESTNET acceptance: strictly read-only, no signer.
  * Reports observed chain facts, NEVER finality, execution ownership or refund.
  */
-import { parseAbiItem, parseEventLogs } from "viem";
+import { decodeFunctionData, parseAbiItem, parseEventLogs } from "viem";
 import { makeClient, readTask } from "./task-reader.mjs";
 import { inspectPhase0 } from "./phase0-inspect.mjs";
 
@@ -16,6 +16,12 @@ const paymentEvent = parseAbiItem(
 );
 const anchorEvent = parseAbiItem(
   "event EvidenceAnchored(bytes32 indexed taskId, bytes32 indexed evidenceHash, address indexed submitter)"
+);
+const recordPaymentMethod=parseAbiItem(
+  "function recordPayment(bytes32 taskId, address payer, uint256 amount, bytes32 settlementRef)"
+);
+const submitEvidenceMethod=parseAbiItem(
+  "function submitEvidence(bytes32 taskId, bytes32 evidenceHash)"
 );
 
 export function assertPublicTestnetRpc(raw) {
@@ -80,6 +86,35 @@ export function assertOrderedEvents(payment,recorder,anchor) {
   }
   return true;
 }
+/**
+ * Validate the actual outer EVM transaction, not only logs emitted by a
+ * contract in its receipt. Phase 0 supports direct authorized calls only;
+ * multisig wrapper transactions need a separately reviewed adapter.
+ */
+export async function verifyDirectLedgerCall(client,{ledger,txHash,caller,method,args}) {
+  const tx=await client.getTransaction({hash:txHash.toLowerCase()});
+  check(tx && equalHash(tx.hash,txHash), "ledger call transaction unavailable or hash mismatch");
+  check(equalAddress(tx.to,ledger), "ledger call target contract mismatch");
+  check(equalAddress(tx.from,caller), "ledger call initiator is not authorized signer");
+  let decoded;
+  try {
+    decoded=decodeFunctionData({abi:[method],data:tx.input});
+  } catch (_) {
+    throw Error("ledger call function selector/parameters invalid");
+  }
+  check(decoded.functionName===method.name &&
+    decoded.args?.length===args.length,"ledger call function mismatch");
+  for(let i=0;i<args.length;i++){
+    const actual=decoded.args[i],expected=args[i];
+    check(typeof expected==="bigint" ? actual===expected :
+      (typeof expected==="string"&&typeof actual==="string"&&
+        actual.toLowerCase()===expected.toLowerCase()),
+    "ledger call parameter mismatch at index "+i);
+  }
+  return {caller:caller.toLowerCase(),target:ledger.toLowerCase(),
+    functionName:decoded.functionName,transaction:txHash.toLowerCase()};
+}
+
 export async function verifyLedgerEvent(client,{ledger,txHash,eventName,eventAbi,checkArgs}) {
   const hash = txHash.toLowerCase();
   const receipt = await client.getTransactionReceipt({hash});
@@ -173,6 +208,11 @@ export async function runLiveAcceptance(request, deps={}) {
       check(equalHash(args.settlementRef,task.settlementRef),"recorder settlementRef mismatch");
     },
   });
+  const recorderCall=await verifyDirectLedgerCall(client,{
+    ledger:request.ledger,txHash:request.recorderTransaction,
+    caller:recorderAddress,method:recordPaymentMethod,
+    args:[task.taskId,task.payer,BigInt(task.amountAtomic),task.settlementRef],
+  });
   const anchor=await verifyLedgerEvent(client,{
     ledger:request.ledger,txHash:request.anchorTransaction,
     eventName:"EvidenceAnchored",eventAbi:anchorEvent,
@@ -183,6 +223,22 @@ export async function runLiveAcceptance(request, deps={}) {
         equalAddress(args.submitter,recorderAddress),
         "Evidence submitted by unapproved actor");
     },
+  });
+  const anchorReceipt=await client.getTransactionReceipt({
+    hash:request.anchorTransaction.toLowerCase()
+  });
+  check(anchorReceipt?.logs && Array.isArray(anchorReceipt.logs),
+    "Evidence anchor transaction log unavailable");
+  const anchorLog=anchorReceipt.logs.filter(log=>equalAddress(log.address,request.ledger) &&
+    equalHash(log.transactionHash,request.anchorTransaction))[0];
+  check(anchorLog && anchorLog.topics?.length===4,"Evidence anchor log missing signer");
+  const signer="0x"+anchorLog.topics[3].slice(-40);
+  check(equalAddress(signer,task.creator)||equalAddress(signer,recorderAddress),
+    "Evidence anchor initiator unauthorized");
+  const anchorCall=await verifyDirectLedgerCall(client,{
+    ledger:request.ledger,txHash:request.anchorTransaction,
+    caller:signer,method:submitEvidenceMethod,
+    args:[task.taskId,task.evidenceHash],
   });
   assertOrderedEvents(payment,recorder,anchor);
   // A reorg can occur between the initial payment receipt read and the
@@ -224,13 +280,14 @@ export async function runLiveAcceptance(request, deps={}) {
       settlementRef:inspected.payment.settlementRef,
       receiptCanonicalAtObservation:true,
     },
-    recorder,
+    recorder:{...recorder, directCall:recorderCall},
     evidence:{
       transaction:anchor.transaction,
       blockHash:anchor.blockHash,
       evidenceHash:task.evidenceHash,
       bytesIndependentlyChecked:true,
       anchorCanonicalAtObservation:true,
+      directCall:anchorCall,
     },
     executionAuthority:"ACP",
     walletKeysUsed:false,contractWritesPerformed:false,
