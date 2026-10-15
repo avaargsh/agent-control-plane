@@ -88,6 +88,8 @@ jobs:
           node --check lib/reconcile-task.mjs
           node --check lib/phase0-inspect.mjs
           node --check tools/phase0-inspect.mjs
+          node --check lib/live-acceptance.mjs
+          node --check tools/live-acceptance.mjs
           node --check tools/reconcile-task.mjs
           node --check public/evidence-browser.mjs
           node --check public/app.mjs
