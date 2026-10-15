@@ -77,11 +77,49 @@ test('RPC verifier checks chain id and returns validated receipt, no network req
   const calls=[];
   const stub=async (_url,init)=>{
     const {method}=JSON.parse(init.body);calls.push(method);
-    const result={eth_chainId:'0x279f',eth_getTransactionReceipt:receipt,eth_blockNumber:'0x65'}[method];
+    const result={eth_chainId:'0x279f',eth_getTransactionReceipt:receipt,eth_blockNumber:'0x65',
+      eth_getBlockByNumber:{number:'0x64',hash:blockHash}}[method];
     return { ok:true,json:async()=>({jsonrpc:'2.0',id:1,result}) };
   };
   const result=await verifyLive({...expected,paymentResponse:{success:true,network:NETWORK,transaction,payer}},'http://127.0.0.1:8545',stub);
   assert.equal(result.amountAtomic,'1000');
-  assert.deepEqual(calls,['eth_chainId','eth_getTransactionReceipt','eth_blockNumber']);
+  assert.equal(result.blockHash,blockHash);
+  assert.equal(result.canonicalBlockCheckedAtObservation,true);
+  assert.equal(result.observedHeadBlockNumber,'101');
+  assert.deepEqual(calls,['eth_chainId','eth_getTransactionReceipt','eth_blockNumber','eth_getBlockByNumber']);
   await assert.rejects(()=>verifyLive(expected,'https://example.com',async()=>({ok:true,json:async()=>({result:'0x8f'})})));
+});
+
+test('RPC verifier refuses an orphaned block despite a successful same-amount receipt', async () => {
+  const expectedHash = '0x' + 'ff'.repeat(32);
+  const responseFor = canonical => async (_url,init) => {
+    const {method,params}=JSON.parse(init.body);
+    if(method==='eth_getBlockByNumber') {
+      assert.deepEqual(params,['0x64',false]);
+      return {ok:true,json:async()=>({result:canonical})};
+    }
+    const result={eth_chainId:'0x279f',eth_getTransactionReceipt:receipt,eth_blockNumber:'0x65'}[method];
+    return {ok:true,json:async()=>({result})};
+  };
+  await assert.rejects(
+    () => verifyLive(expected,'http://127.0.0.1:8545',
+      responseFor({number:'0x64',hash:expectedHash})),/no longer canonical/
+  );
+  await assert.rejects(
+    () => verifyLive(expected,'http://127.0.0.1:8545',responseFor(null)),/canonical block unavailable/
+  );
+  await assert.rejects(
+    () => verifyLive(expected,'http://127.0.0.1:8545',
+      responseFor({number:'0x65',hash:blockHash})),/height mismatch/
+  );
+});
+test('RPC lookup cannot declare a missing receipt a failed charge or settled event',async()=>{
+  const mock=async (_url,init)=>{
+    const {method}=JSON.parse(init.body);
+    return {ok:true,json:async()=>({result:method==='eth_chainId'?'0x279f':null})};
+  };
+  await assert.rejects(
+    () => verifyLive(expected,'http://127.0.0.1:8545',mock),
+    /receipt missing; PaymentUnknown/
+  );
 });
