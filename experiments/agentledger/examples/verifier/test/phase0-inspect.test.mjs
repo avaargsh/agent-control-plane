@@ -17,8 +17,10 @@ const TASK={
   settlementRef:REF,descriptionHash:"0x"+"55".repeat(32),
   evidenceHash:ZERO,maxBudgetAtomic:"1000",
 };
+const APPROVAL={ledger:LEDGER,taskId:ID};
 const reconciled={
-  status:"READ_ONLY_NO_RECHARGE",taskId:ID,
+  status:"READ_ONLY_NO_RECHARGE",taskId:ID,ledger:LEDGER,chainId:10143,
+  descriptionHash:TASK.descriptionHash,payer:TASK.payer,amountAtomic:"1000",
   classification:"PROVEN_PAYMENT_MATCH",settlementRef:REF,
   paymentNonce:"0x"+"66".repeat(32),observedTransaction:"0x"+"77".repeat(32)
 };
@@ -43,7 +45,7 @@ test("Phase0 independently verifies actual Evidence JSON bytes, given on-chain h
   const hash=await evidenceHash(evidence);
   const task={...TASK,evidenceHash:hash};
   const result=await inspectPhase0(req({
-    payment:{approval:{},pendingReceipt:{},expectedPayTo:LEDGER},
+    payment:{approval:APPROVAL,pendingReceipt:{},expectedPayTo:LEDGER},
     evidence:{file:path},
   }),{
     chain:{},readTask:async()=>task,reconcileTask:async()=>reconciled,
@@ -59,7 +61,7 @@ test("maliciously modified evidence cannot alter payment fact",async t=>{
   const good=await evidenceHash(evidence);
   writeFileSync(path,JSON.stringify({...evidence,executor:"forged"}));
   const result=await inspectPhase0(req({
-    payment:{approval:{},pendingReceipt:{},expectedPayTo:LEDGER},
+    payment:{approval:APPROVAL,pendingReceipt:{},expectedPayTo:LEDGER},
     evidence:{file:path},
   }),{chain:{},readTask:async()=>({...TASK,evidenceHash:good}),
     reconcileTask:async()=>reconciled});
@@ -70,7 +72,7 @@ test("maliciously modified evidence cannot alter payment fact",async t=>{
 test("payment reconciliation outage with independently matching bytes is PaymentUnknown",async t=>{
   const {path,evidence}=fixture(t);
   const result=await inspectPhase0(req({
-    payment:{approval:{},pendingReceipt:{},expectedPayTo:LEDGER},
+    payment:{approval:APPROVAL,pendingReceipt:{},expectedPayTo:LEDGER},
     evidence:{file:path},
   }),{chain:{},readTask:async()=>({...TASK,evidenceHash:await evidenceHash(evidence)}),
     reconcileTask:async()=>{throw Error("lost ACK and RPC outage");}});
@@ -97,7 +99,7 @@ test("onchain Paid without receipt is PaymentUnknown even when Recorder attested
 });
 test("explicit ledger conflict returns Conflict without second charge",async()=>{
   const result=await inspectPhase0(req({
-    payment:{approval:{},pendingReceipt:{},expectedPayTo:LEDGER},
+    payment:{approval:APPROVAL,pendingReceipt:{},expectedPayTo:LEDGER},
   }),{
     chain:{},readTask:async()=>TASK,
     reconcileTask:async()=>{throw Error("LEDGER_CONFLICT: settlement mismatch");}
@@ -112,4 +114,59 @@ test("untrusted caller cannot claim authoritative ACP NotStarted",async()=>{
     chain:{},readTask:async()=>{reads++;return TASK;}
   }),/requires authenticated ACP-owned context/);
   assert.equal(reads,0);
+});
+
+test("another contract with same taskId and hash cannot borrow payment approval",async t=>{
+  const {path,evidence}=fixture(t);
+  const secondLedger="0x"+"ab".repeat(20);
+  const requested=req({
+    ledger:secondLedger,
+    payment:{approval:APPROVAL,pendingReceipt:{},expectedPayTo:LEDGER},
+    evidence:{file:path},
+  });
+  let called=0;
+  const result=await inspectPhase0(requested,{
+    chain:{},
+    readTask:async()=>({...TASK,contract:secondLedger,evidenceHash:await evidenceHash(evidence)}),
+    reconcileTask:async()=>{called++;return reconciled;},
+  });
+  assert.equal(called,0,"payment verification cannot run across Ledger contracts");
+  assert.equal(result.state,"Conflict");
+  assert.equal(result.inspection.paymentDiagnostic,"PAYMENT_CONTEXT_MISMATCH");
+  assert.equal(result.payment.eventIndependentlyChecked,false);
+  assert.equal(result.evidence.bytesIndependentlyChecked,true);
+  assert.equal(result.retryPolicy.chargeAgain,false);
+});
+test("a forged successful reconciler return for a different Ledger is rejected",async t=>{
+  const {path,evidence}=fixture(t);
+  const result=await inspectPhase0(req({
+    payment:{approval:APPROVAL,pendingReceipt:{},expectedPayTo:LEDGER},
+    evidence:{file:path},
+  }),{
+    chain:{},readTask:async()=>({...TASK,evidenceHash:await evidenceHash(evidence)}),
+    reconcileTask:async()=>({...reconciled,ledger:"0x"+"de".repeat(20)}),
+  });
+  assert.equal(result.state,"Conflict");
+  assert.equal(result.inspection.paymentDiagnostic,"PAYMENT_CONTEXT_MISMATCH");
+  assert.equal(result.payment.eventIndependentlyChecked,false);
+  assert.equal(result.retryPolicy.chargeAgain,false);
+});
+test("task reader returning another contract or task never verifies either fact",async()=>{
+  for(const wrong of [
+    {contract:"0x"+"ed".repeat(20)},
+    {taskId:"0x"+"fa".repeat(32)},
+    {chainId:1},
+  ]){
+    let verificationCalls=0;
+    const result=await inspectPhase0(req({
+      payment:{approval:APPROVAL,pendingReceipt:{},expectedPayTo:LEDGER},
+    }),{
+      chain:{},readTask:async()=>({...TASK,...wrong}),
+      reconcileTask:async()=>{verificationCalls++;return reconciled;},
+    });
+    assert.equal(verificationCalls,0);
+    assert.equal(result.state,"PaymentUnknown");
+    assert.equal(result.inspection.chainDiagnostic,"CHAIN_CONTEXT_MISMATCH");
+    assert.equal(result.retryPolicy.chargeAgain,false);
+  }
 });
