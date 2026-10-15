@@ -15,13 +15,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  createPublicClient, createWalletClient, http, parseEther, toHex,
+  createPublicClient, createWalletClient, http, parseEther, toHex, parseEventLogs,
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { runDemoTask } from "./run-demo-task.mjs";
 import { readTask } from "../lib/task-reader.mjs";
 import { createVerifierServer } from "../server.mjs";
 import { verifyEvidence } from "../public/evidence-browser.mjs";
+import { projectPhase0 } from "../../../phase0/status.mjs";
 
 const hash = bytes => "0x" + createHash("sha256").update(bytes).digest("hex");
 const rpcUrl = process.env.AGENTLEDGER_ANVIL_RPC || "http://127.0.0.1:18545";
@@ -92,6 +93,7 @@ async function main() {
     let task=await readTask(publicClient,contract,taskId);
     assert.equal(task.status,"Created");
     assert.equal(task.descriptionHash,descriptionHash);
+    assert.equal(projectPhase0({task,attempt:"NotStarted"}).state,"Created");
     // Payment has NOT happened; this must refuse to run.
     await assert.rejects(
       ()=>runDemoTask({contract,taskId,inputPath,outputPath,evidencePath},{chain:publicClient}),
@@ -103,11 +105,21 @@ async function main() {
       address:contract,abi:contractArtifact.abi,functionName:"recordPayment",
       args:[taskId,payer.address,1000n,settlementRef],gas:400_000n
     });
-    await mined(payTx,"recordPayment SIMULATED");
+    const simulatedPaymentReceipt=await mined(payTx,"recordPayment SIMULATED");
+    const attestedLogs=parseEventLogs({
+      abi:contractArtifact.abi,logs:simulatedPaymentReceipt.logs,
+      eventName:"PaymentAttested",strict:true
+    });
+    assert.equal(attestedLogs.length,1,"expected simulated PaymentAttested event");
+    assert.equal(attestedLogs[0].args.settlementRef,settlementRef);
     task=await readTask(publicClient,contract,taskId);
     assert.equal(task.status,"Paid");
     assert.equal(task.amountAtomic,"1000");
     assert.equal(task.settlementRef,settlementRef);
+    const noUsdcPaymentProof=projectPhase0({task,attempt:"Reserved"});
+    assert.equal(noUsdcPaymentProof.state,"PaymentUnknown");
+    assert.equal(noUsdcPaymentProof.payment.recorderAttestationObserved,true);
+    assert.equal(noUsdcPaymentProof.payment.eventIndependentlyChecked,false);
 
     const executed=await runDemoTask(
       {contract,taskId,inputPath,outputPath,evidencePath},{chain:publicClient}
@@ -122,13 +134,25 @@ async function main() {
       address:contract,abi:contractArtifact.abi,functionName:"submitEvidence",
       args:[taskId,executed.evidenceHash],gas:400_000n
     });
-    await mined(proofTx,"submitEvidence");
+    const anchorReceipt=await mined(proofTx,"submitEvidence");
+    const anchorLogs=parseEventLogs({
+      abi:contractArtifact.abi,logs:anchorReceipt.logs,
+      eventName:"EvidenceAnchored",strict:true
+    });
+    assert.equal(anchorLogs.length,1,"expected independently visible EvidenceAnchored event");
+    assert.equal(anchorLogs[0].args.evidenceHash,executed.evidenceHash);
     task=await readTask(publicClient,contract,taskId);
     assert.equal(task.status,"Proven");
     assert.equal(task.evidenceHash,executed.evidenceHash);
     const evidence=JSON.parse(readFileSync(evidencePath,"utf8"));
     assert.equal((await verifyEvidence(evidence,task,
       readFileSync(inputPath),readFileSync(outputPath))).match,true);
+    const separatedFacts=projectPhase0({
+      task,attempt:"Reserved",evidence:"HashMatched"
+    });
+    assert.equal(separatedFacts.state,"PaymentUnknown");
+    assert.equal(separatedFacts.payment.eventIndependentlyChecked,false);
+    assert.equal(separatedFacts.evidence.bytesIndependentlyChecked,true);
     await assert.rejects(
       ()=>verifyEvidence({...evidence,executor:"forged"},task),/SHA-256 mismatch/
     );
@@ -160,6 +184,17 @@ async function main() {
       txHashes:{deploy:deployment,createTask:taskTx,simulatedRecordPayment:payTx,submitEvidence:proofTx},
       statuses:["Created","Paid","Proven"],
       evidenceHash:executed.evidenceHash,
+      phase0:{
+        schemaVersion:separatedFacts.schemaVersion,
+        externallySafeState:separatedFacts.state,
+        paymentFact:separatedFacts.payment.fact,
+        recorderAttestationEventObserved:attestedLogs.length===1,
+        usdcTransferAndNonceVerified:false,
+        evidenceAnchorEventObserved:anchorLogs.length===1,
+        evidenceBytesMatched:separatedFacts.evidence.bytesIndependentlyChecked,
+        executionAuthority:"ACP",
+        safeToRecharge:false
+      },
       independentReadback:{abi:true,browserApi:true,localEvidenceSha256:true},
       result:"PASS_LOCAL_EVM_ONLY",
     };
