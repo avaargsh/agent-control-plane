@@ -4,7 +4,7 @@
 // local admission reservation. No signer, payment, or chain write.
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { hashTypedData } from "viem";
 import { makeClient, readTask } from "../lib/task-reader.mjs";
 import { verifyTaskPaymentApproval, bindApprovedSettlement } from "../lib/payment-approval.mjs";
@@ -75,7 +75,7 @@ async function main(args) {
     await prepareRecord({ approval, pendingReceipt, expectedPayTo }), null, 2
   ));
 }
-if (process.argv[1] && import.meta.url === new URL("file://" + process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main(process.argv.slice(2)).catch(error => {
     console.error("NOT READY: " + error.message);
     process.exitCode = 1;
