@@ -158,6 +158,11 @@ unavailable; no source means **not independently verified**, not false.
 assertion, never inferred from missing local files. Use `Reserved` after
 an attempted charge or `NotEstablished` where that fact is unknown.
 
+The public CLI refuses a raw user-supplied `NotStarted` assertion:
+only an ACP-authenticated integration may supply this input to the
+pure projection. Missing files or journals are not authoritative
+proof that no charge began.
+
 Exit: `0` only if both payment and Evidence are independently matched;
 `2` conflict, `3` unknown/incomplete chain outcome,
 `4` known partial progress. Nonzero does **not** mean failed payment
