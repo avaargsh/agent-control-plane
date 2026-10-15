@@ -60,3 +60,23 @@ jobs:
           node --input-type=module -e "import('@x402/express').then(m => { if(typeof m.paymentMiddleware !== 'function') process.exit(1) })"
           node --input-type=module -e "import('@x402/core/server').then(m => { if(typeof m.x402ResourceServer !== 'function') process.exit(1) })"
           node --input-type=module -e "import('@x402/evm/exact/server').then(m => { if(typeof m.ExactEvmScheme !== 'function') process.exit(1) })"
+
+  verifier:
+    name: Read-only UI and contract query smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned viem dependency
+        working-directory: experiments/agentledger/examples/verifier
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Syntax and hermetic verifier tests
+        working-directory: experiments/agentledger/examples/verifier
+        run: |
+          node --check server.mjs
+          node --check lib/task-reader.mjs
+          node --check public/evidence-browser.mjs
+          node --check public/app.mjs
+          npm test
