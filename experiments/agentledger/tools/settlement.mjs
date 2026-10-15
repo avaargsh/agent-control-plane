@@ -85,6 +85,11 @@ export function verifyReceipt(receipt, expected, currentBlock, opts = {}) {
   requireMatch(normalizeHash(log.transactionHash, 'log.transactionHash') === transaction, 'log transaction mismatch');
   requireMatch(normalizeHash(log.blockHash, 'log.blockHash') === receipt.blockHash.toLowerCase(), 'log block mismatch');
   const logIndex = safeLogIndex(log.logIndex);
+  // RPC receipts report an index within a block. Live acceptance uses it
+  // alongside block height to establish payment-before-recording order.
+  // Legacy unit fixtures can omit it, but then a live acceptance must FAIL.
+  const transactionIndex = receipt.transactionIndex === undefined ? null :
+    safeLogIndex(receipt.transactionIndex);
   // When a payment nonce is supplied, a same-amount unrelated Transfer is
   // insufficient. The token itself must also have consumed THAT nonce in
   // THIS receipt. This applies only to EIP-3009 settlement mode.
@@ -110,7 +115,7 @@ export function verifyReceipt(receipt, expected, currentBlock, opts = {}) {
   return {
     schemaVersion: 'agentledger.settlement.v1', taskId, network: NETWORK, token,
     transaction, payer, payTo, amountAtomic: amount.toString(), settlementRef,
-    logIndex, blockNumber: block.toString(),
+    logIndex, transactionIndex, blockNumber: block.toString(),
     blockHash: receipt.blockHash.toLowerCase(),
     confirmations: (head - block + 1n).toString(),
     ...(paymentNonce ? {paymentNonce} : {}),
