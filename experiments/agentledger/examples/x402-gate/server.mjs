@@ -60,7 +60,7 @@ const server = new x402ResourceServer(new HTTPFacilitatorClient({ url: facilitat
 // not trustless verification and not proof of task authorization.
 // A crash between on-chain settlement and this write still needs reconciliation
 // from the payer's PAYMENT-RESPONSE transaction hash.
-server.onAfterSettle(async ({ result }) => {
+server.onAfterSettle(async ({ result, paymentPayload }) => {
   if (result?.success !== true || result.network !== NETWORK ||
       !TX_RE.test(result.transaction || "") || !ADDRESS_RE.test(result.payer || "")) {
     console.error("UNRECORDED settlement: unexpected result; manual reconciliation required");
@@ -71,13 +71,15 @@ server.onAfterSettle(async ({ result }) => {
     schemaVersion: "agentledger.pending-x402.v1",
     taskId, network: NETWORK, transaction, payer: result.payer.toLowerCase(),
     payTo: payTo.toLowerCase(), token: USDC, amountAtomic,
+    paymentNonce: typeof paymentPayload?.payload?.authorization?.nonce === "string" ?
+      paymentPayload.payload.authorization.nonce.toLowerCase() : null,
     paymentResponse: {
       success: true, network: result.network, transaction,
       payer: result.payer.toLowerCase(), ...(result.amount ? { amount: String(result.amount) } : {}),
     },
     recordedAt: new Date().toISOString(),
     verified: false,
-    note: "Untrusted until RPC verification and independent task authorization check",
+    note: "Untrusted until RPC verification and independent task/quote authorization check. Precharge reservation is not a completed payment.",
   };
   try {
     writeFileSync(`${receiptsDir}/${transaction}.json`, JSON.stringify(pending, null, 2) + "\n",
