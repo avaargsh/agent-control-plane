@@ -54,7 +54,13 @@ The read-only verifier:
 4. Matches **one** ERC-20 Transfer from the official Monad Testnet USDC
    contract, with exact sender, receiver and value.
 5. Checks x402 settlement response against transaction, network and payer.
-6. Generates a domain-separated SHA-256 `settlementRef` from
+6. If an EIP-3009 `paymentNonce` is included, **requires exactly one**
+   `AuthorizationUsed(payer, paymentNonce)` event from the official USDC
+   contract in **the same receipt/block/transaction**, in addition to
+   the matching Transfer. Missing, duplicate, tampered or unrelated nonce
+   events fail closed. This proves the token consumed that authorization,
+   not that the Agent delivered its service.
+7. Generates a domain-separated SHA-256 `settlementRef` from
    network, token, transaction and log index.
 
 The resulting `settlementRef` is a candidate for the contract's
@@ -103,3 +109,24 @@ actual Agent execution still requires work.
 
 Run `node --test test/settlement.test.mjs` locally. No real USDC transfer
 or onchain deployment is claimed by these tests.
+
+
+## Pre-charge → consumed nonce → post-charge admission
+
+For the `examples/x402-gate` path, the post-settle notice now includes
+the EIP-3009 `paymentNonce`. The read-only receipt verifier demands the
+matching EIP-3009 `AuthorizationUsed` event; an unrelated transfer of the
+same amount cannot be accepted as that paid authorization.
+
+`examples/verifier/tools/prepare-record.mjs` additionally requires a
+durable matching pre-charge record in
+`receipts/charge-attempts.db` (task, EIP-712 quote digest, signer,
+quote nonce and consumed payment nonce) before it creates a post-settlement
+`PREPARED` recorder candidate. A failed check leaves the post-settlement
+admission journal untouched. No recorder wallet signing occurs.
+
+A matching pair of events in a successful receipt remains weaker than
+chain finality and cannot prove model execution, delivery, refund rights,
+or correct linkage to a serialized HTTP 402 challenge. The pre-charge
+reservation is local-only; live testnet acceptance and recovery still need
+a dedicated test wallet and independent evidence.
