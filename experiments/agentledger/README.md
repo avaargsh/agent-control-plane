@@ -14,14 +14,17 @@ and the frozen v0.1 acceptance contract.
 | Solidity task ledger | src/AgentLedger.sol | Stores a trusted recorder's PAYMENT ATTESTATION, not independently verified USDC |
 | Lifecycle | Created → Paid → Proven | No durable offchain Executing / Failed / Expired orchestration yet |
 | Evidence | tools/evidence.mjs | SHA-256 of canonical metadata; NOT proof of truthful execution |
-| Tests | test/AgentLedger.t.sol + test/evidence.test.mjs | Foundry and Node tests, plus CI |
-| x402 HTTP gate | examples/x402-gate/server.mjs | Standalone real x402 example; no settlement→task mapping yet |
+| Tests | test/AgentLedger.t.sol + Node evidence/settlement tests | Foundry and Node tests, plus CI |
+| x402 HTTP gate | examples/x402-gate/server.mjs | Fixed task-ID route; journals unverified settlement notices, no ledger mutation |
 | Facilitator check | tools/facilitator-preflight.mjs | Read-only /supported; fails closed for missing network/scheme |
+| On-chain receipt verifier | tools/settlement.mjs | Read-only chain/USDC/log verification, NOT payment intent authorization |
 | Browser UI | not implemented | CLI first, for a one-day hackathon |
 
-**Critical distinction:** x402 /paid-data is a separately working example.
-It is NOT currently wired to recordPayment or submitEvidence. Never present
-a successful paid API call as a completed AgentLedger payment→execution→proof.
+**Critical distinction:** x402 payments can be scoped to a fixed task path, but
+settlement-to-**authorized**-task binding is not yet implemented. The local
+journal captures unverified settlement notices. It is NOT wired to
+recordPayment or submitEvidence. Never present a paid API response as
+AgentLedger payment→execution→proof. See [receipt reconciliation](docs/receipt-reconciliation.md).
 
 ## Threat model and invariants
 
@@ -63,13 +66,13 @@ Never commit mnemonic phrases or private keys.
 
 ~~~bash
 cd experiments/agentledger
-node --test test/evidence.test.mjs
+node --test test/*.test.mjs
 forge test -vvv
 node tools/facilitator-preflight.mjs
 ~~~
 
-Forge was not available in the authoring environment; passing CI and local
-Forge tests are required before describing the contract as verified.
+GitHub Actions has previously passed the Foundry and Node experiment jobs.
+Recheck the latest commit's CI before merging; no public-chain deployment is claimed.
 
 ## Evidence walkthrough (fully local, no tokens)
 
@@ -145,23 +148,28 @@ cd experiments/agentledger
 node tools/facilitator-preflight.mjs
 cd examples/x402-gate
 npm install
+export TASK_ID=0xYOUR_EXISTING_BYTES32_TASK_ID
 export PAY_TO_ADDRESS=0xYOUR_TESTNET_USDC_RECEIVER
 npm start
 # A fresh request should return HTTP 402 (not 200):
-curl -i http://127.0.0.1:4021/paid-data
+curl -i "http://127.0.0.1:4021/tasks/$TASK_ID/run"
 ~~~
 
 An x402 v2-compatible client needs testnet USDC and a valid
 PAYMENT-SIGNATURE to purchase a response. This server uses the Monad
 facilitator, an explicit testnet USDC address and fail-closed /supported
-checks. Its /paid-data route **does not** yet create an AgentLedger task,
-durably bind settlement reference to task ID, run an Agent, or anchor evidence.
+checks. Its task-scoped route journals **unverified** payment responses; it
+still **does not** cryptographically bind a payer-approved quote to the task,
+call recordPayment, run an Agent, or anchor execution evidence.
+
+The read-only verification path is documented in
+[docs/receipt-reconciliation.md](docs/receipt-reconciliation.md).
 
 ## Next milestones (not yet done)
 
-1. P1: Bind quote/taskId and exact payment demand to x402 settlement,
-   independently verify USDC Transfer log + final receipt, and durably
-   reconcile retries and crash/lost ACK without double charging.
+1. P1: Bind signed quote/taskId and payer-approved payment intent to x402
+   settlement; use the new read-only USDC Transfer receipt verifier as one
+   input to durable, idempotent payment reconciliation (not yet built).
 2. P1: Connect a real minimal Agent job execution and attestation generator.
 3. P1: CLI or minimal Web page for task query, wallet flow, evidence upload
    and local digest comparison.
