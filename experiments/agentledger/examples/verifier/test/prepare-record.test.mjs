@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { hashTypedData } from "viem";
 import { buildApprovalData } from "../lib/payment-approval.mjs";
 import { prepareRecord, reserveAdmission } from "../tools/prepare-record.mjs";
 
@@ -14,6 +15,7 @@ const taskId = "0x" + "55".repeat(32);
 const descriptionHash = "0x" + "66".repeat(32);
 const settlementRef = "0x" + "77".repeat(32);
 const tx = "0x" + "88".repeat(32);
+const paymentNonce = "0x" + "aa".repeat(32);
 const usdcContract = "0x534b2f3A21130d7a60830c2Df862319e593943A3";
 
 async function signed() {
@@ -29,7 +31,10 @@ async function signed() {
   approval.signature = await signer.signTypedData(typed);
   return approval;
 }
-function fixture(approval, journalPath, overrides = {}) {
+function fixture(approval, journalPath, overrides = {}, prechargeOverride = {}) {
+  const signedQuote = buildApprovalData(approval);
+  const quoteDigest = hashTypedData({domain:signedQuote.domain,types:signedQuote.types,
+    primaryType:signedQuote.primaryType,message:signedQuote.message}).toLowerCase();
   let reads = 0, settlements = 0;
   const task = {
     taskId, descriptionHash, status: "Created", maxBudgetAtomic: "1000"
@@ -37,13 +42,22 @@ function fixture(approval, journalPath, overrides = {}) {
   const receipt = {
     taskId, transaction: tx, payer: approval.payer, payTo, token: usdcContract,
     network: "eip155:10143", amountAtomic: "1000",
-    settlementRef
+    settlementRef, paymentNonce
   };
   return {
     deps: {
       chain: {},
       readTask: async () => { reads++; return task; },
       verifySettlement: async () => { settlements++; return { ...receipt, ...overrides }; },
+      inspectPrecharge: () => ({
+        result:"PRECHARGE_RECORD_FOUND",
+        admission:{
+          status:"RESERVED_RECONCILE_ONLY",ledger:ledger.toLowerCase(),
+          task_id:taskId,payer:approval.payer.toLowerCase(),
+          approval_nonce:approval.nonce,payment_nonce:paymentNonce,quote_digest:quoteDigest,
+          ...prechargeOverride
+        }
+      }),
       reserve: candidate => reserveAdmission(candidate, { journalPath })
     },
     counters: () => [reads, settlements]
@@ -55,7 +69,7 @@ test("signature + receipt produce durable, one-time recorder candidate", async t
   const journalPath = join(dir, "admission.db");
   const approval = await signed();
   const harness = fixture(approval, journalPath);
-  const args = { approval, pendingReceipt: { transaction:tx }, expectedPayTo:payTo };
+  const args = { approval, pendingReceipt: { transaction:tx, paymentNonce }, expectedPayTo:payTo };
   const first = await prepareRecord(args, harness.deps);
   assert.equal(first.status, "PREPARED_FOR_RECORDER_REVIEW_NOT_SUBMITTED");
   assert.equal(first.journal.result, "PREPARED_NOT_SUBMITTED");
@@ -84,7 +98,34 @@ test("receipt amount mismatch fails before admission", async t => {
   const approval = await signed();
   const harness = fixture(approval, join(dir,"admission.db"), { amountAtomic:"999" });
   await assert.rejects(prepareRecord({
-    approval,pendingReceipt:{transaction:tx},expectedPayTo:payTo
+    approval,pendingReceipt:{transaction:tx,paymentNonce},expectedPayTo:payTo
   },harness.deps),/amount mismatch/);
   assert.deepEqual(harness.counters(),[1,1]);
+});
+
+test("mismatched pre-charge nonce or quote reservation blocks recorder candidate", async t => {
+  const dir = mkdtempSync(join(tmpdir(),"agentledger-deny-"));
+  t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const approval = await signed();
+  for (const override of [
+    {payment_nonce:"0x"+"11".repeat(32)},
+    {quote_digest:"0x"+"22".repeat(32)},
+    {task_id:"0x"+"33".repeat(32)},
+  ]) {
+    const harness=fixture(approval,join(dir,"post.db"),{},override);
+    await assert.rejects(
+      prepareRecord({approval,pendingReceipt:{transaction:tx,paymentNonce},expectedPayTo:payTo},harness.deps),
+      /pre-charge reservation/
+    );
+  }
+});
+test("missing EIP-3009 onchain nonce cannot be admitted",async t=>{
+  const dir=mkdtempSync(join(tmpdir(),"agentledger-deny-"));
+  t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const approval=await signed();
+  const harness=fixture(approval,join(dir,"post.db"),{paymentNonce:undefined});
+  await assert.rejects(
+    prepareRecord({approval,pendingReceipt:{transaction:tx,paymentNonce},expectedPayTo:payTo},harness.deps),
+    /authorization nonce/
+  );
 });
