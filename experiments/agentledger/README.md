@@ -18,7 +18,7 @@ and the frozen v0.1 acceptance contract.
 | x402 HTTP gate | examples/x402-gate/server.mjs | Fixed task-ID route; journals unverified settlement notices, no ledger mutation |
 | Facilitator check | tools/facilitator-preflight.mjs | Read-only /supported; fails closed for missing network/scheme |
 | On-chain receipt verifier | tools/settlement.mjs | Read-only chain/USDC/log verification, NOT payment intent authorization |
-| Browser UI | not implemented | CLI first, for a one-day hackathon |
+| Browser verifier UI | examples/verifier/ | Read-only task query, browser-local Evidence SHA-256; no signing or payments |
 
 **Critical distinction:** x402 payments can be scoped to a fixed task path, but
 settlement-to-**authorized**-task binding is not yet implemented. The local
@@ -69,6 +69,11 @@ cd experiments/agentledger
 node --test test/*.test.mjs
 forge test -vvv
 node tools/facilitator-preflight.mjs
+cd examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+npm test
+npm start
+# Browser: http://127.0.0.1:4321
 ~~~
 
 GitHub Actions has previously passed the Foundry and Node experiment jobs.
@@ -179,3 +184,39 @@ The read-only verification path is documented in
 Do not merge this experimental implementation into ACP core without separate
 security review, repeatable mainnet-disabled testnet acceptance evidence,
 and checks for lost responses, reorgs and duplicate payments.
+
+## Read-only browser verifier (implemented)
+
+```bash
+cd experiments/agentledger/examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+npm test
+npm start
+# Navigate to http://127.0.0.1:4321
+```
+
+The UI accepts a Monad Testnet **deployed contract address** and a bytes32
+**task ID**. The local Node service uses `viem` to check chain ID 10143,
+confirm nonempty contract bytecode, and invoke the read-only
+`getTask(bytes32)` function. It returns the status Created/Paid/Proven,
+amount, budget cap, settlement reference and immutable evidence hash.
+
+Choose the local `agentledger.evidence.v1` JSON file to reproduce the
+canonical SHA-256 digest using browser WebCrypto. Optionally select
+the **original input and output** files to verify both individual digests.
+The UI deliberately disables MATCH until the chain task is Proven.
+No file data leaves the browser. No wallet, private key, signer, or
+`recordPayment` endpoint is exposed by this component.
+
+**Trust limitations:** status Paid is a trusted recorder attestation,
+not a trustless proof of USDC settlement. Evidence hash matching proves
+byte equality only, not executor provenance or correct Agent execution.
+No public deployment or live x402 paid run is claimed by the UI.
+
+Static content is served from an explicit allowlist on local loopback,
+with a restrictive CSP and no general-purpose RPC relay. You can change
+the upstream Monad RPC through `MONAD_RPC_URL` (HTTPS or loopback only),
+but cannot change the expected chain ID in the API request.
+
+See `docs/receipt-reconciliation.md` for the remaining payment-intent
+binding and idempotency gaps. Testnet only.
