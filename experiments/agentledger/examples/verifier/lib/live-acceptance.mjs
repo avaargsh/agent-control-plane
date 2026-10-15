@@ -6,6 +6,7 @@
 import { decodeFunctionData, parseAbiItem, parseEventLogs } from "viem";
 import { makeClient, readTask } from "./task-reader.mjs";
 import { inspectPhase0 } from "./phase0-inspect.mjs";
+import { verifyReviewedDeployment } from "../../../phase0/reviewed-deployment.mjs";
 
 const PINNED_RPC = "https://testnet-rpc.monad.xyz/";
 const HASH = /^0x[0-9a-fA-F]{64}$/;
@@ -163,6 +164,24 @@ export async function runLiveAcceptance(request, deps={}) {
   const rpc=assertPublicTestnetRpc(deps.rpc || process.env.MONAD_RPC_URL || PINNED_RPC);
   const client=deps.client || makeClient(rpc);
   check(await client.getChainId()===10143,"RPC not on Monad Testnet");
+  // Check deployment provenance BEFORE trusting even well-formed events.
+  // A caller-provided Ledger address cannot approve itself: the production
+  // verifier reads the committed, PR-reviewed allowlist (default deny).
+  const recorderAddress=await client.readContract({
+    address:request.ledger,
+    abi:[parseAbiItem("function paymentRecorder() view returns (address)")],
+    functionName:"paymentRecorder",
+  });
+  check(ADDRESS.test(recorderAddress),"trusted Recorder address unavailable");
+  const reviewed=await (deps.verifyDeployment||verifyReviewedDeployment)(
+    client,request.ledger,recorderAddress
+  );
+  check(reviewed?.schemaVersion==="agentledger.reviewed-deployment-witness.v1" &&
+    equalAddress(reviewed.address,request.ledger) &&
+    equalAddress(reviewed.recorder,recorderAddress) &&
+    HASH.test(reviewed.blockHash||"") &&
+    HASH.test(reviewed.runtimeKeccak||""),
+    "PR-reviewed Ledger deployment evidence unavailable");
   const phase0Request={
     schemaVersion:"agentledger.phase0.inspect.v1",
     ledger:request.ledger,
@@ -193,12 +212,6 @@ export async function runLiveAcceptance(request, deps={}) {
     equalHash(task.settlementRef,inspected.payment.settlementRef),
     "re-read onchain task changed during acceptance; reconcile first");
 
-  const recorderAddress=await client.readContract({
-    address:request.ledger,
-    abi:[parseAbiItem("function paymentRecorder() view returns (address)")],
-    functionName:"paymentRecorder",
-  });
-  check(ADDRESS.test(recorderAddress),"trusted recorder address unavailable");
   const recorder=await verifyLedgerEvent(client,{
     ledger:request.ledger,txHash:request.recorderTransaction,
     eventName:"PaymentAttested",eventAbi:paymentEvent,
@@ -235,7 +248,7 @@ export async function runLiveAcceptance(request, deps={}) {
   // A reorg can occur between the initial payment receipt read and the
   // later Recorder/Evidence queries. Re-read all three canonical headers at
   // the end of acceptance to avoid reporting a stale mixed-chain snapshot.
-  const witnesses=[payment,recorder,anchor];
+  const witnesses=[payment,recorder,anchor,reviewed];
   for(const [i,witness] of witnesses.entries()){
     const block=await client.getBlock({blockNumber:strictHeight(witness.blockNumber,"witness")});
     check(block && block.number===BigInt(witness.blockNumber) &&
@@ -258,6 +271,8 @@ export async function runLiveAcceptance(request, deps={}) {
     network:"MONAD_TESTNET_ONLY",
     chainId:10143,
     rpcPinnedToOfficialHTTPS:true,
+    reviewedDeploymentRequired:true,
+    deployment:reviewed,
     canonicalBlocksRecheckedAtEnd:true,
     orderedEventsVerified:true,
     taskReadbackRecheckedAtEnd:true,
