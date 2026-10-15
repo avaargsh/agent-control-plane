@@ -106,6 +106,12 @@ export async function runLiveAcceptance(request, deps={}) {
     equalHash(task.settlementRef,inspected.payment.settlementRef),
     "re-read onchain task changed during acceptance; reconcile first");
 
+  const recorderAddress=await client.readContract({
+    address:request.ledger,
+    abi:[parseAbiItem("function paymentRecorder() view returns (address)")],
+    functionName:"paymentRecorder",
+  });
+  check(ADDRESS.test(recorderAddress),"trusted recorder address unavailable");
   const recorder=await verifyLedgerEvent(client,{
     ledger:request.ledger,txHash:request.recorderTransaction,
     eventName:"PaymentAttested",eventAbi:paymentEvent,
@@ -123,7 +129,8 @@ export async function runLiveAcceptance(request, deps={}) {
       check(equalHash(args.taskId,request.taskId),"Evidence task ID mismatch");
       check(equalHash(args.evidenceHash,task.evidenceHash),"Evidence anchor hash mismatch");
       check(equalAddress(args.submitter,task.creator) ||
-        equalAddress(args.submitter,awaitRecorderNotSupported()),"unreachable");
+        equalAddress(args.submitter,recorderAddress),
+        "Evidence submitted by unapproved actor");
     },
   });
   return {
