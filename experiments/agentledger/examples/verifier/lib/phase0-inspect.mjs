@@ -44,6 +44,14 @@ export async function inspectPhase0(request, deps={}) {
   } catch (error) {
     chainError="CHAIN_READ_UNAVAILABLE";
   }
+  // A read obtained for another contract or another task must NEVER be
+  // combined with the signed payment context supplied for this inspection.
+  if(task && (task.chainId !== 10143 ||
+      task.contract?.toLowerCase() !== ledger.toLowerCase() ||
+      task.taskId?.toLowerCase() !== taskId.toLowerCase())) {
+    task=null;
+    chainError="CHAIN_CONTEXT_MISMATCH";
+  }
   if(task) {
     const payment=request.payment;
     if(payment) {
@@ -51,15 +59,29 @@ export async function inspectPhase0(request, deps={}) {
         if(!payment.approval || !payment.pendingReceipt || !payment.expectedPayTo) {
           throw Error("signed quote/receipt/payee required");
         }
-        reconciliation=await (deps.reconcileTask || reconcileTask)({
+        if(payment.approval.ledger?.toLowerCase()!==ledger.toLowerCase() ||
+           payment.approval.taskId?.toLowerCase()!==taskId.toLowerCase()) {
+          throw Error("PAYMENT_CONTEXT_MISMATCH");
+        }
+        const candidate=await (deps.reconcileTask || reconcileTask)({
           approval:payment.approval,
           pendingReceipt:payment.pendingReceipt,
           expectedPayTo:payment.expectedPayTo,
         },deps);
+        if(candidate?.ledger?.toLowerCase()!==ledger.toLowerCase() ||
+           candidate?.taskId?.toLowerCase()!==taskId.toLowerCase() ||
+           candidate?.chainId!==10143 ||
+           candidate?.descriptionHash!==task.descriptionHash) {
+          throw Error("PAYMENT_CONTEXT_MISMATCH");
+        }
+        reconciliation=candidate;
       } catch (error) {
         // Diagnostics deliberately do not expose RPC URLs, payloads or keys.
-        paymentError=String(error.message).includes("LEDGER_CONFLICT") ?
-          "LEDGER_PAYMENT_CONFLICT":"PAYMENT_RECONCILIATION_UNAVAILABLE";
+        const errorMessage=String(error.message);
+        paymentError=errorMessage.includes("PAYMENT_CONTEXT_MISMATCH") ?
+          "PAYMENT_CONTEXT_MISMATCH" :
+          errorMessage.includes("LEDGER_CONFLICT") ?
+            "LEDGER_PAYMENT_CONFLICT":"PAYMENT_RECONCILIATION_UNAVAILABLE";
       }
     }
     if(request.evidence) {
@@ -86,7 +108,8 @@ export async function inspectPhase0(request, deps={}) {
   // If payment is verifiably contradictory, expose Conflict rather than
   // interpreting it as a failed/retryable charge.
   const projected=projectPhase0({task,attempt,reconciliation,evidence});
-  const conflict=paymentError==="LEDGER_PAYMENT_CONFLICT";
+  const conflict=paymentError==="LEDGER_PAYMENT_CONFLICT" ||
+    paymentError==="PAYMENT_CONTEXT_MISMATCH";
   return {
     ...projected,
     ...(conflict?{state:"Conflict",discrepancy:"payment evidence conflicts with the recorder's onchain claim"}:{}),
