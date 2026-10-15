@@ -29,8 +29,9 @@ jobs:
         run: |
           node --check tools/evidence.mjs
           node --check tools/facilitator-preflight.mjs
+          node --check tools/settlement.mjs
           node --check examples/x402-gate/server.mjs
-          node --test test/evidence.test.mjs
+          node --test test/*.test.mjs
 
   solidity:
     name: Foundry task-ledger tests
@@ -41,3 +42,21 @@ jobs:
       - name: Forge tests
         working-directory: experiments/agentledger
         run: forge test -vvv
+
+  x402-sdk:
+    name: x402 SDK import smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned SDK without lifecycle scripts
+        working-directory: experiments/agentledger/examples/x402-gate
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Verify SDK exports without contacting Facilitator
+        working-directory: experiments/agentledger/examples/x402-gate
+        run: |
+          node --input-type=module -e "import('@x402/express').then(m => { if(typeof m.paymentMiddleware !== 'function') process.exit(1) })"
+          node --input-type=module -e "import('@x402/core/server').then(m => { if(typeof m.x402ResourceServer !== 'function') process.exit(1) })"
+          node --input-type=module -e "import('@x402/evm/exact/server').then(m => { if(typeof m.ExactEvmScheme !== 'function') process.exit(1) })"
