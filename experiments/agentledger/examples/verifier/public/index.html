@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>AgentLedger — Verify task evidence</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.mjs" type="module"></script>
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="brand-mark">A</span> AgentLedger <span class="lab">/ TESTNET LAB</span></div>
+    <a href="https://testnet.monadscan.com" target="_blank" rel="noopener noreferrer">Monad Explorer ↗</a>
+  </header>
+  <main>
+    <div class="eyebrow"><span class="dot"></span> Monad Testnet · Chain 10143 · Read-only</div>
+    <h1>Pay. Execute. <em>Verify.</em></h1>
+    <p class="intro">Inspect an Agent task and compare your local execution evidence to its on-chain hash. No wallet connection or private key required.</p>
+    <div class="columns">
+      <section class="panel">
+        <div class="panel-number">01 / QUERY</div>
+        <h2>Find a task</h2>
+        <form id="lookup-form">
+          <label for="contract">AgentLedger contract address</label>
+          <input id="contract" required autocomplete="off" spellcheck="false" placeholder="0x… (40 hex characters)">
+          <label for="taskId">Task ID · bytes32</label>
+          <input id="taskId" required autocomplete="off" spellcheck="false" placeholder="0x… (64 hex characters)">
+          <button type="submit" id="query-button">Query Monad Testnet <span>↗</span></button>
+        </form>
+        <p id="query-message" class="message" role="status" aria-live="polite">No task loaded.</p>
+        <div id="task-result" class="task-result" hidden>
+          <div class="statusbar"><span id="task-status" class="tag"></span><span>CHAIN 10143</span></div>
+          <dl>
+            <dt>Task</dt><dd id="task-value"></dd>
+            <dt>Creator</dt><dd id="task-creator"></dd>
+            <dt>Payer</dt><dd id="task-payer"></dd>
+            <dt>Amount (atomic USDC units, recorder-attested)</dt><dd id="task-amount"></dd>
+            <dt>Budget cap (atomic units)</dt><dd id="task-budget"></dd>
+            <dt>Evidence hash</dt><dd id="task-hash"></dd>
+            <dt>Settlement reference</dt><dd id="task-settlement"></dd>
+            <dt>Created · Paid · Proven (Unix seconds)</dt><dd id="task-times"></dd>
+          </dl>
+          <p class="hint">“Paid” reflects a trusted recorder's claim, not independent settlement verification.</p>
+          <a id="contract-link" href="#" target="_blank" rel="noopener noreferrer">View contract in Explorer ↗</a>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-number">02 / VERIFY</div>
+        <h2>Check local evidence</h2>
+        <p class="section-copy">Files are hashed in this browser session; they are never sent to the server.</p>
+        <label for="evidence-file">Execution evidence JSON <span class="required">required</span></label>
+        <input id="evidence-file" type="file" accept=".json,application/json">
+        <label for="input-file">Original input <span class="optional">optional</span></label>
+        <input id="input-file" type="file">
+        <label for="output-file">Original output <span class="optional">optional</span></label>
+        <input id="output-file" type="file">
+        <button id="verify-button" type="button" disabled>Verify SHA-256 digest <span>✓</span></button>
+        <p id="verification-message" class="message" role="status" aria-live="polite">Query a Proven task first.</p>
+        <div class="warning">
+          <strong>What this proves</strong>
+          <p>A MATCH means the uploaded bytes reproduce the committed digest. It does not prove the Agent executed correctly, that service was delivered, or that payment was authorized.</p>
+        </div>
+      </section>
+    </div>
+    <footer><span>Agent Control Plane / experiments / AgentLedger</span><span>Testnet only · No custody · No signing</span></footer>
+  </main>
+</body>
+</html>
