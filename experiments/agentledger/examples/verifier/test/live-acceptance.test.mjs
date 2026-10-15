@@ -5,7 +5,7 @@ import {
   encodeAbiParameters, encodeEventTopics, parseAbiItem,
 } from "viem";
 import {
-  assertPublicTestnetRpc, runLiveAcceptance, validateAcceptanceRequest,
+  assertOrderedEvents, assertPublicTestnetRpc, runLiveAcceptance, validateAcceptanceRequest,
 } from "../lib/live-acceptance.mjs";
 
 const LEDGER="0x"+"11".repeat(20);
@@ -39,6 +39,7 @@ const request={
 function receipt(tx,block,number,log) {
   return {
     status:"success",transactionHash:tx,blockNumber:number,blockHash:block,
+    transactionIndex:1,
     logs:[{address:LEDGER,transactionHash:tx,blockHash:block,removed:false,...log}],
   };
 }
@@ -71,6 +72,7 @@ function harness({phase0={},payEvent={},proofEvent={},reorg=false}={}) {
     retryPolicy:{chargeAgain:false},
     inspection:{paymentWitness:{
       transaction:PAYMENT_TX,blockHash:PAYMENT_BLOCK,blockNumber:"99",
+      transactionIndex:0,
       canonicalBlockCheckedAtObservation:true,
     }},
     ...phase0
@@ -85,6 +87,7 @@ function harness({phase0={},payEvent={},proofEvent={},reorg=false}={}) {
     getBlock:async({blockNumber})=>({
       number:blockNumber,
       hash:reorg&&blockNumber===101n ? RECORDER_BLOCK :
+        blockNumber===99n?PAYMENT_BLOCK:
         blockNumber===101n?ANCHOR_BLOCK:RECORDER_BLOCK
     }),
     readContract:async()=>RECORDER,
@@ -117,6 +120,9 @@ test("accepted observation includes independent Recorder and Evidence events but
   assert.equal(out.recorder.event,"PaymentAttested");
   assert.equal(out.evidence.evidenceHash,EVIDENCE_HASH);
   assert.equal(out.walletKeysUsed,false);
+  assert.equal(out.orderedEventsVerified,true);
+  assert.equal(out.canonicalBlocksRecheckedAtEnd,true);
+  assert.equal(out.taskReadbackRecheckedAtEnd,true);
   assert.equal(out.finalityProven,false);
   assert.equal(out.serviceDeliveryProven,false);
   assert.equal(out.sdkReady,false);
@@ -155,4 +161,64 @@ test("fake local Anvil, even with chain ID 10143, cannot masquerade as public Te
     ...h.deps,rpc:"http://127.0.0.1:18545",
   }),/pinned official/);
   assert.deepEqual(h.count(),{inspected:0,chainReads:0});
+});
+
+test("USDC→Recorder→Evidence requires strict blockchain order including intra-block tx indexes",()=>{
+  const base=[
+    {transaction:PAYMENT_TX,blockHash:PAYMENT_BLOCK,blockNumber:"100",transactionIndex:0},
+    {transaction:RECORDER_TX,blockHash:PAYMENT_BLOCK,blockNumber:"100",transactionIndex:1},
+    {transaction:ANCHOR_TX,blockHash:PAYMENT_BLOCK,blockNumber:"100",transactionIndex:2},
+  ];
+  assert.equal(assertOrderedEvents(...base),true,"strict same-block transaction order is valid");
+  for(const changes of [
+    [base[0],{...base[1],transactionIndex:0},base[2]],
+    [{...base[0],blockNumber:"101"},base[1],base[2]],
+    [base[0],base[1],{...base[2],transactionIndex:1}],
+    [base[0],base[1],{...base[2],transaction:RECORDER_TX}],
+    [base[0],base[1],{...base[2],transactionIndex:null}],
+  ]){
+    assert.throws(()=>assertOrderedEvents(...changes),/order|distinct|invalid/);
+  }
+});
+test("missing payment transaction index refuses acceptance before event reads",async()=>{
+  const h=harness({phase0:{inspection:{paymentWitness:{
+    transaction:PAYMENT_TX,blockHash:PAYMENT_BLOCK,blockNumber:"99",
+    canonicalBlockCheckedAtObservation:true,transactionIndex:null
+  }}}});
+  await assert.rejects(()=>runLiveAcceptance(request,h.deps),/transaction index/);
+  assert.equal(h.count().chainReads,0);
+});
+test("acceptance fails if original USDC block is reorged after Event queries",async()=>{
+  const h=harness();
+  let reads=0;
+  const original=h.deps.client.getBlock;
+  h.deps.client.getBlock=async args=>{
+    if(args.blockNumber===99n && ++reads>0) return {
+      number:99n,hash:"0x"+"ee".repeat(32)
+    };
+    return original(args);
+  };
+  await assert.rejects(()=>runLiveAcceptance(request,h.deps),/canonical block changed during acceptance/);
+});
+test("acceptance fails if ledger task changes after Recorder/Evidence receipts",async()=>{
+  const h=harness();
+  let reads=0;
+  const original=h.deps.readTask;
+  h.deps.readTask=async(...args)=>{
+    const t=await original(...args);
+    return ++reads===1?t:{...t,evidenceHash:REF};
+  };
+  await assert.rejects(()=>runLiveAcceptance(request,h.deps),/ledger task changed during acceptance/);
+});
+test("a forged log from wrong block or tx fails before a completed claim",async()=>{
+  const h=harness();
+  const original=h.deps.client.getTransactionReceipt;
+  h.deps.client.getTransactionReceipt=async args=>{
+    const receipt=await original(args);
+    if(args.hash===RECORDER_TX) return {...receipt,logs:receipt.logs.map(log=>({
+      ...log,transactionHash:ANCHOR_TX
+    }))};
+    return receipt;
+  };
+  await assert.rejects(()=>runLiveAcceptance(request,h.deps),/contract logs inconsistent/);
 });
