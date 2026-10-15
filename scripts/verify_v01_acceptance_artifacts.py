@@ -39,6 +39,11 @@ def require_mapping(value: Any, name: str) -> Mapping[str, Any]:
 
 
 def verify_sqlite(path: Path) -> None:
+    # Only the .db bytes are included in the published release artifact set.
+    # Reading an uncheckpointed WAL would validate rows absent from those bytes.
+    wal_path = path.with_name(path.name + "-wal")
+    if wal_path.exists():
+        fail(f"{path.name} has a WAL sidecar; checkpoint and close before export")
     with path.open("rb") as handle:
         if handle.read(16) != b"SQLite format 3\x00":
             fail(f"{path.name} is not a SQLite database")
@@ -49,6 +54,9 @@ def verify_sqlite(path: Path) -> None:
                 fail(f"{path.name} failed SQLite integrity_check")
     except sqlite3.DatabaseError as exc:
         fail(f"{path.name} cannot be opened read-only: {exc}")
+    # A writer must not attach a WAL while integrity_check is in progress.
+    if wal_path.exists():
+        fail(f"{path.name} has a WAL sidecar; checkpoint and close before export")
 
 
 
