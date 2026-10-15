@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { keccak256 } from "viem";
 import {
   loadReviewedDeployments, validateReviewedRegistry, verifyReviewedDeployment,
-} from "../../../phase0/reviewed-deployment.mjs";
+} from "../lib/reviewed-deployment.mjs";
 
 const LEDGER="0x"+"11".repeat(20);
 const RECORDER="0x"+"22".repeat(20);
