@@ -49,6 +49,8 @@ def verify_sqlite(path: Path, *, require_closed_wal: bool = False) -> None:
     # Only the .db bytes are included in the published release artifact set.
     # Reading an uncheckpointed WAL would validate rows absent from those bytes.
     wal_path = path.with_name(path.name + "-wal")
+    if require_closed_wal and path.is_symlink():
+        fail(f"{path.name} is a symlink; strict evidence requires standalone database bytes")
     if require_closed_wal and wal_path.exists():
         fail(f"{path.name} has a WAL sidecar; checkpoint and close before export")
     with path.open("rb") as handle:
@@ -100,6 +102,10 @@ def verify_durable_execution_records(
     journal_path = artifact_dir / "execution-journal.db"
     lease_path = artifact_dir / "execution-leases.db"
     context_path = artifact_dir / "work-context.db"
+    if require_closed_wal:
+        for path in (journal_path, lease_path, context_path):
+            if path.is_symlink():
+                fail(f"{path.name} is a symlink; strict evidence requires standalone database bytes")
 
     try:
         with closing(sqlite3.connect(sqlite_read_uri(journal_path, standalone=require_closed_wal), uri=True)) as db:

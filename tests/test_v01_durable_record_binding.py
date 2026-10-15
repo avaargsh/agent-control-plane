@@ -197,3 +197,25 @@ def test_v01_strict_durable_queries_do_not_recreate_wal(tmp_path, name):
     # Previously these three proof lookups used mode=ro even in strict mode.
     # A strict verifier must not create an omitted WAL sidecar itself.
     assert not path.with_name(path.name + "-wal").exists()
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("execution-journal.db", "execution-leases.db", "work-context.db"),
+)
+def test_v01_strict_rejects_symlinked_sqlite_artifacts(tmp_path, name):
+    """A path to a live/external DB is not a standalone captured evidence file."""
+    predicate = _fixture(tmp_path)
+    path = tmp_path / name
+    moved = tmp_path / ("external-" + name)
+    path.rename(moved)
+    path.symlink_to(moved)
+
+    # The v0.1 published-proof compatibility path is deliberately unchanged.
+    _MODULE.verify_sqlite(path)
+    verify_durable_execution_records(tmp_path, predicate)
+
+    with pytest.raises(SystemExit, match="symlink; strict evidence requires standalone"):
+        _MODULE.verify_sqlite(path, require_closed_wal=True)
+    with pytest.raises(SystemExit, match="symlink; strict evidence requires standalone"):
+        verify_durable_execution_records(tmp_path, predicate, require_closed_wal=True)
