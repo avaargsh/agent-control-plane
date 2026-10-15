@@ -48,8 +48,13 @@ def verify_sqlite(path: Path, *, require_closed_wal: bool = False) -> None:
     with path.open("rb") as handle:
         if handle.read(16) != b"SQLite format 3\x00":
             fail(f"{path.name} is not a SQLite database")
+    # Strict evidence is a frozen snapshot, not a live database reader.
+    # immutable=1 reads only the .db bytes and avoids creating WAL sidecars.
+    uri = f"file:{path}?mode=ro"
+    if require_closed_wal:
+        uri += "&immutable=1"
     try:
-        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
             check = connection.execute("PRAGMA integrity_check").fetchone()
             if check is None or check[0] != "ok":
                 fail(f"{path.name} failed SQLite integrity_check")
