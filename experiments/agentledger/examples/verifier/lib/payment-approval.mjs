@@ -17,7 +17,7 @@ export const APPROVAL_TYPES = {
 const HEX32 = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const SIGNATURE = /^0x[0-9a-fA-F]{130}$/;
-const TOKEN = "0x534b2f3A21130d7a60830c2Df862319e593943A3";
+const USDC_CONTRACT = "0x534b2f3A21130d7a60830c2Df862319e593943A3";
 const fail = reason => { throw new Error(reason); };
 const check = (ok, why) => { if (!ok) fail(why); };
 const addr = (value, field) => {
@@ -40,7 +40,7 @@ export function buildApprovalData(quote) {
   const taskId = hex32(quote.taskId, "taskId");
   const descriptionHash = hex32(quote.descriptionHash, "descriptionHash");
   const token = addr(quote.token, "token");
-  check(token === TOKEN.toLowerCase(), "wrong USDC token");
+  check(token === USDC_CONTRACT.toLowerCase(), "wrong USDC token");
   const payTo = addr(quote.payTo, "payTo");
   const payer = addr(quote.payer, "payer");
   const nonce = hex32(quote.nonce, "nonce");
