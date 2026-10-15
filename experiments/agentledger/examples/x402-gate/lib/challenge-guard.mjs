@@ -117,6 +117,14 @@ export async function verifyX402Payload(payment, approved, config, nowSeconds) {
     "x402 recipient mismatch");
   check(assertUintString(accepted.amount, "payment amount") === approved.message.amountAtomic,
     "x402 amount mismatch");
+  // x402 v2 exact supports Permit2/ERC-7710 as well; this demo only
+  // verifies EIP-3009 and must never admit another settlement mechanism.
+  check((accepted.extra?.assetTransferMethod ?? "eip3009") === "eip3009",
+    "unsupported x402 asset transfer method");
+  check(!accepted.extra?.name || accepted.extra.name === "USDC",
+    "unexpected USDC EIP-712 domain name");
+  check(!accepted.extra?.version || accepted.extra.version === "2",
+    "unexpected USDC EIP-712 domain version");
   const auth = payment.payload?.authorization;
   const signature = payment.payload?.signature;
   check(auth && typeof auth === "object", "missing EIP-3009 authorization");
