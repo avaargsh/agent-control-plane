@@ -97,6 +97,18 @@ or the response disappears. The operator must inspect the on-chain
 EIP-3009 nonce usage and USDC Transfer event, recover pending transaction
 details, and decide on an explicit new quote/compensation procedure.
 
+To inspect a nonce after a timeout (read-only):
+
+```bash
+cd experiments/agentledger
+python3 tools/charge-attempt-journal.py inspect 0xTHE_64_HEX_PAYMENT_NONCE
+```
+
+The post-settlement admission tool requires this exact reserved nonce to
+be consumed in the same USDC transaction's EIP-3009 `AuthorizationUsed`
+event, along with the correct `Transfer` event. Neither event is enough
+alone; the EIP-712 payer quote must match the reserved quote digest.
+
 There is deliberately no reset/clear/retry command. Deleting the DB,
 running multiple disconnected servers or using a second Facilitator
 defeats the local safety boundary.
