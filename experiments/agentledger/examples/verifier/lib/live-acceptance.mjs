@@ -86,7 +86,15 @@ export async function runLiveAcceptance(request, deps={}) {
   const rpc=assertPublicTestnetRpc(deps.rpc || process.env.MONAD_RPC_URL || PINNED_RPC);
   const client=deps.client || makeClient(rpc);
   check(await client.getChainId()===10143,"RPC not on Monad Testnet");
-  const inspected=await (deps.inspect || inspectPhase0)(request,{chain:client});
+  const phase0Request={
+    schemaVersion:"agentledger.phase0.inspect.v1",
+    ledger:request.ledger,
+    taskId:request.taskId.toLowerCase(),
+    attempt:"Reserved",
+    payment:request.payment,
+    evidence:request.evidence,
+  };
+  const inspected=await (deps.inspect || inspectPhase0)(phase0Request,{chain:client});
   check(inspected.schemaVersion==="agentledger.phase0.status.v1","unexpected Phase0 schema");
   check(inspected.state==="EvidenceAnchored" &&
     inspected.payment?.eventIndependentlyChecked === true &&
