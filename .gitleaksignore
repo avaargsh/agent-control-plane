@@ -11,3 +11,7 @@
 # Current source has been corrected to USDC_CONTRACT.
 a9eceb902311e3a9855a37edfa044ef9d2b95f5c:experiments/agentledger/examples/verifier/lib/payment-approval.mjs:generic-api-key:20
 31072daabe6a424e4ea27c7c2ed4f321868e0a9b:experiments/agentledger/examples/verifier/test/approval.test.mjs:generic-api-key:12
+
+# Exact historical false positive: a *public* Monad Testnet USDC contract
+# address in a JSON example, not an API token or sensitive credential.
+06dcc2c701392386a56ac81ae76508125db80680:experiments/agentledger/docs/payment-approval.md:generic-api-key:43
