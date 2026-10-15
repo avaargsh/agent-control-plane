@@ -76,7 +76,9 @@ jobs:
         working-directory: experiments/agentledger/examples/verifier
         run: |
           node --check server.mjs
-          node --check lib/task-reader.mjs\n          node --check lib/payment-approval.mjs\n          node --check tools/prepare-record.mjs
+          node --check lib/task-reader.mjs
+          node --check lib/payment-approval.mjs
+          node --check tools/prepare-record.mjs
           node --check public/evidence-browser.mjs
           node --check public/app.mjs
           npm test
