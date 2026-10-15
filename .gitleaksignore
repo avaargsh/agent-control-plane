@@ -20,3 +20,8 @@ a9eceb902311e3a9855a37edfa044ef9d2b95f5c:experiments/agentledger/examples/verifi
 # gitleaks generic-api-key in an old hermetic test constant. Exact historical
 # fingerprint only. No broad exclusions or scan disable.
 e15cfce98e0e73a1bbd52285acaf897c142d77aa:experiments/agentledger/examples/verifier/test/prepare-record.test.mjs:generic-api-key:17
+
+# Precise historical false positive: public EIP-3009 AuthorizationUsed event
+# topic0/Keccak256 event signature, NOT a secret or API key.
+# Event specified at https://eips.ethereum.org/EIPS/eip-3009
+197bb8365a79128d6ea903d5d5f31decf46e0248:experiments/agentledger/tools/settlement.mjs:generic-api-key:14
