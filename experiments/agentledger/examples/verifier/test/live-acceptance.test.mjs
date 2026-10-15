@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  encodeAbiParameters, encodeEventTopics, parseAbiItem,
+  encodeAbiParameters, encodeEventTopics, encodeFunctionData, parseAbiItem,
 } from "viem";
 import {
   assertOrderedEvents, assertPublicTestnetRpc, runLiveAcceptance, validateAcceptanceRequest,
@@ -26,6 +26,12 @@ const paymentABI=parseAbiItem(
 );
 const anchorABI=parseAbiItem(
   "event EvidenceAnchored(bytes32 indexed taskId, bytes32 indexed evidenceHash, address indexed submitter)"
+);
+const recordFunction=parseAbiItem(
+  "function recordPayment(bytes32 taskId,address payer,uint256 amount,bytes32 settlementRef)"
+);
+const anchorFunction=parseAbiItem(
+  "function submitEvidence(bytes32 taskId,bytes32 evidenceHash)"
 );
 
 const request={
@@ -81,8 +87,21 @@ function harness({phase0={},payEvent={},proofEvent={},reorg=false}={}) {
     [RECORDER_TX]:recorderReceipt(payEvent),
     [ANCHOR_TX]:anchorReceipt(proofEvent),
   };
+  const transactions={
+    [RECORDER_TX]:{
+      hash:RECORDER_TX,from:RECORDER,to:LEDGER,
+      input:encodeFunctionData({abi:[recordFunction],functionName:"recordPayment",
+        args:[TASK,PAYER,1000n,REF]})
+    },
+    [ANCHOR_TX]:{
+      hash:ANCHOR_TX,from:CREATOR,to:LEDGER,
+      input:encodeFunctionData({abi:[anchorFunction],functionName:"submitEvidence",
+        args:[TASK,EVIDENCE_HASH]})
+    }
+  };
   const client={
     getChainId:async()=>10143,
+    getTransaction:async({hash})=>transactions[hash],
     getTransactionReceipt:async({hash})=>{chainReads++;return receipts[hash];},
     getBlock:async({blockNumber})=>({
       number:blockNumber,
@@ -154,6 +173,27 @@ test("wrong Evidence anchored hash, unauthorized submitter, or reorged block fai
     await assert.rejects(()=>runLiveAcceptance(request,harness({proofEvent}).deps));
   }
   await assert.rejects(()=>runLiveAcceptance(request,harness({reorg:true}).deps),/no longer canonical/);
+});
+test("Recorder/Evidence transaction signing identity, target and calldata must match decoded events",async()=>{
+  for(const [txHash,patch] of [
+    [RECORDER_TX,{from:PAYER}],
+    [RECORDER_TX,{to:CREATOR}],
+    [RECORDER_TX,{input:"0x12345678"}],
+    [RECORDER_TX,{input:encodeFunctionData({abi:[recordFunction],functionName:"recordPayment",
+      args:[TASK,PAYER,999n,REF]})}],
+    [ANCHOR_TX,{from:PAYER}],
+    [ANCHOR_TX,{to:CREATOR}],
+    [ANCHOR_TX,{input:encodeFunctionData({abi:[anchorFunction],functionName:"submitEvidence",
+      args:[TASK,REF]})}],
+  ]){
+    const h=harness();
+    const original=h.deps.client.getTransaction;
+    h.deps.client.getTransaction=async args=>{
+      const tx=await original(args);
+      return args.hash===txHash?{...tx,...patch}:tx;
+    };
+    await assert.rejects(()=>runLiveAcceptance(request,h.deps));
+  }
 });
 test("fake local Anvil, even with chain ID 10143, cannot masquerade as public Testnet",async()=>{
   const h=harness();
