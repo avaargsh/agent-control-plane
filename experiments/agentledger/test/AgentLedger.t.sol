@@ -13,7 +13,7 @@ contract AgentLedgerTest {
     bytes32 constant TASK = keccak256("task-1");
     bytes32 constant DESCRIPTION = keccak256("description");
     bytes32 constant REF = keccak256("settlement-1");
-    bytes32 constant PROOF = sha256("canonical-evidence");
+    bytes32 constant PROOF = bytes32(uint256(42));
     address constant ALICE = address(0xA11CE);
 
     function setUp() public {
