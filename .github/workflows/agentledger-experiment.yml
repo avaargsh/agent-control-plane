@@ -84,6 +84,8 @@ jobs:
           node --check lib/task-reader.mjs
           node --check lib/payment-approval.mjs
           node --check tools/prepare-record.mjs
+          node --check lib/reconcile-task.mjs
+          node --check tools/reconcile-task.mjs
           node --check public/evidence-browser.mjs
           node --check public/app.mjs
           npm test
