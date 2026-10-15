@@ -89,3 +89,50 @@ jobs:
           node --check public/evidence-browser.mjs
           node --check public/app.mjs
           npm test
+
+
+  anvil-acceptance:
+    name: Anvil local EVM lifecycle acceptance (SIMULATED payment)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install viem verifier dependencies
+        working-directory: experiments/agentledger/examples/verifier
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Compile real Solidity and exercise local Anvil transaction lifecycle
+        working-directory: experiments/agentledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          forge build
+          anvil --host 127.0.0.1 --port 18545 --chain-id 10143 --silent > "$RUNNER_TEMP/agentledger-anvil.log" 2>&1 &
+          ANVIL_PID=$!
+          trap 'kill "$ANVIL_PID" 2>/dev/null || true' EXIT
+          export AGENTLEDGER_ANVIL_RPC=http://127.0.0.1:18545
+          ready=0
+          for i in $(seq 1 50); do
+            if curl --silent --max-time 1 \
+              --header 'content-type: application/json' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+              "$AGENTLEDGER_ANVIL_RPC" | grep -q '0x279f'; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          if [ "$ready" != 1 ]; then echo 'Anvil did not start with the expected chain ID'; exit 1; fi
+          node examples/verifier/tools/anvil-acceptance.mjs
+      - name: Upload LOCAL-ONLY acceptance manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentledger-anvil-local-acceptance
+          path: experiments/agentledger/out/agentledger-anvil-acceptance.json
+          if-no-files-found: ignore
+          retention-days: 7
