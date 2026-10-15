@@ -105,6 +105,9 @@ export async function reconcileTask({approval, pendingReceipt, expectedPayTo}, d
     paymentNonce: verified.paymentNonce,
     observedTransaction: verified.transaction,
     blockNumber: verified.blockNumber,
+    blockHash: verified.blockHash ?? null,
+    canonicalBlockCheckedAtObservation: verified.canonicalBlockCheckedAtObservation === true,
+    observedHeadBlockNumber: verified.observedHeadBlockNumber ?? null,
     confirmations: verified.confirmations,
     warning: "Block depth is not finality; precharge SQLite timestamp is not a trusted time attestation. No payment or chain mutation occurred.",
   };
