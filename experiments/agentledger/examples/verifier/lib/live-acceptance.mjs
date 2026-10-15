@@ -148,6 +148,7 @@ export async function verifyLedgerEvent(client,{ledger,txHash,eventName,eventAbi
     blockHash:receipt.blockHash.toLowerCase(),
     canonicalBlockCheckedAtObservation:true,
     event:eventName,
+    ...(eventName==="EvidenceAnchored"?{submitter:events[0].args.submitter}:{}),
   };
 }
 /**
@@ -224,20 +225,10 @@ export async function runLiveAcceptance(request, deps={}) {
         "Evidence submitted by unapproved actor");
     },
   });
-  const anchorReceipt=await client.getTransactionReceipt({
-    hash:request.anchorTransaction.toLowerCase()
-  });
-  check(anchorReceipt?.logs && Array.isArray(anchorReceipt.logs),
-    "Evidence anchor transaction log unavailable");
-  const anchorLog=anchorReceipt.logs.filter(log=>equalAddress(log.address,request.ledger) &&
-    equalHash(log.transactionHash,request.anchorTransaction))[0];
-  check(anchorLog && anchorLog.topics?.length===4,"Evidence anchor log missing signer");
-  const signer="0x"+anchorLog.topics[3].slice(-40);
-  check(equalAddress(signer,task.creator)||equalAddress(signer,recorderAddress),
-    "Evidence anchor initiator unauthorized");
+  // Caller and event submitter MUST refer to the same authorized actor.
   const anchorCall=await verifyDirectLedgerCall(client,{
     ledger:request.ledger,txHash:request.anchorTransaction,
-    caller:signer,method:submitEvidenceMethod,
+    caller:anchor.submitter,method:submitEvidenceMethod,
     args:[task.taskId,task.evidenceHash],
   });
   assertOrderedEvents(payment,recorder,anchor);
