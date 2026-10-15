@@ -441,3 +441,28 @@ ownership or independent Agent runtime attestation.
 See [Anvil acceptance instructions](docs/anvil-local-acceptance.md)
 and the `anvil-acceptance` CI job before attempting the separate
 wallet-authorized live Testnet milestone.
+
+
+## Public Testnet provenance gate (default DENY)
+
+**No contract is currently approved for a live settlement acceptance claim.**
+The tracked `phase0/reviewed-testnet-deployments.json` contains an
+empty `deployments` list. Phase 0 now requires a maintainer-reviewed
+deployment entry **before even inspecting payments**.
+
+For a candidate deployment, the signerless verifier independently
+checks the direct creation transaction, its successful canonical
+receipt, the contract address, trusted `paymentRecorder()`, and
+`keccak256` of the on-chain runtime code against the checked-in
+reviewed manifest. An ABI-compatible unreviewed contract cannot pass.
+These tests run in the pinned `examples/verifier` dependency scope;
+the pure `phase0/status.mjs` projection remains dependency-free.
+
+This is not a claim of a completed external source audit or finality.
+A URL in a manifest is not itself proof of PR approval; the recorded
+deployment must actually undergo a separate code/build/deployment
+review before it is allowed. The full procedure is in
+[Live Testnet observation](docs/live-testnet-observation.md).
+
+**SDK extraction remains deferred.** In particular, a valid local
+Anvil simulation cannot register itself as public Monad Testnet.
