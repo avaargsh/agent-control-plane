@@ -11,7 +11,9 @@ authorization, retry/resume, OutcomeContract, and independent execution
 proof. Ledger is only a settlement/receipt/evidence adapter.
 
 The following must already have happened through **separate, approved
-test-only wallet operations**:
+test-only wallet operations**. The live command **also requires** a reviewed
+entry in `phase0/reviewed-testnet-deployments.json`. The initial registry
+contains no approved deployments and intentionally fails closed:
 
 1. On Monad Testnet, deploy AgentLedger and create the task.
 2. Approve the EIP-712 task quote and send one x402 v2 payment using a
@@ -86,6 +88,13 @@ Evidence JSON and the original input/output bytes against the on-chain
 `Proven` digest. It must return `EvidenceAnchored`.
 
 The acceptance layer additionally:
+
+- **Requires a PR-reviewed deployment registry entry** matching the exact
+  Ledger contract, its trusted Recorder, the creation transaction and
+  `keccak256` of the deployed runtime bytecode. It checks that the
+  deployment receipt actually created that address and that its block
+  is still on the canonical chain. Unknown, substituted or unreviewed
+  contracts never pass, even if their ABI/events look identical.
 
 - Re-reads the on-chain task independently, preventing a stale verified
   projection from being used after a state change.
@@ -218,3 +227,54 @@ deployed source/bytecode provenance automatically trustworthy. Verify
 contract deployment against reviewed Solidity code separately. Ledger
 still has no authority over ACP leases, retries, resume, execution
 correctness or independent-execution-proof.
+
+## Register a *reviewed* public Testnet deployment
+
+This is an explicit product-security gate, not an invitation to copy
+arbitrary RPC code into a whitelist. The tracked file
+`experiments/agentledger/phase0/reviewed-testnet-deployments.json`
+ships with `deployments: []`. Therefore no live public acceptance
+is possible until a maintainer reviews and merges a specific Testnet
+deployment record.
+
+After a dedicated Testnet deployment has occurred, independently gather
+the following values from official RPC and the Foundry compilation artifacts:
+
+- exact contract address and direct creator transaction hash;
+- immutable configured `paymentRecorder()` address;
+- runtime bytecode of the on-chain contract and
+  `keccak256(runtimeBytecode)`, checked against the reviewed build
+  including immutable Recorder substitution and Solidity metadata;
+- matching successful contract-creation receipt with
+  `contractAddress == reviewed address`, the canonical creation block,
+  and a description of the build/source provenance;
+- a completed PR review reference within
+  `avaargsh/agent-control-plane` that approved this exact deployment.
+
+Only after that approval should a `deployments` entry be committed:
+
+```json
+{
+  "address": "0xREVIEWED_DEPLOYED_TESTNET_LEDGER",
+  "paymentRecorder": "0xREVIEWED_TESTNET_RECORDER",
+  "runtimeKeccak": "0x64_HEX_CHARACTER_RUNTIME_HASH",
+  "deploymentTransaction": "0x64_HEX_CHARACTER_DEPLOYMENT_TX",
+  "reviewReference": "https://github.com/avaargsh/agent-control-plane/pull/REVIEWED_PR_NUMBER"
+}
+```
+
+The placeholders above are intentionally invalid. Do not populate this
+registry from an unreviewed user request or a successful-looking
+`PaymentAttested` log. **The live request JSON cannot bypass or replace
+the checked-in deployment registry.**
+
+The verifier fetches runtime code and the creation transaction and
+receipt at execution time, independently checks the configured Recorder,
+and rechecks the deployment block at the end along with the USDC,
+Recorder and Evidence blocks. These establish only a *point-in-time
+provenance match* to a reviewed record, not finality or trustworthy
+Agent execution.
+
+A registry entry with a link to a PR is not itself proof that an
+independent human/source audit actually occurred. The maintainer must
+verify that review before accepting the provenance assertion.
