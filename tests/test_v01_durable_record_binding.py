@@ -140,3 +140,29 @@ def test_v01_missing_sqlite_tables_are_not_valid_durable_evidence(tmp_path):
         db.execute("DROP TABLE execution_attempts")
     with pytest.raises(SystemExit, match="database validation failed"):
         verify_durable_execution_records(tmp_path, predicate)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("execution-journal.db", "execution-leases.db", "work-context.db"),
+)
+def test_v01_rejects_live_sqlite_wal_sidecar_until_closed(tmp_path, name):
+    """A readable WAL database is not a self-contained .db release artifact."""
+    path = tmp_path / name
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        connection.execute("CREATE TABLE wal_record (value TEXT NOT NULL)")
+        connection.execute("INSERT INTO wal_record VALUES ('committed-in-wal')")
+        connection.commit()
+        assert path.with_name(path.name + "-wal").exists()
+        with pytest.raises(SystemExit, match="has a WAL sidecar"):
+            _MODULE.verify_sqlite(path)
+    finally:
+        connection.close()
+
+    # Closing the final writer checkpoints the committed rows into the .db.
+    assert not path.with_name(path.name + "-wal").exists()
+    _MODULE.verify_sqlite(path)
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+        assert db.execute("SELECT value FROM wal_record").fetchone()[0] == "committed-in-wal"
