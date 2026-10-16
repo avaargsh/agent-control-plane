@@ -28,6 +28,23 @@ export function createVerifierServer({ lookup } = {}) {
   const getTask = lookup || ((contract, id) => readTask(makeClient(process.env.MONAD_RPC_URL), contract, id));
   return createServer(async (req, res) => {
     try {
+      // Optional exact-origin browser development integration for Expo Web.
+      // Never wildcard CORS. GET-only semantics and no-write policy remain.
+      const requested = req.headers.origin;
+      const configured = process.env.AGENTLEDGER_CORS_ORIGIN;
+      if (configured && requested === configured) {
+        let allowed = false;
+        try {
+          const parsed = new URL(configured);
+          const local = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+          allowed = parsed.origin === configured && !parsed.username && !parsed.password &&
+            (parsed.protocol === "https:" || (parsed.protocol === "http:" && local));
+        } catch { /* invalid development origin never enables CORS */ }
+        if (allowed) {
+          res.setHeader("access-control-allow-origin", configured);
+          res.setHeader("vary", "Origin");
+        }
+      }
       if (req.method !== "GET") return send(res, 405, JSON.stringify({ error: "read-only endpoint" }));
       const url = new URL(req.url, "http://127.0.0.1");
       if (url.pathname === "/api/healthz") {
