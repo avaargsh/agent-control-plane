@@ -1,6 +1,6 @@
 {
   "name": "@agentledger/verify",
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "private": true,
   "type": "module",
   "description": "Read-only AgentLedger Phase 0 verification SDK preview (NOT funded Testnet accepted)",
