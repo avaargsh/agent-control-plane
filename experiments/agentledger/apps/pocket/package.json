@@ -10,7 +10,8 @@
     "android": "expo run:android",
     "check": "tsc --noEmit",
     "test": "node --test test/*.test.mjs",
-    "build:web": "expo export --platform web"
+    "build:web": "expo export --platform web",
+    "test:browser": "node browser/smoke.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.16",
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "playwright-core": "1.56.1"
   }
 }
