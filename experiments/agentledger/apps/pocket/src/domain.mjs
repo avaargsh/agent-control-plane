@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Mobile-first observer: record facts and uncertainty, NEVER claim paid from
 // a Recorder enum alone. This module has no transport and no wallet methods.
+import { DEMO_DIGEST } from "./evidence.mjs";
 export const CHAIN_ID=10143;
 export const RPC_ID="https://testnet-rpc.monad.xyz/";
 export const HEX32=/^0x[0-9a-fA-F]{64}$/;
@@ -28,7 +29,7 @@ export function demoTask(stage="created"){
     payer:status==="Created"?"0x"+"00".repeat(20):PAYER,
     amountAtomic:status==="Created"?"0":"1000",
     maxBudgetAtomic:"2000",settlementRef:status==="Created"?ZERO:REF,
-    evidenceHash:stage==="proven"?"0x"+"c4".repeat(32):ZERO,
+    evidenceHash:stage==="proven"?DEMO_DIGEST:ZERO,
     status,stage,source:"LOCAL_SIMULATION",
   });
 }
