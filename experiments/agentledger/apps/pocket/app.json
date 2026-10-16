@@ -10,7 +10,7 @@
     "web": {
       "name": "AgentLedger Pocket",
       "bundler": "metro",
-      "output": "static"
+      "output": "single"
     },
     "ios": {
       "supportsTablet": true
