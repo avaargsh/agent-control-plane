@@ -116,7 +116,7 @@ jobs:
           node --check scripts/build.mjs
           npm test
           npm run packcheck
-          node --input-type=module -e "import('./dist/index.mjs').then(m => { if(m.SDK_VERSION !== '0.2.0-alpha.1' || m.SDK_CAPABILITIES.charge !== false || m.SDK_CAPABILITIES.manageAcp !== false) process.exit(1) })"
+          node --input-type=module -e "import('./dist/index.mjs').then(m => { if(m.SDK_VERSION !== '0.2.0-alpha.2' || m.SDK_CAPABILITIES.charge !== false || m.SDK_CAPABILITIES.manageAcp !== false) process.exit(1) })"
 
   anvil-acceptance:
     name: Anvil local EVM lifecycle acceptance (SIMULATED payment)
