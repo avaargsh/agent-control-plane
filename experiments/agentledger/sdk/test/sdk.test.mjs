@@ -63,3 +63,11 @@ test("cross-chain reads are refused, receipt calls with injected clients are for
   await assert.rejects(()=>sdk.verifySettlement({}),/Injected RPC clients/);
   assert.throws(()=>createAgentLedgerVerifier({client:fake(ZERO),rpcUrl:"http://127.0.0.1:3333"}),/either/);
 });
+
+test("SDK never accepts nonce-free receipt observation as independent USDC proof",async()=>{
+  const sdk=createAgentLedgerVerifier({rpcUrl:"http://127.0.0.1:18545"});
+  await assert.rejects(()=>sdk.verifySettlement({
+    transaction:"0x"+"77".repeat(32),network:"eip155:10143"
+  }),/paymentNonce required/);
+  assert.equal("verifySettlementReceipt" in await import("../dist/index.mjs"),false);
+});
