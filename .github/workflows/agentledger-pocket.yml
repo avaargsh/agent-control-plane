@@ -42,6 +42,11 @@ jobs:
         run: |
           npm run build:web
           test -f dist/index.html
+      - name: Install CJK fonts for readable Chinese mobile screenshots
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fc-match 'Noto Sans CJK SC'
       - name: Browser acceptance against actual Expo Web bundle
         working-directory: experiments/agentledger/apps/pocket
         run: |
