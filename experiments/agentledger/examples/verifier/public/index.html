@@ -3,67 +3,128 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <title>AgentLedger — Verify task evidence</title>
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f6f7f9">
+  <meta name="description" content="AgentLedger: a read-only visual studio for settlement observations and Evidence SHA-256 verification.">
+  <title>AgentLedger Studio — See every claim. Verify every fact.</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.mjs" type="module"></script>
 </head>
 <body>
-  <header>
-    <div class="brand"><span class="brand-mark">A</span> AgentLedger <span class="lab">/ TESTNET LAB</span></div>
-    <a href="https://testnet.monadscan.com" target="_blank" rel="noopener noreferrer">Monad Explorer ↗</a>
-  </header>
-  <main>
-    <div class="eyebrow"><span class="dot"></span> Monad Testnet · Chain 10143 · Read-only</div>
-    <h1>Pay. Execute. <em>Verify.</em></h1>
-    <p class="intro">Inspect an Agent task and compare your local execution evidence to its on-chain hash. No wallet connection or private key required.</p>
-    <div class="columns">
-      <section class="panel">
-        <div class="panel-number">01 / QUERY</div>
-        <h2>Find a task</h2>
-        <form id="lookup-form">
-          <label for="contract">AgentLedger contract address</label>
-          <input id="contract" required autocomplete="off" spellcheck="false" placeholder="0x… (40 hex characters)">
-          <label for="taskId">Task ID · bytes32</label>
-          <input id="taskId" required autocomplete="off" spellcheck="false" placeholder="0x… (64 hex characters)">
-          <button type="submit" id="query-button">Query Monad Testnet <span>↗</span></button>
-        </form>
-        <p id="query-message" class="message" role="status" aria-live="polite">No task loaded.</p>
-        <div id="task-result" class="task-result" hidden>
-          <div class="statusbar"><span id="task-status" class="tag"></span><span>CHAIN 10143</span></div>
-          <dl>
-            <dt>Task</dt><dd id="task-value"></dd>
-            <dt>Creator</dt><dd id="task-creator"></dd>
-            <dt>Payer</dt><dd id="task-payer"></dd>
-            <dt>Amount (atomic USDC units, recorder-attested)</dt><dd id="task-amount"></dd>
-            <dt>Budget cap (atomic units)</dt><dd id="task-budget"></dd>
-            <dt>Evidence hash</dt><dd id="task-hash"></dd>
-            <dt>Settlement reference</dt><dd id="task-settlement"></dd>
-            <dt>Created · Paid · Proven (Unix seconds)</dt><dd id="task-times"></dd>
-          </dl>
-          <p class="hint">“Paid” reflects a trusted recorder's claim, not independent settlement verification.</p>
-          <a id="contract-link" href="#" target="_blank" rel="noopener noreferrer">View contract in Explorer ↗</a>
-        </div>
-      </section>
-      <section class="panel">
-        <div class="panel-number">02 / VERIFY</div>
-        <h2>Check local evidence</h2>
-        <p class="section-copy">Files are hashed in this browser session; they are never sent to the server.</p>
-        <label for="evidence-file">Execution evidence JSON <span class="required">required</span></label>
-        <input id="evidence-file" type="file" accept=".json,application/json">
-        <label for="input-file">Original input <span class="optional">optional</span></label>
-        <input id="input-file" type="file">
-        <label for="output-file">Original output <span class="optional">optional</span></label>
-        <input id="output-file" type="file">
-        <button id="verify-button" type="button" disabled>Verify SHA-256 digest <span>✓</span></button>
-        <p id="verification-message" class="message" role="status" aria-live="polite">Query a Proven task first.</p>
-        <div class="warning">
-          <strong>What this proves</strong>
-          <p>A MATCH means the uploaded bytes reproduce the committed digest. It does not prove the Agent executed correctly, that service was delivered, or that payment was authorized.</p>
-        </div>
-      </section>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Project navigation">
+      <a class="logo" href="/" aria-label="AgentLedger Studio home">
+        <span class="brand-icon" aria-hidden="true">AL</span>
+        <span><strong>AgentLedger</strong><small>VERIFICATION STUDIO</small></span>
+      </a>
+      <div class="side-label">WORKSPACE</div>
+      <nav class="nav-items" aria-label="Workspace">
+        <a href="#overview" class="nav-item active"><span class="nav-symbol">◫</span> Overview</a>
+        <a href="#proof-journey" class="nav-item"><span class="nav-symbol">◇</span> Proof journey</a>
+        <a href="#evidence-panel" class="nav-item"><span class="nav-symbol">▤</span> Evidence lab</a>
+      </nav>
+      <div class="side-label">ENVIRONMENT</div>
+      <div class="environment"><span class="status-pulse"></span><div>Monad Testnet<small>Chain ID 10143</small></div></div>
+      <div class="sidebar-bottom">
+        <div class="bound-card"><span class="bound-icon">↗</span><strong>Built beside ACP.</strong><p>Settlement and digest observation, not another Agent control plane.</p></div>
+        <a class="side-link" href="https://github.com/avaargsh/agent-control-plane/pull/157" target="_blank" rel="noopener noreferrer">View open-source PR <span>↗</span></a>
+      </div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="breadcrumb">Experiments <span>/</span> AgentLedger <span>/</span> Overview</div>
+        <div class="top-actions"><span class="preview-tag"><span class="small-dot"></span> SDK v0.2 alpha</span><span class="readonly-tag">Read-only</span></div>
+      </header>
+      <main id="overview">
+        <section class="hero">
+          <div class="hero-eyebrow">PAY → EXECUTE → PROVE <span class="hero-divider">/</span> PHASE 0</div>
+          <h1>Trust the evidence.<br><span>Not the status.</span></h1>
+          <p>Explore the life of an Agent task, its settlement observation and its proof anchor. Every fact has a source. Every unknown stays unknown.</p>
+          <div class="hero-actions">
+            <button id="show-demo" type="button" class="button primary">Explore interactive demo <span>↗</span></button>
+            <button id="show-live" type="button" class="button secondary">Inspect Testnet task <span>→</span></button>
+          </div>
+          <div class="hero-ornament" aria-hidden="true"><span class="orb orb-one"></span><span class="orb orb-two"></span><span class="orb orb-three"></span><span class="orbit-label">READ · VERIFY · ANCHOR</span></div>
+        </section>
+
+        <section id="proof-journey" class="section proof-journey" aria-labelledby="journey-title">
+          <div class="section-head"><div><span class="overline">THE PROOF JOURNEY</span><h2 id="journey-title">Three steps. Two independent facts.</h2></div><p class="section-sub">A recorder claim is not a USDC receipt. A digest match is not proof of correct Agent execution.</p></div>
+          <div class="journey-grid">
+            <article class="journey-card"><div class="journey-top"><span class="step-icon step-purple">01</span><span class="step-arrow">↗</span></div><h3>Task</h3><p>Task identity, description hash and owner boundary.</p><span class="journey-caption">CREATED · LEDGER CLAIM</span></article>
+            <article class="journey-card"><div class="journey-top"><span class="step-icon step-orange">02</span><span class="step-arrow">↗</span></div><h3>Settlement</h3><p>Independently verify transfer, nonce and Recorder attestation.</p><span class="journey-caption">PAYMENT UNKNOWN BY DEFAULT</span></article>
+            <article class="journey-card"><div class="journey-top"><span class="step-icon step-green">03</span><span class="step-arrow">↗</span></div><h3>Evidence</h3><p>Recompute exact bytes and compare the on-chain SHA-256.</p><span class="journey-caption">HASH MATCH ≠ EXECUTION PROOF</span></article>
+          </div>
+        </section>
+
+        <section class="studio-section" aria-labelledby="studio-title">
+          <div class="section-head"><div><span class="overline">INTERACTIVE EXPLORER</span><h2 id="studio-title">Verification workspace</h2></div><div class="mode-switch" role="group" aria-label="Data source"><button type="button" id="mode-demo" class="mode-button active" aria-pressed="true">Simulation</button><button type="button" id="mode-live" class="mode-button" aria-pressed="false">Testnet lookup</button></div></div>
+          <div id="source-note" class="source-note"><strong>LOCAL SIMULATION</strong><span>Illustrative data generated in this browser — not a USDC settlement or public-chain transaction.</span></div>
+          <div class="studio-grid">
+            <section class="panel panel-controls" aria-label="Scenario controls">
+              <div id="demo-controls">
+                <span class="overline">CHOOSE A STATE</span>
+                <div class="scenarios" id="scenarios">
+                  <button type="button" class="scenario active" data-scenario="created" aria-pressed="true"><span class="scenario-number">01</span><span><strong>Created</strong><small>Task is registered</small></span><span>→</span></button>
+                  <button type="button" class="scenario" data-scenario="lost-ack" aria-pressed="false"><span class="scenario-number">02</span><span><strong>Lost ACK</strong><small>Payment outcome unknown</small></span><span>→</span></button>
+                  <button type="button" class="scenario" data-scenario="proven" aria-pressed="false"><span class="scenario-number">03</span><span><strong>Evidence anchored</strong><small>Digest available to verify</small></span><span>→</span></button>
+                </div>
+                <div class="scenario-details"><span class="overline">WHAT YOU'RE SEEING</span><h3 id="scenario-heading">Task recorded</h3><p id="scenario-summary">This task exists in the local simulation. No independent payment has been verified.</p></div>
+              </div>
+              <div id="live-controls" hidden>
+                <span class="overline">PUBLIC CHAIN · READ ONLY</span>
+                <h3 class="control-title">Inspect a transaction's task</h3>
+                <p class="help-text">Provide a deployed Monad Testnet ledger and its exact bytes32 task ID. Queries do not spend gas.</p>
+                <form id="lookup-form">
+                  <label for="contract">Ledger contract address</label>
+                  <input id="contract" type="text" required autocomplete="off" spellcheck="false" placeholder="0x · 40 hexadecimal characters" aria-describedby="contract-help">
+                  <span id="contract-help" class="field-help">Uses official Testnet RPC via local read-only service.</span>
+                  <label for="taskId">Task identifier · bytes32</label>
+                  <input id="taskId" type="text" required autocomplete="off" spellcheck="false" placeholder="0x · 64 hexadecimal characters">
+                  <button id="query-button" class="button primary full" type="submit">Read chain state <span>↗</span></button>
+                </form>
+                <p id="query-message" class="response" role="status" aria-live="polite">No live task loaded.</p>
+              </div>
+            </section>
+            <section class="panel panel-observation" aria-label="Observed task facts">
+              <div class="observation-header"><div><span class="overline">CURRENT OBSERVATION</span><h3 id="observation-title">Created task</h3></div><span id="ledger-badge" class="state-pill">CREATED</span></div>
+              <div class="fact-list">
+                <div class="fact-item"><div class="fact-head"><span>Ledger status</span><span id="chain-flag" class="fact-source">SIMULATED</span></div><strong id="chain-state">Created</strong><small>Contract-reported state, not full settlement validation</small></div>
+                <div class="fact-item"><div class="fact-head"><span>Payment fact</span><span class="fact-source">USDC RECEIPT</span></div><strong id="payment-fact" class="text-warn">PaymentUnknown</strong><small id="payment-detail">No independent Transfer + AuthorizationUsed + quote proof</small></div>
+                <div class="fact-item"><div class="fact-head"><span>Evidence fact</span><span class="fact-source">SHA-256</span></div><strong id="evidence-fact">Not anchored</strong><small id="evidence-detail">Check original bytes to establish digest equality</small></div>
+              </div>
+              <div class="readonly-warning"><span>ⓘ</span><p><strong>No recharge.</strong> Unknown payment does not mean unpaid. ACP exclusively owns Agent execution and recovery.</p></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="evidence-panel" class="evidence-section" aria-labelledby="evidence-title">
+          <div class="section-head"><div><span class="overline">EVIDENCE LAB</span><h2 id="evidence-title">Prove a digest. Not a narrative.</h2></div><p class="section-sub">Canonical JSON and raw input/output SHA-256 are checked locally in the browser. Files never leave this device.</p></div>
+          <div class="evidence-grid">
+            <section class="panel"><span class="overline">LOCAL CHECK</span><h3>Evidence verification</h3><p class="help-text">For the local Proven scenario, run a generated fixture check. For real tasks, select your own files.</p>
+              <div class="evidence-action"><button id="run-sample-proof" type="button" class="button secondary full" disabled>Verify simulated Evidence <span>✓</span></button></div>
+              <label for="evidence-file">Evidence JSON <span class="required">required</span></label><input id="evidence-file" type="file" accept=".json,application/json">
+              <div class="file-split"><div><label for="input-file">Original input <span class="optional">optional</span></label><input id="input-file" type="file"></div><div><label for="output-file">Original output <span class="optional">optional</span></label><input id="output-file" type="file"></div></div>
+              <button id="verify-button" type="button" class="button primary full" disabled>Verify selected files <span>↗</span></button>
+              <p id="verification-message" class="response" role="status" aria-live="polite">Choose the anchored scenario or load a Proven task to begin.</p>
+            </section>
+            <section class="panel data-panel"><div class="data-head"><span class="overline">TASK DETAILS</span><a id="contract-link" href="#" target="_blank" rel="noopener noreferrer" hidden>View in Explorer ↗</a></div>
+              <div class="data-rows">
+                <div class="data-row"><span>Chain</span><strong id="task-network">Local simulation</strong></div>
+                <div class="data-row"><span>Task ID</span><code id="task-value">—</code></div>
+                <div class="data-row"><span>Creator</span><code id="task-creator">—</code></div>
+                <div class="data-row"><span>Payer</span><code id="task-payer">—</code></div>
+                <div class="data-row"><span>Amount (atomic)</span><strong id="task-amount">—</strong></div>
+                <div class="data-row"><span>Budget cap (atomic)</span><strong id="task-budget">—</strong></div>
+                <div class="data-row"><span>Settlement ref</span><code id="task-settlement">—</code></div>
+                <div class="data-row"><span>Evidence hash</span><code id="task-hash">—</code></div>
+              </div>
+              <p class="data-footnote">A hash match proves byte consistency, not payment authorization, model correctness or independent ACP operation ownership.</p>
+            </section>
+          </div>
+        </section>
+        <footer><span>AgentLedger Studio · Phase 0 verification preview</span><span>No wallet · No custody · No automatic payment retry</span></footer>
+      </main>
     </div>
-    <footer><span>Agent Control Plane / experiments / AgentLedger</span><span>Testnet only · No custody · No signing</span></footer>
-  </main>
+  </div>
 </body>
 </html>
