@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { verifyEvidence } from "./evidence-browser.mjs";
 import { SCENARIOS, buildDemoCase } from "./demo-scenarios.mjs";
+import { makeSummary, RPC_LABEL } from "./summary.mjs";
 
 const byId = id => document.getElementById(id);
 const HEX40=/^0x[0-9a-fA-F]{40}$/;
@@ -9,15 +10,20 @@ let currentMode="demo";
 let currentDemo=null;
 let loadedTask=null;
 let lookupSequence=0;
+let evidenceVerification="NOT_RUN";
 function text(id,value) { byId(id).textContent=String(value??"—"); }
 function message(id,value,tone="") {
   const el=byId(id);el.textContent=value;el.className="response"+(tone?" "+tone:"");
 }
 function displayTask(task,kind="SIMULATION") {
   loadedTask=task;
+  evidenceVerification="NOT_RUN";
   const live=kind==="TESTNET";
   text("task-network",live?"Monad Testnet · 10143":"Local simulation · NOT CHAIN");
   text("task-value",task.taskId);
+  text("task-description",task.descriptionHash);
+  text("task-contract",task.contract);
+  text("task-rpc",live?RPC_LABEL:"No RPC contacted (simulated)");
   text("task-creator",task.creator);
   text("task-payer",task.payer);
   text("task-amount",task.amountAtomic);
@@ -30,6 +36,8 @@ function displayTask(task,kind="SIMULATION") {
   byId("ledger-badge").className="state-pill "+(task.status==="Proven"?"state-proven":task.status==="Paid"?"state-paid":"");
   text("observation-title",task.status==="Proven"?"Digest anchored":task.status==="Paid"?"Recorder-attested payment":"Created task");
   text("payment-fact","PaymentUnknown");
+  text("payment-transfer","NOT VERIFIED");
+  text("payment-nonce","NOT VERIFIED · nonce unavailable");
   text("payment-detail",task.status==="Created"?
     "No verified payer payment attempt. Do not infer permission to spend.":
     "Recorder state alone does not verify USDC Transfer + EIP-3009 nonce.");
@@ -49,6 +57,7 @@ function displayTask(task,kind="SIMULATION") {
 }
 function clearTask() {
   loadedTask=null;
+  evidenceVerification="NOT_RUN";
   byId("verify-button").disabled=true;
   byId("run-sample-proof").disabled=true;
   text("observation-title","No task selected");
@@ -56,7 +65,9 @@ function clearTask() {
   text("chain-state","Not loaded");
   text("payment-fact","PaymentUnknown");
   text("evidence-fact","Not verified");
-  for(const id of ["task-value","task-creator","task-payer","task-amount","task-budget","task-settlement","task-hash"])text(id,"—");
+  for(const id of ["task-value","task-description","task-contract","task-rpc","task-creator","task-payer","task-amount","task-budget","task-settlement","task-hash"])text(id,"—");
+  text("payment-transfer","NOT VERIFIED");
+  text("payment-nonce","NOT VERIFIED");
   byId("contract-link").hidden=true;
   message("verification-message","Load a Proven task to verify Evidence.");
 }
@@ -155,6 +166,7 @@ async function checkEvidence(evidence,input,output,mode) {
   if(!loadedTask ||loadedTask.status!=="Proven")throw Error("No Proven task");
   const result=await verifyEvidence(evidence,loadedTask,input,output);
   if(!result.match)throw Error("Digest mismatch");
+  evidenceVerification="HASH_MATCHED";
   text("evidence-fact",mode==="demo"?"SIMULATED · Hash matched":"Hash matched to chain anchor");
   text("evidence-detail",mode==="demo"?
     "Local-only simulated anchor, not a Monad transaction.":
@@ -170,7 +182,7 @@ byId("run-sample-proof").addEventListener("click",async()=>{
   const button=byId("run-sample-proof");button.disabled=true;
   message("verification-message","Hashing local synthetic input, output and Evidence …");
   try{await checkEvidence(currentDemo.evidence,currentDemo.inputBytes,currentDemo.outputBytes,"demo");}
-  catch(error){message("verification-message","Verification failed: "+error.message,"error");}
+  catch(error){evidenceVerification="NOT_VERIFIED";message("verification-message","Verification failed: "+error.message,"error");}
   finally{button.disabled=false;}
 });
 byId("verify-button").addEventListener("click",async()=>{
@@ -184,7 +196,26 @@ byId("verify-button").addEventListener("click",async()=>{
     const input=await chosenFile("input-file",10*1024*1024);
     const output=await chosenFile("output-file",10*1024*1024);
     await checkEvidence(evidence,input,output,currentMode);
-  }catch(error){message("verification-message","NOT VERIFIED: "+error.message,"error");}
+  }catch(error){evidenceVerification="NOT_VERIFIED";message("verification-message","NOT VERIFIED: "+error.message,"error");}
   finally{button.disabled=!loadedTask||loadedTask.status!=="Proven";}
 });
 void showScenario("created");
+
+// Explicit browser-only artifact: no server upload, no wallet use, no write API.
+byId("save-summary").addEventListener("click",()=>{
+  if(!loadedTask){
+    message("verification-message","Load a simulation stage or a Testnet task before exporting.","error");
+    return;
+  }
+  const summary=makeSummary(loadedTask,{
+    simulation:currentMode==="demo",
+    verification:evidenceVerification,
+    scenario:currentMode==="demo"?currentDemo?.key:null,
+  });
+  const blob=new Blob([JSON.stringify(summary,null,2)+"\n"],{type:"application/json"});
+  const objectUrl=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=objectUrl;a.download="summary.json";
+  document.body.append(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(objectUrl),0);
+});
