@@ -65,8 +65,9 @@
                 <span class="overline">CHOOSE A STATE</span>
                 <div class="scenarios" id="scenarios">
                   <button type="button" class="scenario active" data-scenario="created" aria-pressed="true"><span class="scenario-number">01</span><span><strong>Created</strong><small>Task is registered</small></span><span>→</span></button>
-                  <button type="button" class="scenario" data-scenario="lost-ack" aria-pressed="false"><span class="scenario-number">02</span><span><strong>Lost ACK</strong><small>Payment outcome unknown</small></span><span>→</span></button>
-                  <button type="button" class="scenario" data-scenario="proven" aria-pressed="false"><span class="scenario-number">03</span><span><strong>Evidence anchored</strong><small>Digest available to verify</small></span><span>→</span></button>
+                  <button type="button" class="scenario" data-scenario="paid" aria-pressed="false"><span class="scenario-number">02</span><span><strong>Paid · Recorder claim</strong><small>Not independently settled</small></span><span>→</span></button>
+                  <button type="button" class="scenario" data-scenario="proven" aria-pressed="false"><span class="scenario-number">03</span><span><strong>Evidence → Verify</strong><small>Local SHA-256 match</small></span><span>→</span></button>
+                  <button type="button" class="scenario" data-scenario="lost-ack" aria-pressed="false"><span class="scenario-number">04</span><span><strong>PaymentUnknown</strong><small>Lost ACK · no recharge</small></span><span>→</span></button>
                 </div>
                 <div class="scenario-details"><span class="overline">WHAT YOU'RE SEEING</span><h3 id="scenario-heading">Task recorded</h3><p id="scenario-summary">This task exists in the local simulation. No independent payment has been verified.</p></div>
               </div>
@@ -89,7 +90,7 @@
               <div class="observation-header"><div><span class="overline">CURRENT OBSERVATION</span><h3 id="observation-title">Created task</h3></div><span id="ledger-badge" class="state-pill">CREATED</span></div>
               <div class="fact-list">
                 <div class="fact-item"><div class="fact-head"><span>Ledger status</span><span id="chain-flag" class="fact-source">SIMULATED</span></div><strong id="chain-state">Created</strong><small>Contract-reported state, not full settlement validation</small></div>
-                <div class="fact-item"><div class="fact-head"><span>Payment fact</span><span class="fact-source">USDC RECEIPT</span></div><strong id="payment-fact" class="text-warn">PaymentUnknown</strong><small id="payment-detail">No independent Transfer + AuthorizationUsed + quote proof</small></div>
+                <div class="fact-item"><div class="fact-head"><span>Payment observation</span><span class="fact-source">USDC RECEIPT</span></div><strong id="payment-fact" class="text-warn">PaymentUnknown</strong><small id="payment-detail">No independent Transfer + AuthorizationUsed + quote proof</small><div class="fact-metadata"><span>Transfer</span><code id="payment-transfer">NOT VERIFIED</code><span>AuthorizationUsed / Nonce</span><code id="payment-nonce">NOT VERIFIED</code></div></div>
                 <div class="fact-item"><div class="fact-head"><span>Evidence fact</span><span class="fact-source">SHA-256</span></div><strong id="evidence-fact">Not anchored</strong><small id="evidence-detail">Check original bytes to establish digest equality</small></div>
               </div>
               <div class="readonly-warning"><span>ⓘ</span><p><strong>No recharge.</strong> Unknown payment does not mean unpaid. ACP exclusively owns Agent execution and recovery.</p></div>
@@ -111,6 +112,9 @@
               <div class="data-rows">
                 <div class="data-row"><span>Chain</span><strong id="task-network">Local simulation</strong></div>
                 <div class="data-row"><span>Task ID</span><code id="task-value">—</code></div>
+                <div class="data-row"><span>descriptionHash</span><code id="task-description">—</code></div>
+                <div class="data-row"><span>Contract</span><code id="task-contract">—</code></div>
+                <div class="data-row"><span>RPC identity</span><code id="task-rpc">—</code></div>
                 <div class="data-row"><span>Creator</span><code id="task-creator">—</code></div>
                 <div class="data-row"><span>Payer</span><code id="task-payer">—</code></div>
                 <div class="data-row"><span>Amount (atomic)</span><strong id="task-amount">—</strong></div>
@@ -118,6 +122,7 @@
                 <div class="data-row"><span>Settlement ref</span><code id="task-settlement">—</code></div>
                 <div class="data-row"><span>Evidence hash</span><code id="task-hash">—</code></div>
               </div>
+              <div class="artifact-tools"><button type="button" id="save-summary" class="button secondary full">Export summary.json <span>↓</span></button><p class="field-help">Reports the current observation only. Simulated data cannot become a Testnet acceptance claim.</p></div>
               <p class="data-footnote">A hash match proves byte consistency, not payment authorization, model correctness or independent ACP operation ownership.</p>
             </section>
           </div>
