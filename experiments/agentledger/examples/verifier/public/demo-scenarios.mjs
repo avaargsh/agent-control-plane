@@ -18,12 +18,16 @@ export const SCENARIOS=Object.freeze([
     heading:"Task recorded",summary:"The ledger has a task, but there is no verified payment attempt. No execution decision is implied.",
   },
   {
-    key:"lost-ack",label:"02 · Lost ACK",short:"Payment unknown",
-    heading:"Payment response missing",summary:"Recorder claims Paid, but independent USDC settlement proof is unavailable. Do not charge again.",
+    key:"paid",label:"02 · Paid claim",short:"Recorder attested",
+    heading:"Recorder records payment",summary:"The contract marks Paid through its Recorder. This is not proof of a USDC Transfer or a consumed EIP-3009 nonce.",
   },
   {
     key:"proven",label:"03 · Evidence",short:"Digest anchored",
-    heading:"Evidence hash matches",summary:"The local simulated Evidence reproduces the ledger digest. Payment remains unverified; execution correctness is not established.",
+    heading:"Evidence ready to verify",summary:"The simulated contract has an Evidence hash. Click Verify to rehash local bytes; Recorder payment remains unverified.",
+  },
+  {
+    key:"lost-ack",label:"04 · PaymentUnknown",short:"Lost ACK, hold charge",
+    heading:"Payment response missing",summary:"A charge may have settled before the HTTP acknowledgement was lost. No receipt or consumed nonce is established; NEVER re-charge.",
   },
 ]);
 export async function buildDemoCase(key) {
@@ -34,7 +38,7 @@ export async function buildDemoCase(key) {
     outputSha256:await sha256Hex(OUTPUT),schemaVersion:"agentledger.evidence.v1",taskId:ID,
   };
   const hash=await evidenceHash(evidence);
-  const status=key==="created"?"Created":key==="lost-ack"?"Paid":"Proven";
+  const status=key==="created"?"Created":key==="proven"?"Proven":"Paid";
   const task={
     chainId:10143,contract:LEDGER,taskId:ID,
     status,creator:CREATOR,payer:status==="Created"?"0x"+"00".repeat(20):PAYER,
@@ -48,8 +52,16 @@ export async function buildDemoCase(key) {
     kind:"SIMULATION",key,stage:SCENARIOS.find(s=>s.key===key),
     task,evidence,inputBytes:INPUT,outputBytes:OUTPUT,
     payment:{
-      status:"PaymentUnknown",eventIndependentlyChecked:false,
+      status:"PaymentUnknown",
+      recorderClaim:status==="Created"?"NotRecorded":"Paid",
+      eventIndependentlyChecked:false,
+      transferEvent:"NOT_OBSERVED_LOCAL_SIMULATION",
+      authorizationUsed:"NOT_OBSERVED_LOCAL_SIMULATION",
+      paymentNonce:null,
+      transaction:null,
+      settlementRef:status==="Created"?null:SETTLEMENT,
       recorderAttestationObserved:status!=="Created",
+      failureSemantic:key==="lost-ack"?"ACK_LOST_OUTCOME_UNKNOWN":"RECORDER_CLAIM_NOT_USDC_PROOF",
       chargeAgain:false,
     },
     evidenceFact:status==="Proven"?"Simulated hash can be independently checked":"Not anchored",
