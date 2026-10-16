@@ -1,0 +1,51 @@
+name: agentledger-pocket
+on:
+  push:
+    branches:
+      - feat/agentledger-pocket-app
+    paths:
+      - "experiments/agentledger/apps/pocket/**"
+      - "experiments/agentledger/examples/verifier/server.mjs"
+      - "experiments/agentledger/examples/verifier/test/pocket-cors.test.mjs"
+      - ".github/workflows/agentledger-pocket.yml"
+  pull_request:
+    paths:
+      - "experiments/agentledger/apps/pocket/**"
+      - "experiments/agentledger/examples/verifier/server.mjs"
+      - "experiments/agentledger/examples/verifier/test/pocket-cors.test.mjs"
+      - ".github/workflows/agentledger-pocket.yml"
+permissions:
+  contents: read
+jobs:
+  expo-web-build:
+    name: Expo iOS/Web shared app — TypeScript, domain and export
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Expo dependencies
+        working-directory: experiments/agentledger/apps/pocket
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Pure domain, identity and canonical SHA-256 tests
+        working-directory: experiments/agentledger/apps/pocket
+        run: npm test
+      - name: Strict TypeScript
+        working-directory: experiments/agentledger/apps/pocket
+        run: npm run check
+      - name: Produce actual deployable Expo Web output
+        working-directory: experiments/agentledger/apps/pocket
+        env:
+          CI: "1"
+          EXPO_NO_TELEMETRY: "1"
+        run: |
+          npm run build:web
+          test -f dist/index.html
+      - name: Upload static web app (NO WALLET / DEMO ONLY)
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentledger-pocket-expo-web
+          path: experiments/agentledger/apps/pocket/dist/
+          if-no-files-found: error
+          retention-days: 7
