@@ -42,6 +42,18 @@ jobs:
         run: |
           npm run build:web
           test -f dist/index.html
+      - name: Browser acceptance against actual Expo Web bundle
+        working-directory: experiments/agentledger/apps/pocket
+        run: |
+          node --check browser/smoke.mjs
+          npm run test:browser
+      - name: Upload visual acceptance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentledger-pocket-visual-smoke
+          path: experiments/agentledger/apps/pocket/e2e-artifacts/
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload static web app (NO WALLET / DEMO ONLY)
         uses: actions/upload-artifact@v4
         with:
