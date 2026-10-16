@@ -9,6 +9,7 @@ const STATIC = new Map([
   ["/", ["./public/index.html", "text/html; charset=utf-8"]],
   ["/app.mjs", ["./public/app.mjs", "text/javascript; charset=utf-8"]],
   ["/demo-scenarios.mjs", ["./public/demo-scenarios.mjs", "text/javascript; charset=utf-8"]],
+  ["/summary.mjs", ["./public/summary.mjs", "text/javascript; charset=utf-8"]],
   ["/style.css", ["./public/style.css", "text/css; charset=utf-8"]],
   ["/evidence-browser.mjs", ["./public/evidence-browser.mjs", "text/javascript; charset=utf-8"]],
 ]);
