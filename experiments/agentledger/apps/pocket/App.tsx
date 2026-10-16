@@ -313,7 +313,7 @@ export default function App(){
  return <SafeAreaProvider><SafeAreaView style={S.root}>
   <StatusBar style="light"/>
   <View style={[S.layout,wide&&{justifyContent:"center",paddingHorizontal:28}]}>
-   <View style={[{flex:wide?0:1,width:wide?438:"100%"},wide&&{height:"100%"}]}>
+   <View style={wide?{width:438,flexShrink:0,height:"100%"}:{flex:1,width:"100%"}}>
      {entered?main:welcome}
    </View>
    {wide&&<ScrollView contentContainerStyle={{padding:38,paddingBottom:65,maxWidth:580}} style={{flex:1}}>
