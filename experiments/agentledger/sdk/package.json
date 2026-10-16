@@ -1,0 +1,28 @@
+{
+  "name": "@agentledger/verify",
+  "version": "0.2.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "description": "Read-only AgentLedger Phase 0 verification SDK preview (NOT funded Testnet accepted)",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": "./dist/index.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "packcheck": "npm run build && npm pack --dry-run"
+  },
+  "dependencies": {
+    "viem": "2.57.4"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}
