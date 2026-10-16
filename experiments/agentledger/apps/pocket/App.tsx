@@ -182,7 +182,7 @@ export default function App(){
     <View style={{flex:1}}><Txt weight="700" size={14}>{scenario.summary}</Txt>
       <Txt color={C.muted} size={11} style={{marginTop:5}}>{scenario.hint}</Txt></View>
     <Txt color={stage===scenario.key?C.accent:C.quiet} size={17}>→</Txt>
-   </Press>)}</View>
+   </Pressable>)}</View>
   </>:<Card><Txt weight="700" size={15}>只读查询真实任务</Txt>
     <Txt color={C.muted} size={12} style={{marginTop:10,lineHeight:20}}>仅 GET /api/task。不会读取私钥、调用钱包或主动支付。网页需要配置同源代理/CORS。</Txt>
     <TextInput value={contract} onChangeText={setContract} style={S.input}
