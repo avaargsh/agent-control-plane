@@ -3,10 +3,28 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { encodeFunctionResult } from "viem";
-import { TASK_ABI } from "../../examples/verifier/lib/task-reader.mjs";
 import { evidenceHash } from "../../examples/verifier/public/evidence-browser.mjs";
 import { SDK_VERSION, SDK_CAPABILITIES, createAgentLedgerVerifier } from "../dist/index.mjs";
 
+// Consumers know the public contract ABI; they do not import private
+// verifier internals (which are outside this package's dependency scope).
+const TASK_ABI=[{
+  type:"function",name:"getTask",stateMutability:"view",
+  inputs:[{name:"taskId",type:"bytes32"}],
+  outputs:[{name:"task",type:"tuple",components:[
+    {name:"creator",type:"address"},
+    {name:"payer",type:"address"},
+    {name:"amount",type:"uint256"},
+    {name:"maxBudget",type:"uint256"},
+    {name:"descriptionHash",type:"bytes32"},
+    {name:"evidenceHash",type:"bytes32"},
+    {name:"settlementRef",type:"bytes32"},
+    {name:"status",type:"uint8"},
+    {name:"createdAt",type:"uint64"},
+    {name:"paidAt",type:"uint64"},
+    {name:"provenAt",type:"uint64"},
+  ]}],
+}];
 const CONTRACT="0x"+"ab".repeat(20),ID="0x"+"11".repeat(32);
 const payload={
   completedAt:"2026-10-16T00:00:00.000Z",
