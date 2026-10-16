@@ -4,7 +4,7 @@
 import { readTask, makeClient, validateLookup, CHAIN_ID, RPC } from "../../examples/verifier/lib/task-reader.mjs";
 import { canonicalEvidence, evidenceHash, verifyEvidence } from "../../examples/verifier/public/evidence-browser.mjs";
 import { projectPhase0, PHASE0_SCHEMA, STATES } from "../../phase0/status.mjs";
-import { verifyLive as verifySettlementLive, verifyReceipt as verifySettlementReceipt } from "../../tools/settlement.mjs";
+import { verifyLive as verifySettlementLive } from "../../tools/settlement.mjs";
 
 export const SDK_VERSION = "0.2.0-alpha.1";
 export const SDK_CAPABILITIES = Object.freeze({
@@ -13,7 +13,7 @@ export const SDK_CAPABILITIES = Object.freeze({
   sign: false, mutateLedger: false, executeAgent: false, manageAcp: false,
   proveChainFinality: false,
 });
-export { canonicalEvidence, evidenceHash, verifyEvidence, verifySettlementReceipt, PHASE0_SCHEMA, STATES };
+export { canonicalEvidence, evidenceHash, verifyEvidence, PHASE0_SCHEMA, STATES };
 
 /**
  * A deliberately conservative read-only SDK facade.
@@ -50,6 +50,9 @@ export function createAgentLedgerVerifier({ client, rpcUrl = RPC } = {}) {
       };
     },
     async verifySettlement(expected, { minConfirmations=2 }={}) {
+      if(!/^0x[0-9a-fA-F]{64}$/.test(expected?.paymentNonce || "")) {
+        throw Error("EIP-3009 paymentNonce required for SDK receipt observation; PaymentUnknown");
+      }
       // A valid event is not a signed task intent, a sufficient payment
       // admission, or authorization to call recordPayment.
       if (client) throw Error("Injected RPC clients cannot be used for receipt verification; supply a pinned rpcUrl");
