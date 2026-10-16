@@ -69,7 +69,13 @@ relative to the source script, not the working directory. Or pass an
 explicit destination as the first CLI positional argument.
 
 The CI job **Read-only UI and contract query smoke** executes the same
-journey and uploads `agentledger-studio-simulated-summary`.
+journey **and launches real headless Chromium** against the local Studio
+server (no external RPC). Browser automation clicks Created, Paid,
+Evidence and Verify; asserts Recorder Paid does not promote
+`PaymentUnknown`; downloads and parses `summary.json`; checks the
+Lost ACK no-recharge branch, and repeats at mobile viewport.
+It uploads `agentledger-studio-simulated-summary` containing
+`summary.json`, `studio-desktop.png` and `studio-mobile.png`.
 The JSON contains `taskId`, `descriptionHash`, Ledger contract,
 chain ID, pinned RPC identifier (with `contacted:false`),
 recorder claim, USDC event/nonce uncertainty, `evidenceHash`,
@@ -115,3 +121,20 @@ No fixture parser, injectable `client`/`transport`, signing, write
 or AgentRun API is exported. Transport injection is refused at factory
 construction **before** nonce or RPC processing. No npm publish is
 permitted (`private:true`).
+
+### Optional local Chromium visual regression
+
+```bash
+cd experiments/agentledger/examples/verifier
+npm install --ignore-scripts --no-audit --no-fund
+# Requires locally installed Chrome/Chromium; set AGENTLEDGER_CHROME_PATH if needed.
+npm run test:browser
+```
+
+This exercise starts its own loopback-only GET verifier service with a
+mock that throws if a simulated scenario attempts public RPC, runs
+headless Chromium, generates screenshots, downloads the browser-authored
+`summary.json`, verifies its required fields, and fails if there are
+browser runtime errors or horizontal overflow at 390px viewport.
+It is a **real graphical interaction test**, not just a Node model
+fixture check. It does not contact a Testnet payment facilitator.
