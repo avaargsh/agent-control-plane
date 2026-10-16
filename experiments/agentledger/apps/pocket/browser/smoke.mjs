@@ -40,11 +40,16 @@ try{
     args:["--no-sandbox","--disable-gpu"]});
   const page=await browser.newPage({viewport:{width:1280,height:860},
     acceptDownloads:true,reducedMotion:"reduce"});
-  const errors=[];
+  const errors=[],failedRequests=[],responses=[];
   page.on("pageerror",e=>errors.push(e.message));
+  page.on("requestfailed",r=>failedRequests.push(r.url()+" "+r.failure()?.errorText));
+  page.on("response",r=>{if(r.status()>=400)responses.push(r.status()+" "+r.url())});
   const base="http://127.0.0.1:"+server.address().port;
   await page.goto(base+"/",{waitUntil:"networkidle"});
-  await page.getByText("进入模拟体验").waitFor();
+  await page.screenshot({path:join(out,"pocket-startup-diagnostic.png"),fullPage:true});
+  const body=(await page.locator("body").innerText()).slice(0,1200);
+  console.log("BROWSER STARTUP",JSON.stringify({url:page.url(),body,errors,failedRequests,responses}));
+  await page.getByText("进入模拟体验").waitFor({timeout:8000});
   await page.screenshot({path:join(out,"pocket-welcome-desktop.png"),fullPage:true});
   await page.getByText("进入模拟体验").click();
   await page.getByText("我的任务").waitFor();
