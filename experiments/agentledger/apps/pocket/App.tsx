@@ -69,7 +69,7 @@ export default function App(){
  const seq=useRef(0);
  const task=mode==="SIMULATION"?demoTask(stage):liveTask;
  const fact=task?publicObservation(task,{simulation:mode==="SIMULATION",evidenceChecked:proofMatched}):null;
- const rejects=useMemo(()=>demoIdentityRejections(),[]);
+ const rejects=useMemo(()=>demoIdentityRejections() as Array<{kind:string;result:string}>,[]);
  const journal=(description:string)=>setEvents(e=>[description,...e].slice(0,12));
  const stageChange=(key:string)=>{
   seq.current++;setStage(key);setMode("SIMULATION");setProofMatched(false);setError("");
@@ -96,7 +96,7 @@ export default function App(){
   if(mode!=="SIMULATION"||stage!=="proven"){setError("当前版本只能核验本地模拟 Evidence；真实数据请使用独立只读 verifier。");return;}
   setBusy(true);setError("");
   try{
-   const result=await verifyDemoEvidence(input=>Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,input));
+   const result=await verifyDemoEvidence((input:string)=>Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,input));
    setProofMatched(result.match);
    journal("LOCAL EVIDENCE · SHA-256 matched · payment unknown");
   }catch(e){setProofMatched(false);setError(e instanceof Error?e.message:"Evidence mismatch");}
