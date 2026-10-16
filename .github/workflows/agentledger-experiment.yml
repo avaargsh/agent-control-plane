@@ -92,8 +92,21 @@ jobs:
           node --check tools/live-acceptance.mjs
           node --check tools/reconcile-task.mjs
           node --check public/evidence-browser.mjs
+          node --check public/demo-scenarios.mjs
+          node --check public/summary.mjs
+          node --check tools/demo-journey.mjs
           node --check public/app.mjs
           npm test
+      - name: Execute simulated Created-Paid-Evidence-Verify plus Unknown and identity rejections
+        working-directory: experiments/agentledger/examples/verifier
+        run: node tools/demo-journey.mjs
+      - name: Publish local-only Verification Studio summary.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentledger-studio-simulated-summary
+          path: experiments/agentledger/out/demo-journey/summary.json
+          if-no-files-found: error
+          retention-days: 7
 
 
   sdk-alpha:
