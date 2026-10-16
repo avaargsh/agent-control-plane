@@ -39,8 +39,15 @@ Monad Testnet payment→execution→anchor acceptance is independently verified.
 
 ## Read-only SDK alpha and visual demo (v0.2 preview)
 
+**SDK API is narrowed to three read-only operations:**
+`observe / verify / reconcile(receipt-only)`. Public module exports
+contain only the factory and metadata. `client`/`transport` injection
+is rejected at construction before any nonce check. The only
+receipt reconciliation exposed by the SDK remains `PaymentUnknown`
+until the separate Phase 0 signed-intent/precharge workflow succeeds.
+
 **SDK:** `sdk/` now builds a private, versioned
-`@agentledger/verify@0.2.0-alpha.1` package from the tested Phase 0
+`@agentledger/verify@0.2.0-alpha.2` package from the tested Phase 0
 projection, on-chain reader and SHA-256 source modules via esbuild.
 This preview is deliberately `private:true` and **not npm-published**;
 it does not sign or submit payments, write Recorder attestations, manage
@@ -54,6 +61,17 @@ npm install --no-audit --no-fund --ignore-scripts
 npm test
 npm run packcheck
 ```
+
+**Visual demo:** `examples/verifier/` is a responsive Verification
+Studio with **Created → Paid (Recorder claim) → Evidence → Verify** and a
+separate **PaymentUnknown / Lost ACK** route. The browser exports
+`summary.json` including `taskId`, `descriptionHash`, chain ID,
+contract, RPC identity, payment event/nonce uncertainty and Evidence hash
+verification. The hermetic `tools/demo-journey.mjs` runs both paths
+and cross-Ledger/wrong-payer rejection in CI.
+
+For the exact live walkthrough and executable acceptance contract, see
+[Verification Studio demo acceptance](docs/verification-studio-demo-acceptance.md).
 
 **Visual demo:** `examples/verifier/` is now a responsive verification
 studio, with distinct Task / Settlement / Evidence facts and two explicit
