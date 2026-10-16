@@ -8,7 +8,7 @@ import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
-const dist=fileURLToPath(new URL("../dist/",import.meta.url));
+const dist=resolve(fileURLToPath(new URL("../dist/",import.meta.url)));
 const out=fileURLToPath(new URL("../e2e-artifacts/",import.meta.url));
 await mkdir(out,{recursive:true});
 const exists=existsSync(join(dist,"index.html"));
