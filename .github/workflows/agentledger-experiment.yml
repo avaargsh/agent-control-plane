@@ -100,11 +100,19 @@ jobs:
       - name: Execute simulated Created-Paid-Evidence-Verify plus Unknown and identity rejections
         working-directory: experiments/agentledger/examples/verifier
         run: node tools/demo-journey.mjs
+      - name: Real Chromium Verification Studio interactive acceptance
+        working-directory: experiments/agentledger/examples/verifier
+        run: |
+          node --check browser/studio-browser-smoke.mjs
+          node browser/studio-browser-smoke.mjs
       - name: Publish local-only Verification Studio summary.json
         uses: actions/upload-artifact@v4
         with:
           name: agentledger-studio-simulated-summary
-          path: experiments/agentledger/out/demo-journey/summary.json
+          path: |
+            experiments/agentledger/out/demo-journey/summary.json
+            experiments/agentledger/out/demo-journey/studio-desktop.png
+            experiments/agentledger/out/demo-journey/studio-mobile.png
           if-no-files-found: error
           retention-days: 7
 
