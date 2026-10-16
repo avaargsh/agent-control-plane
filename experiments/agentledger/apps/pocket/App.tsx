@@ -295,7 +295,8 @@ export default function App(){
  <View style={[S.phone,wide&&S.phoneWide]}>
   {header}
   <ScrollView keyboardShouldPersistTaps="handled"
-    contentContainerStyle={{paddingHorizontal:21,paddingBottom:125,flexGrow:1}}
+    style={{flex:1,width:"100%"}}
+    contentContainerStyle={{width:"100%",paddingHorizontal:21,paddingBottom:125,flexGrow:1}}
     showsVerticalScrollIndicator={false}>
     {tab==="Home"?home:tab==="Tasks"?tasks:tab==="Proof"?proof:journalView}
     {!!error&&<View style={[S.notice,{borderColor:C.red,marginTop:18}]}><Txt color={C.red} size={12}>{error}</Txt></View>}
