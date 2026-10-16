@@ -14,7 +14,7 @@ const browserCandidates=[
 ].filter(Boolean);
 const binary=browserCandidates.find(existsSync);
 assert(binary,"No system Chromium/Chrome installed; browser acceptance must not silently skip");
-const outputDir=resolve(process.env.AGENTLEDGER_BROWSER_ARTIFACTS || "../../../out/demo-journey");
+const outputDir=resolve(process.env.AGENTLEDGER_BROWSER_ARTIFACTS || "../../out/demo-journey");
 mkdirSync(outputDir,{recursive:true});
 const server=createVerifierServer({
   lookup:async()=>{throw Error("browser simulation attempted an unauthorized RPC call");}
@@ -74,8 +74,7 @@ try {
   await page.waitForFunction(()=>document.querySelector("#scenario-heading")?.textContent==="Payment response missing");
   assert(await page.locator("#payment-fact").innerText()==="PaymentUnknown",
     "lost ACK did not remain PaymentUnknown");
-  await page.locator("#save-summary").click();
-  const lostSummary=page.waitForEvent("download"); // The action above is synchronous; re-click with watcher below.
+  const lostSummary=page.waitForEvent("download");
   await page.locator("#save-summary").click();
   const lostReport=JSON.parse(readFileSync(await (await lostSummary).path(),"utf8"));
   assert(lostReport.payment.failureSemantic==="ACK_LOST_OUTCOME_UNKNOWN",
