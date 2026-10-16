@@ -57,6 +57,17 @@ try{
   console.log("AFTER ENTRY",JSON.stringify({
     visible:await titleLocator.isVisible(),
     rect:await titleLocator.boundingBox(),
+    ancestors:await titleLocator.evaluate(el=>{
+      const output=[];let node=el;
+      while(node&&output.length<10){
+        const r=node.getBoundingClientRect(),style=getComputedStyle(node);
+        output.push({tag:node.tagName,cls:String(node.className).slice(0,90),
+          width:r.width,height:r.height,display:style.display,
+          flex:style.flex,overflow:style.overflow});
+        node=node.parentElement;
+      }
+      return output;
+    }),
     body:(await page.locator("body").innerText()).slice(0,1700),
     errors,
   }));
