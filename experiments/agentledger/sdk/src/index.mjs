@@ -50,12 +50,12 @@ export function createAgentLedgerVerifier({ client, rpcUrl = RPC } = {}) {
       };
     },
     async verifySettlement(expected, { minConfirmations=2 }={}) {
+      if (client) throw Error("Injected RPC clients cannot be used for receipt verification; supply a pinned rpcUrl");
       if(!/^0x[0-9a-fA-F]{64}$/.test(expected?.paymentNonce || "")) {
         throw Error("EIP-3009 paymentNonce required for SDK receipt observation; PaymentUnknown");
       }
       // A valid event is not a signed task intent, a sufficient payment
       // admission, or authorization to call recordPayment.
-      if (client) throw Error("Injected RPC clients cannot be used for receipt verification; supply a pinned rpcUrl");
       const result=await verifySettlementLive(expected,rpcUrl,fetch,{minConfirmations});
       return Object.freeze({
         ...result,
