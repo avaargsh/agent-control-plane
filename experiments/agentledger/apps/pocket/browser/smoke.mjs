@@ -52,7 +52,16 @@ try{
   await page.getByText("进入模拟体验").waitFor({timeout:8000});
   await page.screenshot({path:join(out,"pocket-welcome-desktop.png"),fullPage:true});
   await page.getByText("进入模拟体验").click();
-  await page.getByText("我的任务").waitFor();
+  await page.waitForTimeout(500);
+  const titleLocator=page.getByText("我的任务");
+  console.log("AFTER ENTRY",JSON.stringify({
+    visible:await titleLocator.isVisible(),
+    rect:await titleLocator.boundingBox(),
+    body:(await page.locator("body").innerText()).slice(0,1700),
+    errors,
+  }));
+  await page.screenshot({path:join(out,"pocket-after-entry-diagnostic.png"),fullPage:true});
+  await titleLocator.waitFor({timeout:8000});
   await page.getByText("登记支付声明").click();
   await page.getByText("PaymentUnknown").first().waitFor();
   await page.getByText("证据哈希已上链").click();
