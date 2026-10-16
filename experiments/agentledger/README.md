@@ -37,6 +37,53 @@ Business OutcomeContract and `independent-execution-proof.json`.
 Do not extract a generalized signing/payment SDK before a true
 Monad Testnet payment→execution→anchor acceptance is independently verified.
 
+## Read-only SDK alpha and visual demo (v0.2 preview)
+
+**SDK:** `sdk/` now builds a private, versioned
+`@agentledger/verify@0.2.0-alpha.1` package from the tested Phase 0
+projection, on-chain reader and SHA-256 source modules via esbuild.
+This preview is deliberately `private:true` and **not npm-published**;
+it does not sign or submit payments, write Recorder attestations, manage
+ACP AgentRuns or claim chain finality. Its optional on-chain USDC receipt
+observation now requires an EIP-3009 `paymentNonce`, and still does
+**not** verify complete signed task intent or authorize side effects.
+
+```bash
+cd experiments/agentledger/sdk
+npm install --no-audit --no-fund --ignore-scripts
+npm test
+npm run packcheck
+```
+
+**Visual demo:** `examples/verifier/` is now a responsive verification
+studio, with distinct Task / Settlement / Evidence facts and two explicit
+data sources:
+
+- **Local Simulation:** choose Created, Lost ACK, or Evidence Anchored.
+  The source label stays visible, no RPC or wallet action occurs,
+  `PaymentUnknown` remains in place, and a synthetic Evidence fixture
+  can be rehashed entirely in the browser.
+- **Testnet lookup:** supply Ledger contract + bytes32 task ID; the
+  existing GET-only API displays actual recorder-attested chain state,
+  but never upgrades it to independently verified USDC payment.
+  Users can select Evidence JSON, input and output files and recompute
+  SHA-256 locally without uploading their content.
+
+Start the interactive demo:
+
+```bash
+cd experiments/agentledger/examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+npm start
+# http://127.0.0.1:4321
+```
+
+**Product boundary:** This is an AgentLedger read-only settlement /
+Evidence adapter alongside ACP, not a second task control plane.
+No audited public Testnet deployment exists in the default-deny
+registry; real paid Testnet acceptance remains **NOT COMPLETE**. SDK
+publication stays gated behind that acceptance.
+
 ## Real Monad Testnet observation gate (read-only)
 
 A new acceptance command is available **only after** a genuine dedicated
