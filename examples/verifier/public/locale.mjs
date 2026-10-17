@@ -3,8 +3,13 @@
 // raw evidence, JSON artifacts or contract/runtime values.
 import { COPY } from './locale-copy.mjs';
 
-const EN_ZH = new Map(COPY);
-const ZH_EN = new Map(COPY.map(([en, zh]) => [zh, en]));
+// Some legacy page strings start in Chinese (wallet/guide) while Studio starts
+// in English. Normalize pairs before indexing in either direction.
+const pairs = COPY.map(([first, second]) =>
+  /[\u3400-\u9fff]/.test(first) && !/[\u3400-\u9fff]/.test(second)
+    ? [second, first] : [first, second]);
+const EN_ZH = new Map(pairs);
+const ZH_EN = new Map(pairs.map(([en, zh]) => [zh, en]));
 const LONG_EN = [...EN_ZH].filter(([en, zh]) =>
   en.length >= 13 && en !== zh && /[A-Za-z]/.test(en)).sort((a, b) => b[0].length - a[0].length);
 const LONG_ZH = [...ZH_EN].filter(([zh, en]) =>
