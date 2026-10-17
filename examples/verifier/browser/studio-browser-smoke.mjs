@@ -176,7 +176,7 @@ try {
   assert(await page.locator('#chain-state').innerText()==='Not loaded','wrong identity presented as loaded');
 
   // A failed optional Testnet read never reverses the completed offline proof journey.
-  await page.route(/\\/api\\/showcase/,route=>route.fulfill({status:503,contentType:'application/json',body:'{}'}));
+  await page.route('**/api/showcase',route=>route.fulfill({status:503,contentType:'application/json',body:'{}'}));
   await page.locator('#guide-reset').click();
   for(let index=1;index<6;index++) await page.locator('#guide-next').click();
   await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('本地六步演示已完成'));
