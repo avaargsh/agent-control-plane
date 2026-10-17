@@ -63,3 +63,11 @@ Use [the MOJO handoff checklist](../docs/monad-blitz-submission.md) and `npm run
 The **Clickable Demo** slide contains two loopback-only links: Pocket Web on `http://127.0.0.1:8081` and the six-step offline Studio guided demo on `http://127.0.0.1:4322/demo`. Start those services on the **same computer** as the presentation browser. These are development-only local navigation links, not deployed sites. If demonstrating on a separate device, use approved port forwarding and open the corresponding service directly; do not treat a failed `127.0.0.1` link as a Testnet failure.
 
 Pocket's fourth step now ends in **Export guided summary.json**, with the payment claim still `PaymentUnknown`; Studio displays a separate seventh, **optional** Testnet read. Both presentation surfaces use a restrained navy/blue visual system and retain their source labels.
+
+## 中文 / English 完整切换
+
+- 中文稿：`npm run build:judge` → `slides/dist-judge/`
+- English: `npm run build:judge:en` → `slides/dist-judge-en/`
+- 两版分别维护完整文本，避免单页中英文叙述混排；封面语言链接可在两个打包页面间切换。
+- 先构建两版，再在 `slides/` 目录用 `npx serve .` 提供同源静态服务，访问 `/dist-judge/` 或 `/dist-judge-en/`。链接不是公网部署地址。
+- Pocket 和 Studio 应用的语言切换为独立的页面级状态，在同一浏览器下会保存用户的显示语言；Pitch 的两份 Markdown 不携带钱包或链上操作。
