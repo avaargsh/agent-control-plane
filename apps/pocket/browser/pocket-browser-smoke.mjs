@@ -53,8 +53,17 @@ try{
    await page.getByText(expected,{exact:true}).waitFor();
    await page.getByText(/PaymentUnknown/).first().waitFor();
  }
- if(!await page.getByRole("button",{name:"Guide next"}).isDisabled())
-   throw Error("Guided demonstration ran past no-recharge endpoint");
+ if(await page.getByRole("button",{name:"Guide next"}).count()!==0)
+   throw Error("Guide offered an unsafe step after Lost ACK");
+ await page.getByText("STEP 4 / 4",{exact:true}).waitFor();
+ const guidedDownloadPromise=page.waitForEvent("download");
+ await page.getByRole("button",{name:"Export guided summary.json"}).click();
+ const guidedDownload=await guidedDownloadPromise;
+ if(guidedDownload.suggestedFilename()!=="summary.json")throw Error("No guided summary export");
+ const guidedSummary=JSON.parse(await readFile(await guidedDownload.path(),"utf8"));
+ if(guidedSummary.mode!=="LOCAL_SIMULATION" || guidedSummary.payment.observed!=="PaymentUnknown"
+   || guidedSummary.payment.chargeAgain!==false || guidedSummary.rpc.contacted!==false)
+   throw Error("Guided export asserted unsafe payment provenance");
  await page.getByRole("button",{name:"Guide back"}).click();
  await page.getByText("03 · Evidence / Verify",{exact:true}).waitFor();
  await page.getByRole("button",{name:"Guide next"}).click();
@@ -63,7 +72,7 @@ try{
  await page.getByRole("button",{name:"Guide back"}).click();
  await page.getByRole("button",{name:"Guide back"}).click();
  await page.getByText("01 · Created",{exact:true}).waitFor();
- await page.locator('[aria-label="Local simulated guided demonstration"]').getByRole("button").first().click();
+ await page.getByRole("button",{name:"Exit guided demo"}).click();
  await page.getByRole("tab",{name:"Tasks"}).click();
  await page.getByText("Your agent tasks",{exact:true}).waitFor();
 
@@ -234,6 +243,24 @@ try{
  }));
  if(sizes.overflow>3)throw Error("Horizontal mobile overflow "+JSON.stringify(sizes));
  await page.screenshot({path:join(output,"pocket-mobile.png"),fullPage:true});
+  // At 390px the presenter must expose the finish CTA without horizontal overflow.
+  await page.getByRole("button",{name:/Start 3-minute guided demo/}).click();
+  for(let i=0;i<3;i++) await page.getByRole("button",{name:"Guide next"}).click();
+  await page.getByText("STEP 4 / 4",{exact:true}).waitFor();
+  if(!await page.getByRole("button",{name:"Export guided summary.json"}).isVisible())
+    throw Error("Mobile guided finish export unreachable");
+  const guidedWidth=await page.evaluate(()=>({
+    scroll:document.documentElement.scrollWidth,
+    viewport:document.documentElement.clientWidth,
+    controls:[...document.querySelectorAll('[aria-label="Local simulated guided demonstration"] [role="button"]')]
+      .map(el=>({label:el.getAttribute("aria-label"),right:Math.round(el.getBoundingClientRect().right)})),
+  }));
+  if(guidedWidth.scroll>guidedWidth.viewport+3 || guidedWidth.controls.some(x=>x.right>guidedWidth.viewport+3))
+    throw Error("Mobile presenter overflows "+JSON.stringify(guidedWidth));
+  await page.screenshot({path:join(output,"pocket-mobile-guided.png"),fullPage:true});
+  await page.getByRole("button",{name:"Exit guided demo"}).click();
+  if(await page.getByText("GUIDED DEMO · LOCAL SIMULATION ONLY").count())
+    throw Error("Presenter remains visible after exit");
  if(errors.length)throw Error("Browser exceptions: "+errors.join("; "));
  console.log("POCKET WEB PASS: Created → Recorder Paid → Evidence real SHA-256 → PaymentUnknown Lost ACK; unsafe lookup rejected; mobile layout okay");
 }finally{

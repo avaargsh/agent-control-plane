@@ -52,8 +52,11 @@
 
         <section id="demo-guide" class="demo-director" lang="zh-CN" aria-labelledby="guide-title">
           <div class="director-progress"><span id="guide-counter">完整演示 · 约 3 分钟</span><progress id="guide-progress" max="7" value="0" aria-label="演示进度"></progress><span id="guide-source" class="director-source">LOCAL SIMULATION · NO WALLET</span><button id="guide-exit" class="guide-exit" type="button" hidden aria-label="退出引导演示">退出导览 ×</button></div>
-          <div class="director-body"><div><h2 id="guide-title">从任务记录到可以复核的证据。</h2><p id="guide-description">逐步展示支付声明、本地工具结果、SHA-256 验证与异常恢复，最后读取真实测试网任务。前六步不花费 gas。</p><p id="guide-result" class="director-result" role="status" aria-live="polite"></p></div>
-          <div class="director-actions"><button id="guide-prev" type="button" class="button secondary" disabled>上一步</button><button id="guide-next" type="button" class="button primary">开始完整演示</button><button id="guide-reset" type="button" class="button secondary">重新开始</button></div></div>
+          <ol id="guide-timeline" class="guide-timeline" aria-label="导览阶段">
+            <li data-guide-step="0">Task</li><li data-guide-step="1">Claim</li><li data-guide-step="2">Tool</li><li data-guide-step="3">Verify</li><li data-guide-step="4">Tamper</li><li data-guide-step="5">Lost ACK</li><li data-guide-step="6">Testnet <span>可选</span></li>
+          </ol>
+          <div class="director-body"><div><h2 id="guide-title">从任务记录到可以复核的证据。</h2><p id="guide-description">逐步展示支付声明、本地工具结果、SHA-256 验证与异常恢复，前六步在浏览器本地完成，无钱包、无 gas；最后一步可选只读核对 Monad Testnet。</p><p id="guide-result" class="director-result" role="status" aria-live="polite"></p></div>
+          <div class="director-actions"><button id="guide-prev" type="button" class="button secondary" disabled>上一步</button><button id="guide-next" type="button" class="button primary">开始本地演示</button><button id="guide-reset" type="button" class="button secondary">重新开始</button></div></div>
         </section>
 
         <section class="live-demo-card" lang="zh-CN" aria-label="真实测试网演示入口"><div><h2>已有一条真实链上任务。</h2><p>可选只读核对创建交易和当前链上状态；无钱包、无新交易。离线六步演示不依赖此查询。</p><p id="showcase-message" class="response" role="status" aria-live="polite">真实状态以本次 RPC 查询结果为准。</p></div><button id="load-showcase" type="button" class="button secondary">读取真实测试网任务</button></section>

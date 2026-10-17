@@ -56,3 +56,21 @@ main{max-width:1530px;padding-top:30px}.hero{display:grid;grid-template-columns:
 }
 .director-source{white-space:nowrap;font-size:10px;letter-spacing:.3px;font-weight:750;color:#416592;background:#e4eefc;border:1px solid #c9d9f0;padding:5px 8px;border-radius:6px}
 @media(max-width:650px){.director-source{order:3}.director-progress progress{flex:1}}
+
+/* Judge journey: 7-step proof rail, keyboard focus and responsive tap targets. */
+.guide-timeline{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));list-style:none;margin:14px 0 0;padding:0;gap:7px}
+.guide-timeline li{min-width:0;padding:9px 4px;border:1px solid #DDE6F2;background:#fff;border-radius:7px;text-align:center;color:#66809F;font-size:10px;font-weight:750;white-space:nowrap}
+.guide-timeline li.current{color:#1E55AD;background:#E9F1FF;border-color:#8DB3E8;box-shadow:inset 0 -2px #3168C6}
+.guide-timeline li span{font-size:9px;color:#95601D}
+.demo-director{border-color:#C1D4EE;box-shadow:0 10px 28px #18385B12}
+.guided-demo-active .demo-director{border-color:#8DAFE1}
+#guide-exit:focus-visible,.director-actions .button:focus-visible{outline:3px solid #315FC6;outline-offset:2px}
+@media(max-width:850px){.guide-timeline{grid-template-columns:repeat(7,minmax(70px,1fr));overflow-x:auto;scrollbar-width:thin}}
+@media(max-width:650px){
+ .demo-director{padding:16px;border-radius:12px}
+ .guide-timeline{display:flex;max-width:100%;gap:5px;padding-bottom:5px;overflow-x:auto}
+ .guide-timeline li{flex:0 0 70px}
+ .guided-demo-active{padding-bottom:100px}
+ .guided-demo-active .director-actions{bottom:max(10px,env(safe-area-inset-bottom))}
+ .director-actions .button{min-height:44px}
+}

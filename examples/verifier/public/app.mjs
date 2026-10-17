@@ -243,6 +243,16 @@ byId('save-summary').addEventListener('click', () => {
     creationReceiptChecked: Boolean(creationObservation), creationBlock: creationObservation?.blockNumber ?? null };
   download('summary.json', JSON.stringify(summary, null, 2) + '\n');
 });
+function guideTimeline() {
+  for (const item of document.querySelectorAll('[data-guide-step]')) {
+    const active = Number(item.dataset.guideStep) === guideIndex;
+    item.classList.toggle('current', active);
+    if (active) item.setAttribute('aria-current', 'step');
+    else item.removeAttribute('aria-current');
+  }
+  byId('guide-progress').setAttribute('aria-valuetext', guideIndex < 0
+    ? '导览未开始' : `第 ${guideIndex + 1} 步，共 ${DEMO_STEPS.length} 步`);
+}
 function guideButtons() {
   byId('guide-prev').disabled = guideBusy || guideIndex <= 0;
   byId('guide-next').disabled = guideBusy;
@@ -261,6 +271,7 @@ function cancelGuide(reset = false) {
   if (reset) {
     guideIndex = -1;
     byId('guide-progress').value = 0;
+    guideTimeline();
     text('guide-counter', '完整演示 · 约 3 分钟');
     text('guide-source', currentMode === 'live' ? 'TESTNET · READ ONLY' : 'LOCAL SIMULATION · NO WALLET');
   }
@@ -279,6 +290,7 @@ async function runGuide(index) {
   text('guide-counter', `完整演示 · ${guideIndex + 1} / ${DEMO_STEPS.length}`);
   text('guide-source', step.action === 'live' ? 'OPTIONAL TESTNET · READ ONLY' : 'LOCAL SIMULATION · NO WALLET');
   byId('guide-progress').value = guideIndex + 1;
+  guideTimeline();
   text('guide-title', step.title); text('guide-description', step.text); text('guide-result', '正在准备此步骤…'); guideButtons();
   try {
     let success;

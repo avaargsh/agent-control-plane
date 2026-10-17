@@ -175,3 +175,33 @@ html, body, #app { background: var(--al-bg); }
 .al-pitch-ending p{font-size:.95rem;color:#b2bdd0;max-width:42rem}
 .al-pitch-repo{color:#8e98ae;font-family:ui-monospace,monospace;font-size:.75rem;margin-top:1.2rem}
 @media print{.al-pitch-cover,.al-pitch-ending{height:100%}}
+
+/* Seven-slide judge presentation: calm high-contrast typography and a real
+   Pocket → Studio local handoff, without publishing a development repo URL. */
+.slidev-layout{font-family:Inter,"Noto Sans SC",ui-sans-serif,system-ui,sans-serif}
+.al-pitch-kicker{color:#8CB7FF;letter-spacing:.18em}
+.al-pitch-title{letter-spacing:-.045em;font-weight:850}
+.al-pitch-cover::before,.al-pitch-ending::before{
+ content:"";position:absolute;inset:3% 12%;z-index:-1;pointer-events:none;
+ border-radius:50%;background:radial-gradient(ellipse at 50% 50%,rgba(58,116,199,.13),rgba(24,69,107,.045) 42%,transparent 67%);
+}
+.al-pitch-flow{margin-top:.65rem;font-size:.74rem;line-height:1.6;letter-spacing:.02em;color:#A7BEE4}
+.al-pitch-flow b{color:#69CFB4;margin:0 .35rem}
+.al-pitch-tags span{border-color:#3D5471;background:#13263C;color:#DCE9FA;font-weight:700}
+.al-pitch-warning{border-radius:8px;line-height:1.55;background:#392B1938;color:#F6CB96}
+.al-pitch-tile,.al-pitch-stage,.al-pitch-card{border-color:#2E4159;background:linear-gradient(160deg,#152439,#111C2B)}
+.al-pitch-tile{box-shadow:0 8px 25px #030F1F32}
+.al-pitch-tile h2{letter-spacing:-.025em}
+.al-pitch-stage{position:relative;border-radius:12px;border-top:2px solid #35689D}
+.al-pitch-stage:last-child{border-top-color:#DEAE61}
+.al-pitch-demo-bar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;background:#152A41;border:1px solid #355075;padding:.6rem .8rem}
+.al-pitch-demo-bar span{flex:1;min-width:17rem;font-size:.75rem;line-height:1.45}
+.al-pitch-demo-bar a{border:1px solid #547BAC;color:#EEF5FF;text-decoration:none;padding:.47rem .72rem;border-radius:7px;font-size:.7rem;font-weight:800;white-space:nowrap;background:#22456A}
+.al-pitch-demo-bar a:hover,.al-pitch-demo-bar a:focus-visible{background:#386798;border-color:#91B9EE;color:#fff}
+.al-pitch-phone{border-color:#354C68;box-shadow:0 20px 38px #0005}
+.al-pitch-ph-hero{background:#15375F}
+.al-pitch-ph-hero strong{color:#9DC7FF}
+.al-pitch-ph-row b{color:#315FC6}
+.al-pitch-bottom{border-left-color:#4C8CE3;background:#1532576A}
+.al-pitch-ending h1 em{color:#70D9BE}
+@media print{.al-pitch-demo-bar a{color:#EEF5FF!important;background:#22456A!important}}
