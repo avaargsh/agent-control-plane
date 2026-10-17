@@ -28,7 +28,7 @@
       <div class="environment"><span id="network-indicator" class="status-pulse" data-state="configured"></span><div>Monad Testnet<small id="studio-network-status">Chain ID 10143 · not queried</small></div></div>
       <div class="sidebar-bottom">
         <div class="bound-card"><span class="bound-icon">↗</span><strong>Built beside ACP.</strong><p>Settlement and digest observation, not another Agent control plane.</p></div>
-        <a class="side-link" href="https://github.com/avaargsh/agentledger-hackathon/pull/157" target="_blank" rel="noopener noreferrer">View open-source PR <span>↗</span></a>
+        <a class="side-link" href="https://github.com/avaargsh/agent-control-plane/tree/dev" target="_blank" rel="noopener noreferrer">Source · dev branch <span>↗</span></a>
       </div>
     </aside>
     <div class="workspace">
@@ -42,7 +42,7 @@
           <h1>Trust the evidence.<br>Not the status.</h1>
           <p>Explore the life of an Agent task, its settlement observation and its proof anchor. Every fact has a source. Every unknown stays unknown.</p>
           <div class="hero-actions">
-            <button id="show-demo" type="button" class="button primary">Explore interactive demo <span>↗</span></button>
+            <button id="show-demo" type="button" class="button primary">Start 3-minute guided demo <span>↗</span></button>
             <button id="show-live" type="button" class="button secondary">Inspect Testnet task <span>→</span></button>
           </div>
           <div class="proof-map" aria-label="Verification model: task record, independent payment observation, and evidence digest">
@@ -55,7 +55,7 @@
         </section>
 
         <section id="demo-guide" class="demo-director" lang="zh-CN" aria-labelledby="guide-title">
-          <div class="director-progress"><span id="guide-counter">完整演示 · 约 3 分钟</span><progress id="guide-progress" max="7" value="0" aria-label="演示进度"></progress></div>
+          <div class="director-progress"><span id="guide-counter">完整演示 · 约 3 分钟</span><progress id="guide-progress" max="7" value="0" aria-label="演示进度"></progress><button id="guide-exit" class="guide-exit" type="button" hidden aria-label="退出引导演示">退出导览 ×</button></div>
           <div class="director-body"><div><h2 id="guide-title">从任务记录到可以复核的证据。</h2><p id="guide-description">逐步展示支付声明、本地工具结果、SHA-256 验证与异常恢复，最后读取真实测试网任务。前六步不花费 gas。</p><p id="guide-result" class="director-result" role="status" aria-live="polite"></p></div>
           <div class="director-actions"><button id="guide-prev" type="button" class="button secondary" disabled>上一步</button><button id="guide-next" type="button" class="button primary">开始完整演示</button><button id="guide-reset" type="button" class="button secondary">重新开始</button></div></div>
         </section>
