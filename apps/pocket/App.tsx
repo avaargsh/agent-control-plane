@@ -34,10 +34,10 @@ const C={bg:"#F5F8FC",panel:"#FFFFFF",card:"#EFF1FD",line:"#E5EAF3",ink:"#18243C
 const getLabels=():Record<Tab,string>=>({tasks:t("Tasks","任务"),payment:t("Payment","支付"),evidence:t("Evidence","证据"),journal:t("Journal","记录")});
 const tabs:Tab[]=["tasks","payment","evidence","journal"];
 const getSteps=():{key:Stage;label:string;note:string}[]=>[
- {key:"created",label:"Created",note:t("Task registered","任务已创建")},
- {key:"paid",label:"Paid claim",note:t("Recorder claim · USDC not verified","Recorder 声明，不等于 USDC 已核验")},
- {key:"evidence",label:"Evidence",note:t("Simulated Evidence awaiting hash check","模拟证据等待验证")},
- {key:"unknown",label:"Lost ACK",note:t("PaymentUnknown · never recharge","PaymentUnknown / 禁止重扣")},
+ {key:"created",label:t("Created","已创建"),note:t("Task registered","任务已创建")},
+ {key:"paid",label:t("Paid claim","支付声明"),note:t("Recorder claim · USDC not verified","Recorder 声明，不等于 USDC 已核验")},
+ {key:"evidence",label:t("Evidence","证据"),note:t("Simulated Evidence awaiting hash check","模拟证据等待验证")},
+ {key:"unknown",label:t("Lost ACK","响应丢失"),note:t("PaymentUnknown · never recharge","PaymentUnknown / 禁止重扣")},
 ];
 function Chip({text,tone="purple"}:{text:string;tone?:"purple"|"amber"|"mint"}){
  return <View style={[s.chip,{backgroundColor:tone==="amber"?"#FFF1DE":tone==="mint"?"#E2F8EF":"#EBE9FF"}]}><Text style={[s.chipText,{color:tone==="amber"?C.amber:tone==="mint"?C.mint:C.purple}]}>{text}</Text></View>;
@@ -49,10 +49,10 @@ function Hero({state,live}:{state:string;live:boolean}){
  return <View style={s.hero}>
     <View pointerEvents="none" style={s.heroOrbitOne}/>
     <View pointerEvents="none" style={s.heroOrbitTwo}/>
-    <View style={s.heroTop}><Text style={s.heroLabel}>AGENT PROOF / 01</Text><Text style={s.heroStamp}>↗</Text></View>
+    <View style={s.heroTop}><Text style={s.heroLabel}>{l("AGENT PROOF / 01")}</Text><Text style={s.heroStamp}>↗</Text></View>
     <Text style={s.heroTitle}>{t("Your work.\nVerifiable.","每次执行，\n都有据可查。")}</Text>
     <Text style={s.heroBody}>{t("One place for the task, the payment observation and its evidence.","从任务到支付观察、再到证据核验，一目了然。")}</Text>
-    <View style={s.heroBottom}><View style={[s.heroStatusDot,{backgroundColor:live?"#90B8FF":"#A7B0CB"}]}/><Text style={s.heroFoot}>{live?"TESTNET · TASK OBSERVED":"LOCAL DEMONSTRATION"}</Text><View style={s.heroFootRight}><Text style={s.heroFootRightText}>{state.toUpperCase()}</Text></View></View>
+    <View style={s.heroBottom}><View style={[s.heroStatusDot,{backgroundColor:live?"#90B8FF":"#A7B0CB"}]}/><Text style={s.heroFoot}>{l(live?"TESTNET · TASK OBSERVED":"LOCAL DEMONSTRATION")}</Text><View style={s.heroFootRight}><Text style={s.heroFootRightText}>{state.toUpperCase()}</Text></View></View>
   </View>;
 }
 function InfoHeader({index,title,sub}:{index:string;title:string;sub?:string}){
@@ -225,10 +225,10 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
  }
  return <SafeAreaView style={s.phone}>
   <StatusBar style="dark"/>
-  <View style={s.header}><View style={s.brandGroup}><Mark/><View><Text style={s.brand}>agentledger<Text style={{color:C.purple}}>.</Text></Text><Text style={s.kicker}>{l("PROOF STUDIO · POCKET")}</Text></View></View><Pressable accessibilityRole="button" accessibilityLabel={t("Switch to Chinese","切换为英文")} style={s.languageButton} onPress={onChangeLanguage}><Text style={s.languageButtonText}>{ZH?"EN":"中文"}</Text></Pressable><Chip text={live?"TASK READ-ONLY":"SIMULATED"} tone="amber"/></View>
+  <View style={s.header}><View style={s.brandGroup}><Mark/><View><Text style={s.brand}>agentledger<Text style={{color:C.purple}}>.</Text></Text><Text style={s.kicker}>{l("PROOF STUDIO · POCKET")}</Text></View></View><Pressable accessibilityRole="button" accessibilityLabel={t("Switch to Chinese","切换为英文")} style={s.languageButton} onPress={onChangeLanguage}><Text style={s.languageButtonText}>{ZH?"EN":"中文"}</Text></Pressable><Chip text={l(live?"TASK READ-ONLY":"SIMULATED")} tone="amber"/></View>
   {presenting&&<View style={s.presenterStrip} accessibilityLabel="Local simulated guided demonstration">
    <View style={s.presenterTop}>
-    <Text style={s.presenterEyebrow}>GUIDED DEMO · LOCAL SIMULATION ONLY</Text>
+    <Text style={s.presenterEyebrow}>{l("GUIDED DEMO · LOCAL SIMULATION ONLY")}</Text>
     <Pressable accessibilityRole="button" accessibilityLabel="Exit guided demo" onPress={()=>setPresenting(false)} style={s.presenterCloseHit}><Text style={s.presenterClose}>×</Text></Pressable>
    </View>
    <View style={s.presenterStepRow}><Text style={s.presenterStepCount}>{t("STEP","步骤")} {presenterIndex(stage)+1} / {PRESENTER_STAGES.length}</Text><Text style={s.presenterCurrent}>{ZH?PRESENTER_LABELS[stage].zh:PRESENTER_LABELS[stage].en}</Text></View>
@@ -245,30 +245,30 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
       <Text style={s.presenterExportText}>{t("Next","下一步")} →</Text>
     </Pressable>}
    </View>
-   <Text style={s.presenterCaution}>PaymentUnknown · NO RECHARGE · NOT TESTNET PAYMENT ACCEPTANCE</Text>
+   <Text style={s.presenterCaution}>{l("PaymentUnknown · NO RECHARGE · NOT TESTNET PAYMENT ACCEPTANCE")}</Text>
   </View>}
   <ScrollView ref={scrollerRef} style={s.scroller} contentContainerStyle={{padding:20,paddingBottom:42}}>
-   <View style={s.headline}><Text style={s.eyebrow}>WORKSPACE / {tab.toUpperCase()} <Text style={{color:C.mint}}> · READ ONLY</Text></Text><Text style={s.h1}>{tab==="tasks"?"Your agent tasks":tab==="payment"?"Payment clarity":tab==="evidence"?"Proof, not promises":"Your activity"}</Text>
+   <View style={s.headline}><Text style={s.eyebrow}>{l("WORKSPACE")} / {l(tab.toUpperCase())} <Text style={{color:C.mint}}> · {l("READ ONLY")}</Text></Text><Text style={s.h1}>{l(tab==="tasks"?"Your agent tasks":tab==="payment"?"Payment clarity":tab==="evidence"?"Proof, not promises":"Your activity")}</Text>
     <Text style={s.lede}>{live?t("Read-only chain task. USDC, signed intent and deployment review remain unverified.","链上任务状态来自只读查询；USDC 转账、付款授权及部署审查尚未独立核验。"):t("Offline demo. Recorder status is not independent payment proof.","模拟场景无需网络。链上 Recorder 状态不代表独立支付事实。")}</Text></View>
    {tab==="tasks"&&<>
     <Hero state={state} live={live}/>
     {!presenting&&<Button title={t("▶ Start 3-minute guided demo","▶ 开始三分钟演示")} onPress={startPresenter}/>}
     <InfoHeader index="01" title={t("Current task","当前任务")} sub={t("A clear record of what the ledger actually claims.","只展示合约声明，不混淆链上事实。")}/>
-    <View style={s.card}><View style={s.inline}><Text style={s.cardTitle}>{live?"Observed Task":"Agent Task 023"}</Text><Chip text={state} tone={state==="Proven"?"mint":"purple"}/></View>
-     <Text style={s.muted}>A task you can inspect, not a task you can spend on.</Text>
-     <View style={s.divider}/><Row label="Task ID" value={shorten(observed?.taskId??fact.taskId)}/><Row label="Description" value={shorten(observed?.descriptionHash??fact.descriptionHash)}/><Row label="Contract" value={shorten(observed?.contract??fact.ledger)}/><Row label="Network" value={live?"Monad Testnet · task read only":t("Monad Testnet · 10143 (simulated)","Monad Testnet · ID 10143 (模拟)")}/>
+    <View style={s.card}><View style={s.inline}><Text style={s.cardTitle}>{l(live?"Observed Task":"Agent Task 023")}</Text><Chip text={state} tone={state==="Proven"?"mint":"purple"}/></View>
+     <Text style={s.muted}>{l("A task you can inspect, not a task you can spend on.")}</Text>
+     <View style={s.divider}/><Row label={l("Task ID")} value={shorten(observed?.taskId??fact.taskId)}/><Row label={l("Description")} value={shorten(observed?.descriptionHash??fact.descriptionHash)}/><Row label={l("Contract")} value={shorten(observed?.contract??fact.ledger)}/><Row label={l("Network")} value={live?t("Monad Testnet · task read only","Monad 测试网 · 任务只读"):t("Monad Testnet · 10143 (simulated)","Monad 测试网 · 10143（模拟）")}/>
     </View>
     <InfoHeader index="02" title={t("Observe on Testnet","查询测试网任务")} sub={t("Inspect an address without signing or spending gas.","只读查询 · 无需签名或 Gas")}/>
     <View style={s.card}>
      <Text style={s.small}>{t("Local verifier supports GET only. Paid/Proven does not prove USDC settlement. No reviewed deployment: public acceptance blocked.","本地 verifier 代理只支持 GET。任务 Paid/Proven 不是支付证明；无 reviewed deployment 仍禁止公共验收。")}</Text>
-     <TextInput accessibilityLabel="Ledger contract" autoCapitalize="none"
+     <TextInput accessibilityLabel={l("Ledger contract")} autoCapitalize="none"
       autoCorrect={false} value={contract} onChangeText={value=>{lookupEpoch.current++;setContract(value);onObserve(null);setLookupBusy(false);clearLocalEvidence();}}
-      placeholder="Contract 0x…" placeholderTextColor={C.sub} style={s.field}/>
+      placeholder={l("Contract 0x…")} placeholderTextColor={C.sub} style={s.field}/>
      <TextInput accessibilityLabel="Task ID" autoCapitalize="none"
       autoCorrect={false} value={taskId} onChangeText={value=>{lookupEpoch.current++;setTaskId(value);onObserve(null);setLookupBusy(false);clearLocalEvidence();}}
-      placeholder="Task ID bytes32 0x…" placeholderTextColor={C.sub} style={s.field}/>
-     <Button title={lookupBusy?"Reading…":"Observe Task · no gas"} disabled={lookupBusy} onPress={()=>{void lookup();}}/>
-     {!!lookupState&&<Text style={[s.small,{color:lookupState.startsWith("NOT")?C.red:C.mint}]}>{lookupState}</Text>}
+      placeholder={l("Task ID bytes32 0x…")} placeholderTextColor={C.sub} style={s.field}/>
+     <Button title={l(lookupBusy?"Reading…":"Observe Task · no gas")} disabled={lookupBusy} onPress={()=>{void lookup();}}/>
+     {!!lookupState&&<Text style={[s.small,{color:lookupState.startsWith("NOT")?C.red:C.mint}]}>{l(lookupState)}</Text>}
     </View>
     <InfoHeader index="03" title={t("Explore the journey","任务证明旅程")} sub={t("Follow every observation, including uncertainty.","按阶段查看每一步的依据与未知项。")}/>
     {steps.map((v,i)=><Pressable key={v.key} onPress={()=>choose(v.key)} style={[s.step,stage===v.key&&s.stepActive]} accessibilityRole="button" accessibilityState={{selected:stage===v.key}}>
@@ -276,18 +276,18 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
     </Pressable>)}
    </>}
    {tab==="payment"&&<>
-    <View style={s.paymentHero}><Text style={s.eyebrow}>SETTLEMENT / VERIFIED FACTS</Text><Text style={s.paymentLead}>{t("Uncertain is\na valid state.","未知，也是一种\n重要的状态。")}</Text><View style={s.paymentStatus}><View style={s.paymentDot}/><Text style={s.paymentStatusText}>PaymentUnknown</Text></View><Text style={s.heroBodyDark}>{t("No missing acknowledgement can justify a second payment.","响应丢失不意味着未支付，也不能据此重扣。")}</Text></View>
+    <View style={s.paymentHero}><Text style={s.eyebrow}>{l("SETTLEMENT / VERIFIED FACTS")}</Text><Text style={s.paymentLead}>{t("Uncertain is\na valid state.","未知，也是一种\n重要的状态。")}</Text><View style={s.paymentStatus}><View style={s.paymentDot}/><Text style={s.paymentStatusText}>PaymentUnknown</Text></View><Text style={s.heroBodyDark}>{t("No missing acknowledgement can justify a second payment.","响应丢失不意味着未支付，也不能据此重扣。")}</Text></View>
     <InfoHeader index="01" title={t("Payment observation","支付观察")} sub={t("Claims and independently observed receipts stay separate.","Recorder 声明和真实回执分别展示。")}/>
-    <View style={s.card}><Text style={s.eyebrow}>INDEPENDENT SETTLEMENT FACT</Text><Text style={[s.bigState,{color:C.amber}]}>PaymentUnknown</Text><Text style={s.lede}>Recorder claim: {live?(state==="Created"?"NotRecorded":"Paid"):fact.recorderClaim} . {t("Neither proof of paid nor unpaid.","既不代表付款成功，也不代表未付款。")}</Text>
-     <View style={s.divider}/><Row label="USDC Transfer" value="NOT VERIFIED"/><Row label="AuthorizationUsed" value="NOT VERIFIED"/><Row label="EIP-3009 nonce" value="NOT AVAILABLE"/><Row label="Charge again?" value="NO · unsafe"/>
-    </View><View style={s.notice}><Text style={{color:C.amber,fontWeight:"700"}}>↗ Lost ACK protection</Text><Text style={s.small}>{t("Timeout, disconnection or lost response never authorizes a second charge. Reconcile USDC events, signed intent and reservation first.","超时、断链、丢失响应时禁止重扣。只有取得独立 USDC、签名意图和预留记录后才能继续对账。")}</Text></View>
+    <View style={s.card}><Text style={s.eyebrow}>{l("INDEPENDENT SETTLEMENT FACT")}</Text><Text style={[s.bigState,{color:C.amber}]}>PaymentUnknown</Text><Text style={s.lede}>{l("Recorder claim: ")}{l(live?(state==="Created"?"NotRecorded":"Paid"):fact.recorderClaim)} · {t("Neither proof of paid nor unpaid.","既不代表付款成功，也不代表未付款。")}</Text>
+     <View style={s.divider}/><Row label={l("USDC Transfer")} value={l("NOT VERIFIED")}/><Row label={l("AuthorizationUsed")} value={l("NOT VERIFIED")}/><Row label={l("EIP-3009 nonce")} value={l("NOT AVAILABLE")}/><Row label={l("Charge again?")} value={l("NO · unsafe")}/>
+    </View><View style={s.notice}><Text style={{color:C.amber,fontWeight:"700"}}>{l("↗ Lost ACK protection")}</Text><Text style={s.small}>{t("Timeout, disconnection or lost response never authorizes a second charge. Reconcile USDC events, signed intent and reservation first.","超时、断链、丢失响应时禁止重扣。只有取得独立 USDC、签名意图和预留记录后才能继续对账。")}</Text></View>
     <Button title={t("Show PaymentUnknown / Lost ACK","演示 PaymentUnknown / Lost ACK")} secondary onPress={()=>choose("unknown")}/>
    </>}
    {tab==="evidence"&&<>
-    <View style={s.evidenceHero}><View style={s.evidenceOrb}><Text style={s.evidenceOrbText}>◇</Text></View><View style={{flex:1}}><Text style={s.eyebrow}>PROOF / SHA-256</Text><Text style={s.evidenceHeroTitle}>{t("Verify the bytes.\nKeep the context.","字节可核验，\n结论有边界。")}</Text><Text style={s.small}>{t("An anchor match does not verify a USDC payment.","摘要相同不代表付款成功。")}</Text></View></View>
+    <View style={s.evidenceHero}><View style={s.evidenceOrb}><Text style={s.evidenceOrbText}>◇</Text></View><View style={{flex:1}}><Text style={s.eyebrow}>{t("PROOF / SHA-256","证据 / SHA-256")}</Text><Text style={s.evidenceHeroTitle}>{t("Verify the bytes.\nKeep the context.","字节可核验，\n结论有边界。")}</Text><Text style={s.small}>{t("An anchor match does not verify a USDC payment.","摘要相同不代表付款成功。")}</Text></View></View>
     <InfoHeader index="01" title={t("Evidence anchor","证据锚点")} sub={t("Recalculate exact bytes, not an AI summary.","核验原始字节，而非依赖文字结论。")}/>
-    <View style={s.card}><Text style={s.eyebrow}>EVIDENCE DIGEST</Text><Text style={s.cardTitle}>SHA-256 anchor</Text><Text style={[s.hash,{marginTop:15}]} selectable>{hash}</Text>
-     <View style={s.divider}/><Row label="Verification" value={verified?(live?"HASH MATCHED · PAY UNKNOWN":"SIMULATED HASH MATCH · VERIFIED BY SHA-256"):"NOT VERIFIED"}/><Row label="Payment" value="PaymentUnknown"/>
+    <View style={s.card}><Text style={s.eyebrow}>{l("EVIDENCE DIGEST")}</Text><Text style={s.cardTitle}>{l("SHA-256 anchor")}</Text><Text style={[s.hash,{marginTop:15}]} selectable>{hash}</Text>
+     <View style={s.divider}/><Row label={l("Verification")} value={l(verified?(live?"HASH MATCHED · PAY UNKNOWN":"SIMULATED HASH MATCH · VERIFIED BY SHA-256"):"NOT VERIFIED")}/><Row label={l("Payment")} value="PaymentUnknown"/>
     </View>
     <InfoHeader index="02" title={t("Files on this device","选择本机文件")} sub={t("Your files are hashed locally; nothing is uploaded.","文件仅在设备本地计算 SHA-256。")}/>
     <View style={s.card}>
@@ -307,34 +307,34 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
       )}
       <Text style={s.eyebrow}>{t("ON-DEVICE FILE VERIFICATION","本机文件校验")}</Text>
       <Text style={s.small}>{t("Choose canonical JSON (2 MB max) and optional original binary input/output (10 MB each). Files stay on your device.","选择原始 Evidence JSON（最大 2 MB）和可选的二进制输入/输出（各最大 10 MB）。不会上传文件。")}</Text>
-      <Button title={localFiles.evidence?"Evidence: "+localFiles.evidence.name:"Choose Evidence JSON file"}
+      <Button title={l(localFiles.evidence?"Evidence: ":"Choose Evidence JSON file")+(localFiles.evidence?localFiles.evidence.name:"")}
         secondary disabled={fileReading} onPress={()=>{void selectFile("evidence");}}/>
-      <Button title={localFiles.input?"Input: "+localFiles.input.name:"Choose original input file (optional)"}
+      <Button title={l(localFiles.input?"Input: ":"Choose original input file (optional)")+(localFiles.input?localFiles.input.name:"")}
         secondary disabled={fileReading} onPress={()=>{void selectFile("input");}}/>
-      <Button title={localFiles.output?"Output: "+localFiles.output.name:"Choose original output file (optional)"}
+      <Button title={l(localFiles.output?"Output: ":"Choose original output file (optional)")+(localFiles.output?localFiles.output.name:"")}
         secondary disabled={fileReading} onPress={()=>{void selectFile("output");}}/>
       {!!fileDiagnostic&&<Text style={[s.small,{color:fileDiagnostic.startsWith("FILE_NOT")?C.red:C.mint}]}>{fileDiagnostic}</Text>}
     </View>
     {live&&<View>
-      <TextInput accessibilityLabel="Evidence JSON" multiline autoCapitalize="none" autoCorrect={false}
-       placeholder="Paste canonical Evidence JSON locally" placeholderTextColor={C.sub}
+      <TextInput accessibilityLabel={l("Evidence JSON")} multiline autoCapitalize="none" autoCorrect={false}
+       placeholder={l("Paste canonical Evidence JSON locally")} placeholderTextColor={C.sub}
        value={evidenceJson} onChangeText={value=>editText("evidence",value)} style={[s.field,{minHeight:116,textAlignVertical:"top"}]}/>
-      <TextInput accessibilityLabel="Input bytes text" multiline autoCapitalize="none" autoCorrect={false}
-       placeholder="Optional original input · UTF-8 text only" placeholderTextColor={C.sub}
+      <TextInput accessibilityLabel={l("Input bytes text")} multiline autoCapitalize="none" autoCorrect={false}
+       placeholder={l("Optional original input · UTF-8 text only")} placeholderTextColor={C.sub}
        value={inputText} onChangeText={value=>editText("input",value)} style={s.field}/>
-      <TextInput accessibilityLabel="Output bytes text" multiline autoCapitalize="none" autoCorrect={false}
-       placeholder="Optional original output · UTF-8 text only" placeholderTextColor={C.sub}
+      <TextInput accessibilityLabel={l("Output bytes text")} multiline autoCapitalize="none" autoCorrect={false}
+       placeholder={l("Optional original output · UTF-8 text only")} placeholderTextColor={C.sub}
        value={outputText} onChangeText={value=>editText("output",value)} style={s.field}/>
     </View>}
-    <Button title={verified?"✓ SHA-256 matched":"Verify SHA-256 locally"}
+    <Button title={l(verified?"✓ SHA-256 matched":"Verify SHA-256 locally")}
       disabled={fileReading||fileDiagnostic.startsWith("FILE_NOT_VERIFIED")||state!=="Proven"||(live&&!evidenceJson.trim()&&!localFiles.evidence)} onPress={verify}/>
     {!!verificationError&&<Text style={[s.small,{color:C.red}]}>{verificationError}</Text>}
     <Text style={[s.small,{marginTop:12}]}>{t("This app computes canonical Evidence SHA-256. The demo checks a pinned reference digest; real reads compare an on-chain anchor. Input/output may be original binary files or optional UTF-8 text. A hash match does not prove payment or execution correctness.","本应用实际计算 canonical JSON SHA-256。模拟路径用预先固定的独立参考哈希；真实查询使用链上锚定值。支持原始输入/输出二进制文件或 UTF-8 文本。校验摘要不证明支付或执行正确性。")}</Text>
    </>}
    {tab==="journal"&&<>
-     <View style={s.journalHero}><Text style={s.eyebrow}>AUDIT / OBSERVATIONS</Text><Text style={s.evidenceHeroTitle}>{t("A trail you\ncan explain.","可复查的\n观察记录。")}</Text><Text style={s.small}>{t("A useful history never invents blockchain finality.","记录的是事实与不确定性，不是虚构的终局。")}</Text></View>
+     <View style={s.journalHero}><Text style={s.eyebrow}>{l("AUDIT / OBSERVATIONS")}</Text><Text style={s.evidenceHeroTitle}>{t("A trail you\ncan explain.","可复查的\n观察记录。")}</Text><Text style={s.small}>{t("A useful history never invents blockchain finality.","记录的是事实与不确定性，不是虚构的终局。")}</Text></View>
      <InfoHeader index="01" title={t("Observation timeline","观察时间线")}/>
-     <View style={s.card}><Text style={s.cardTitle}>Recent observations</Text><Text style={s.lede}>{t("Local demonstration only. No server sync or wallet transactions.","本机演示，无服务器同步、无钱包交易。")}</Text>
+     <View style={s.card}><Text style={s.cardTitle}>{l("Recent observations")}</Text><Text style={s.lede}>{t("Local demonstration only. No server sync or wallet transactions.","本机演示，无服务器同步、无钱包交易。")}</Text>
        <View style={s.divider}/>{steps.map((x,i)=><View key={x.key} style={s.journalItem}><Text style={s.stepNumber}>{String(i+1).padStart(2,"0")}</Text><View><Text style={s.stepTitle}>{x.label}</Text><Text style={s.small}>{x.note}</Text></View></View>)}
      </View>
      <Button title={t("Export summary.json","导出 summary.json")} secondary onPress={onExport}/>
@@ -363,7 +363,7 @@ function Inspector({fact,observed,verification,onExport,exportNotice}:{fact:Demo
   <View style={s.inspectorBrand}><Mark size={38}/><View><Text style={s.inspectorEyebrow}>AGENTLEDGER / REVIEW DESK</Text><Text style={s.inspectorBrandSub}>READ-ONLY OBSERVATION CONSOLE</Text></View></View>
   <Text style={s.eyebrow}>JUDGE / EVIDENCE VIEW</Text><Text style={s.h2}>Every claim has a boundary.</Text><Text style={s.inspectorIntro}>Inspect the observed facts, their sources and what still needs independent verification.</Text>
   <View style={[s.notice,{marginTop:18}]}><Text style={{color:C.amber,fontWeight:"700"}}>{isLive?"TESTNET TASK ONLY · PAYMENT UNKNOWN":"LOCAL SIMULATION · NOT TESTNET ACCEPTED"}</Text><Text style={s.small}>{isLive?"Task fetched read-only via verifier. Payment not independently accepted.":"No RPC contacted. No funds spent. No real payment verified."}</Text></View>
-  <InfoHeader index="01" title="Chain context"/><Row label="Chain ID" value={isLive?"10143 (task read)":"10143 (simulated)"}/><Row label="Contract" value={shorten(observed?.contract??fact.ledger)}/><Row label="RPC identity" value={isLive?"local GET verifier → Monad RPC":"testnet-rpc.monad.xyz (label only)"}/><Row label="Task ID" value={shorten(observed?.taskId??fact.taskId)}/><Row label="Description" value={shorten(observed?.descriptionHash??fact.descriptionHash)}/>
+  <InfoHeader index="01" title="Chain context"/><Row label={l("Chain ID")} value={isLive?"10143 (task read)":"10143 (simulated)"}/><Row label={l("Contract")} value={shorten(observed?.contract??fact.ledger)}/><Row label={l("RPC identity")} value={isLive?"local GET verifier → Monad RPC":"testnet-rpc.monad.xyz (label only)"}/><Row label={l("Task ID")} value={shorten(observed?.taskId??fact.taskId)}/><Row label={l("Description")} value={shorten(observed?.descriptionHash??fact.descriptionHash)}/>
   <InfoHeader index="02" title="Read-only assertions"/>{assertions.map(([title,detail,ok])=><View key={title} style={s.assertion}><Text style={{color:ok?C.mint:C.amber,fontWeight:"800"}}>{ok?"✓":"○"}</Text><View style={{flex:1}}><Text style={s.stepTitle}>{title}</Text><Text style={s.small}>{detail}</Text></View></View>)}
   <InfoHeader index="03" title="summary.json preview"/><View style={s.jsonBox}><Text style={s.json} selectable>{JSON.stringify(report,null,2)}</Text></View>
   <Button title="Export summary.json" secondary onPress={onExport}/>
