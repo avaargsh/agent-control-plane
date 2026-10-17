@@ -226,7 +226,6 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
     <Pressable accessibilityRole="button" accessibilityLabel="Guide back" disabled={presenterIndex(stage)===0} accessibilityState={{disabled:presenterIndex(stage)===0}} onPress={()=>gotoPresenter(presenterPrevious(stage))} style={s.presenterBackHit}>
       <Text style={[s.presenterAction,presenterIndex(stage)===0&&{opacity:.35}]}>← {t("Back","上一步")}</Text>
     </Pressable>
-    <Text style={s.presenterCurrent}>{ZH?PRESENTER_LABELS[stage].zh:PRESENTER_LABELS[stage].en}</Text>
     {stage==="unknown"?<Pressable accessibilityRole="button" accessibilityLabel="Export guided summary.json" onPress={onExport} style={s.presenterExportHit}>
       <Text style={s.presenterExportText}>{t("Export summary.json","导出 summary.json")} ↓</Text>
     </Pressable>:<Pressable accessibilityRole="button" accessibilityLabel="Guide next" onPress={()=>gotoPresenter(presenterNext(stage))} style={s.presenterNextHit}>
