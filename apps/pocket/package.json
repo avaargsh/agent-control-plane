@@ -1,0 +1,36 @@
+{
+  "name": "agentledger-pocket",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/*.test.ts",
+    "export:web": "expo export --platform web",
+    "test:browser": "node browser/pocket-browser-smoke.mjs",
+    "test:browser:live": "node browser/pocket-live-verifier.mjs"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~57.0.16",
+    "expo": "~57.0.27",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-web": "^0.21.2",
+    "react-native-safe-area-context": "~5.7.0",
+    "@noble/hashes": "2.0.1",
+    "expo-document-picker": "~57.0.3",
+    "expo-file-system": "~57.0.7",
+    "expo-sharing": "~57.0.19"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3",
+    "tsx": "4.20.6",
+    "@types/node": "^22.15.0",
+    "playwright-core": "1.56.1"
+  }
+}

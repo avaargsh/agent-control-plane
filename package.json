@@ -1,0 +1,24 @@
+{
+  "name": "agentledger-hackathon",
+  "version": "0.0.1",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "workspaces": ["sdk", "examples/verifier", "examples/x402-gate"],
+  "description": "AgentLedger - Pay → Execute → Prove (Monad testnet experiment)",
+  "scripts": {
+    "dev": "node tools/dev.mjs",
+    "start": "npm --prefix examples/verifier start",
+    "deploy:testnet": "npm --prefix examples/verifier run deploy:testnet",
+    "test": "npm run test:node && npm run test:sdk && npm run test:python",
+    "test:sdk": "npm --prefix sdk test",
+    "test:pocket": "npm --prefix apps/pocket test",
+    "test:pocket:typecheck": "npm --prefix apps/pocket run typecheck",
+    "onsite:check": "node tools/onsite-check.mjs",
+    "test:node": "node --test test/*.test.mjs examples/verifier/test/*.test.mjs examples/x402-gate/test/*.test.mjs",
+    "test:python": "python3 -m pytest test/test_admission_journal.py test/test_charge_attempt_journal.py -q",
+    "test:browser": "npm --prefix examples/verifier run test:browser",
+    "test:browser:anvil": "python3 examples/verifier/browser/testnet-local-e2e.py",
+    "test:browser:live": "python3 examples/verifier/browser/demo-public-read-smoke.py",
+    "fmt": "npx --yes prettier --write . 2>/dev/null || true"
+  }
+}

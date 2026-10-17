@@ -1,0 +1,16 @@
+out/
+cache/
+broadcast/
+.env
+.env.*
+*.secret
+evidence.json
+receipts/
+approval.json
+node_modules/
+__pycache__/
+.pytest_cache/
+sdk/dist/
+.DS_Store
+__MACOSX/
+slides/dist/

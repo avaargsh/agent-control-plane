@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AgentLedger · Monad 测试网工作台</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/deploy.css"><script type="module" src="/deploy.mjs"></script></head>
+<body><main class="deploy-workspace">
+  <header class="deploy-header"><a href="/demo">AgentLedger · 完整演示</a><a href="/studio">Verification Studio</a><span>Monad Testnet · 10143</span></header>
+  <section class="deploy-intro"><div><h1>从部署到第一条任务。</h1><p>连接钱包，部署账本，创建链上任务，再到 Studio 检查独立事实。每一笔交易都由你在 MetaMask 中确认。</p></div><span class="deploy-network">测试网工作台</span></section>
+  <ol class="deploy-steps" aria-label="操作步骤"><li id="step-connect" aria-current="step"><span>1</span>连接钱包</li><li id="step-deploy"><span>2</span>部署并核对</li><li id="step-task"><span>3</span>创建测试任务</li><li id="step-verify"><span>4</span>读取链上状态</li></ol>
+  <div class="deploy-columns">
+  <section class="studio-section panel">
+    <h2>检查浏览器钱包</h2>
+    <p id="wallet-detection" class="response" role="status">正在检测 MetaMask 扩展…</p>
+    <div id="wallet-help" class="readonly-warning" hidden><div>
+      <p>此页面需要在安装了 MetaMask 扩展的电脑浏览器中打开。聊天内置预览、普通网页和手机钱包不会自动提供电脑端签名。</p>
+      <p><a href="https://metamask.io/download/" target="_blank" rel="noopener noreferrer">打开 MetaMask 官方下载页</a>。已安装扩展时，请解锁钱包、确认允许此网站访问，然后重新检测。</p>
+      <p>如果项目运行在远程开发机，请先转发端口 4322，再用自己电脑的浏览器打开转发地址。手机上的 127.0.0.1 不能访问电脑。</p>
+    </div></div>
+    <button class="button secondary" id="detect" type="button">重新检测钱包</button>
+    <h2>部署账户与权限</h2>
+    <p class="help-text">paymentRecorder 默认使用连接的钱包地址。它拥有支付声明记录权限，并且部署后无法修改。部署合约不会产生已验证的 USDC 支付。</p>
+    <button class="button primary" id="connect">连接 MetaMask</button>
+    <button class="button secondary" id="switch-network" type="button" hidden>切换 / 添加 Monad 测试网</button>
+    <p id="account" class="response">尚未连接钱包。</p>
+    <p id="network-status" class="response" aria-live="polite">网络将在授权账户后检查。</p>
+    <label for="recorder">paymentRecorder 地址</label><input id="recorder" type="text" placeholder="0x…" autocomplete="off" spellcheck="false">
+    <button class="button secondary full" id="prepare" disabled>检查测试网余额与部署费用</button>
+    <p id="estimate" class="response" aria-live="polite"></p>
+    <button class="button primary full" id="deploy" disabled>在 MetaMask 中确认部署</button>
+    <p id="status" class="response" role="status" aria-live="polite">只允许 Monad 测试网。请在普通浏览器中打开此页面。</p>
+    <a id="explorer" class="button secondary" target="_blank" rel="noopener noreferrer" hidden>查看部署交易</a>
+    <button class="button secondary full" id="check" hidden>检查已提交的部署</button>
+    <p id="result" class="response"></p>
+    <div id="deployment-recovery" hidden><label for="deployment-hash">恢复部署交易哈希</label><input id="deployment-hash" type="text" placeholder="0x · 64 hexadecimal characters" spellcheck="false"><p class="field-help">如果签名后页面中断，请粘贴 MetaMask 活动中的交易哈希，再点击检查。不要重复部署。</p></div>
+    <button class="button secondary full" id="download" hidden>下载部署记录</button>
+    <p class="field-help">部署成功不等于完整支付验收；此页面不会自动加入已审批部署登记表。</p>
+  </section>
+  <section class="studio-section panel" aria-labelledby="create-task-title">
+    <h2 id="create-task-title">创建第一条测试任务</h2>
+    <p class="help-text">先完成左侧的部署核对。任务将绑定输入文本的 SHA-256 和预算上限；这里只创建 Created 状态，不发起 USDC 支付或执行 Agent。</p>
+    <label for="task-input">任务输入（按 UTF-8 原始字节计算哈希）</label>
+    <textarea id="task-input" rows="5">Count the words in this AgentLedger test task.</textarea>
+    <label for="task-budget">支付声明预算上限（USDC atomic units）</label>
+    <input id="task-budget" type="text" inputmode="numeric" value="1000" autocomplete="off">
+    <p class="field-help">1000 atomic units = 0.001 USDC。此字段仅约束合约中的支付声明金额。</p>
+    <button class="button secondary full" id="prepare-task" disabled>生成任务并检查创建费用</button>
+    <p id="task-estimate" class="response" aria-live="polite"></p>
+    <button class="button primary full" id="create-task" disabled>在 MetaMask 中确认创建任务</button>
+    <p id="wallet-request-status" class="response" role="status" aria-live="polite">点击创建后，这里会显示钱包请求进度。</p>
+    <p id="task-status" class="response" role="status" aria-live="polite">核对部署后即可准备任务。</p>
+    <div id="task-transaction-details" hidden>
+      <p id="task-transaction-state" class="response" aria-live="polite"></p>
+      <label for="task-created-hash">任务创建交易哈希（不是部署交易，也不是 Task ID）</label>
+      <input id="task-created-hash" type="text" readonly spellcheck="false" placeholder="钱包尚未返回交易哈希">
+      <a class="button secondary full" id="task-explorer" target="_blank" rel="noopener noreferrer" hidden>查看任务创建交易</a>
+    </div>
+    <div id="task-recovery" hidden><label for="task-transaction-hash">恢复任务创建交易哈希</label><input id="task-transaction-hash" type="text" placeholder="0x · 64 hexadecimal characters" spellcheck="false"></div>
+    <button class="button secondary full" id="check-task" hidden>检查任务创建交易</button>
+    <p id="task-result" class="response"></p>
+    <a class="button primary full" id="open-studio" hidden>在 Studio 中读取此任务</a>
+    <button class="button secondary full" id="download-task" hidden>下载任务记录与原始输入</button>
+    <div class="readonly-warning"><p>支付状态保持 PaymentUnknown。Created、Paid 声明与 SHA-256 匹配是不同的事实。</p></div>
+  </section>
+  </div>
+  <section id="step-four" class="studio-section panel" hidden aria-labelledby="step-four-title">
+    <h2 id="step-four-title">第 4 步 · 读取链上状态</h2>
+    <p id="step-four-status" class="response" role="status" aria-live="polite"></p>
+    <a id="step-four-link" class="button primary" hidden>打开真实链上任务视图</a>
+    <p class="field-help">只读服务核对创建交易、TaskCreated 事件与 getTask。此步骤不会发送交易，也不等于支付验收。</p>
+  </section>
+</main></body></html>

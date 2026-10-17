@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "AgentLedger Pocket",
+    "slug": "agentledger-pocket",
+    "scheme": "agentledger",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "web": {
+      "name": "AgentLedger Pocket",
+      "bundler": "metro"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "extra": {
+      "simulationOnly": true
+    }
+  }
+}

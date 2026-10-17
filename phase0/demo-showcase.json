@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "agentledger.demo-showcase.v1",
+  "chainId": 10143,
+  "title": "文本字数统计测试任务",
+  "contract": "0x2a497095a6f3b6675e251432d50060d0a6fc1b9c",
+  "taskId": "0xd424d23731f1c390a22b1e7f9cafdbe84d1dc0753b714c391b735f1e9139fb0e",
+  "creationTransaction": "0x40146d20bedda88a4dbdb118aa1cdae421e32f3c77271744d6d0a60db3d675c6",
+  "deploymentTransaction": "0x4565654b2e3a6f32329b005b0de779a6efb91806e1bd7a2582c7532ce3bcdfbe",
+  "scope": "PUBLIC_TASK_REFERENCE_NOT_REVIEWED_DEPLOYMENT_OR_PAYMENT_ACCEPTANCE"
+}

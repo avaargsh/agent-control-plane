@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: Apache-2.0
+# AgentLedger local gates. Browser/Anvil runs are local-scope only:
+# simulation, loopback Anvil and read-only public Testnet reads.
+# No wallet, no signing, no public-chain mutation, never payment acceptance.
+name: agentledger-gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  node-sdk-python-studio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install workspace deps
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install pytest (Python journals)
+        run: python3 -m pip install --upgrade pytest
+      - name: Node + SDK + Python suite
+        run: npm test
+      - name: Offline readiness check
+        run: node tools/onsite-check.mjs
+      - name: Studio Chromium simulation (seven steps, local only)
+        run: npm run test:browser
+      - name: Real public Testnet read-only smoke (needs dev server)
+        run: |
+          node tools/dev.mjs &
+          dev_pid=$!
+          sleep 3
+          curl -fsS http://127.0.0.1:4321/api/healthz > /dev/null
+          curl -fsS http://127.0.0.1:4322/ > /dev/null
+          timeout 180 python3 examples/verifier/browser/demo-public-read-smoke.py
+          kill "$dev_pid" 2>/dev/null || true
+
+  pocket:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/pocket/package-lock.json
+      - name: Install workspace deps (verifier + viem for the live gate)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Pocket deps
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: apps/pocket
+      - name: TypeScript + unit tests (portable SHA-256)
+        run: |
+          npm run typecheck
+          npm test
+        working-directory: apps/pocket
+      - name: Expo Web static export
+        run: npm run export:web
+        working-directory: apps/pocket
+      - name: Pocket Chromium smoke (exported app, local only)
+        run: npm run test:browser
+        working-directory: apps/pocket
+      - name: Live read-only Testnet acceptance (real task via loopback verifier)
+        run: npm run test:browser:live
+        working-directory: apps/pocket
+
+  forge-anvil:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Node deps (viem for acceptance script)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Forge build + contract tests
+        run: |
+          forge --version
+          forge build --sizes
+          forge test -vvv
+      - name: Hermetic Anvil acceptance (simulated recorder payment, loopback)
+        run: |
+          anvil --port 18545 --chain-id 10143 &
+          sleep 2
+          node examples/verifier/tools/anvil-acceptance.mjs
