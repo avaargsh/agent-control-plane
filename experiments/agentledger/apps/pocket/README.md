@@ -55,6 +55,46 @@ verified USDC settlement**. Public payment state remains
 `PaymentUnknown`, `chargeAgain=false`; no reviewed deployment means
 `BLOCKED_NO_REVIEWED_DEPLOYMENT`. Execution authorization, recovery and business outcomes remain outside AgentLedger.
 
+## Presenter-friendly guided journey
+
+Pocket now provides a persistent **Guided Demo** control immediately below
+the app header. It stays visible on Tasks, Payment, Evidence and Journal;
+audiences no longer need to discover the four tabs manually.
+
+1. **Start guided demo** → shows `Created`, `taskId`,
+   `descriptionHash`, chain ID and contract identity.
+2. **Next · Observe Recorder Paid** → switches to Payment. Contract
+   `Paid` is a *Recorder attestation*. Independent USDC payment observation
+   remains `PaymentUnknown` and retry remains prohibited.
+3. **Next · Inspect Evidence** → switches to the Evidence tab,
+   displaying the SHA-256 digest. Raw JSON, input/output files and
+   on-device verification remain accessible below the guide.
+4. **Next · Verify SHA-256 locally** → runs the existing real canonical
+   byte-level verifier. The guide does **not advance** on a mismatch,
+   failed file replacement, oversized file or unsettled picker.
+5. **Next · Open audit summary** → Journal and `summary.json` export;
+   every source is labelled `LOCAL_SIMULATION` or
+   `TESTNET_TASK_READ_ONLY` as appropriate.
+6. **Next · Show lost ACK** → returns to PaymentUnknown; absolutely
+   no second charge. **Restart demo** resets the walkthrough.
+
+The guide only drives *simulated* fixtures. A user choosing **Observe
+Task** can still read a real Testnet task through the pinned read-only
+service; this leaves payment and deployment review UNKNOWN/BLOCKED and
+pauses the offline guide. Manually selecting a stage resets progress,
+so it never leaves an old SHA-256 success attached to another task.
+The transition sequence is checked in `src/demo-flow.test.ts`, and
+headless Chromium clicks the whole guide, including the Lost ACK path.
+
+**Testnet evidence provenance:** The operator may already have performed
+a Monad Testnet run. That is not equivalent to the repository's
+independently reviewed public paid-acceptance gate: the checked-in
+`phase0/reviewed-testnet-deployments.json` has no reviewed addresses.
+Bring the existing Testnet transaction hashes, contract creation/
+runtime bytecode evidence, consumed Nonce, transfer/event logs and
+`summary.json` to a separate technical review; this UI does not invent
+those artifacts or erase a real prior run.
+
 ## Run on a local Web browser
 
 Two terminals:
