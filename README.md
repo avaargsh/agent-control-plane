@@ -20,6 +20,29 @@ Use a browser with MetaMask enabled for signing. For remote development, forward
 
 You can run the services separately with `npm start` and `npm run deploy:testnet`. `npm run dev` owns only its own processes and stops both on Ctrl+C. It does not terminate existing services using those ports.
 
+## Presenter-ready Pocket + pitch (dev)
+
+For a judge presentation, **do not start with the long engineering slides**:
+
+- **Seven-slide pitch:** `slides/judge.md`, built via
+  `cd slides && npm ci --ignore-scripts && npm run build:judge`;
+  the full appendix stays in `slides/slides.md`.
+- **Guided Pocket journey:** click **▶ Start 3-minute guided demo** in
+  `apps/pocket` Web. Its four explicit steps are Created →
+  Recorder Paid claim → Evidence/Verify → Lost ACK, with Back/Next,
+  persistent simulation source label and PaymentUnknown/no-recharge.
+- **Evidence:** on Evidence press Verify SHA-256 locally, optionally
+  load genuine source bytes. Matching a simulated hash is still *not*
+  independent payment acceptance; exporting summary.json retains its
+  source label.
+- **Public-chain evidence:** show the already recorded Monad Testnet
+  Created task via the separate read-only verifier; never blend it
+  with the synthetic Paid/Proven demo.
+
+See [pitch and handoff guide](slides/README.md). Slidev supplies PDF
+and PPTX export scripts; the current public paid Testnet acceptance
+is blocked without an approved reviewed deployment.
+
 ## Complete demo (about three minutes)
 
 Open **<http://127.0.0.1:4322/demo>** and click **开始完整演示**. No wallet is needed for this walkthrough.
