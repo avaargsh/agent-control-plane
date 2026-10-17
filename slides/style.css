@@ -205,3 +205,9 @@ html, body, #app { background: var(--al-bg); }
 .al-pitch-bottom{border-left-color:#4C8CE3;background:#1532576A}
 .al-pitch-ending h1 em{color:#70D9BE}
 @media print{.al-pitch-demo-bar a{color:#EEF5FF!important;background:#22456A!important}}
+
+/* Static Slidev bilingual decks use parallel build folders, with a visible
+   first-slide link to the other fully localized presentation. */
+.al-pitch-language{position:absolute;top:0;right:0;display:flex;align-items:center;gap:.55rem;color:#a7b6ce;font-size:.76rem}
+.al-pitch-language a{display:inline-flex;padding:.35rem .75rem;border:1px solid #6083b4;border-radius:7px;background:#1c3958;color:#e9f3ff;text-decoration:none;font-size:.76rem;font-weight:800}
+.al-pitch-language a:hover,.al-pitch-language a:focus-visible{background:#336aa1;color:white}
