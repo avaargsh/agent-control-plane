@@ -16,14 +16,14 @@ drawings:
 transition: fade-out
 ---
 
-<div class="frame cover">
+<div class="frame cover first">
   <div class="topline"><div class="brand">agentledger<span>.</span></div><div class="top-label">MONAD × x402 · HACKATHON PITCH</div></div>
   <div class="globe"></div>
   <div class="content">
-    <div class="section-tag" style="margin-top:60px">AGENT ECONOMY · TRUST INFRASTRUCTURE</div>
+    <div class="section-tag" style="margin-top:25px">AGENT ECONOMY · TRUST INFRASTRUCTURE</div>
     <h1 class="title">Pay<span class="highlight">.</span><br>Execute<span class="highlight">.</span><br>Prove<span class="mint">.</span></h1>
     <div class="subtitle">让 Agent 的付款与执行证据<br>成为<span class="highlight">可独立核验的事实</span></div>
-    <div class="rowline" style="margin-top:28px"><span class="pill teal">Pocket App</span><span class="pill">Read-only Verification</span><span class="pill gold">Fail Closed</span></div>
+    <div class="rowline" style="margin-top:15px"><span class="pill teal">Pocket App</span><span class="pill">Read-only Verification</span><span class="pill gold">Fail Closed</span></div>
   </div>
   <div class="deck-bottom"><span>AGENTLEDGER / EXPERIMENTAL PHASE 0</span><span>Local PoC demonstrated · Public Testnet paid acceptance pending</span></div>
 </div>
