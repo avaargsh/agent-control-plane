@@ -63,10 +63,9 @@ try{
  await page.getByRole("button",{name:"Guide back"}).click();
  await page.getByRole("button",{name:"Guide back"}).click();
  await page.getByText("01 · Created",{exact:true}).waitFor();
- await page.getByRole("button",{name:"Tasks"}).first().catch(()=>{});
- await page.locator('[aria-label="Local simulated guided demonstration"]').getByRole("button",{name:"×"}).click().catch(async()=>{
-   await page.locator('[aria-label="Local simulated guided demonstration"]').locator('button').first().click();
- });
+ await page.locator('[aria-label="Local simulated guided demonstration"]').getByRole("button").first().click();
+ await page.getByRole("tab",{name:"Tasks"}).click();
+ await page.getByText("Your agent tasks",{exact:true}).waitFor();
 
  await page.getByText("Paid claim",{exact:true}).first().click();
  await page.getByText("PaymentUnknown",{exact:false}).first().waitFor();
