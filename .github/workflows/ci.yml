@@ -101,8 +101,11 @@ jobs:
         working-directory: slides
         run: |
           npm run build:judge
+          npm run build:judge:en
           test -f dist-judge/index.html
+          test -f dist-judge-en/index.html
           test -s judge.md
+          test -s judge.en.md
 
   forge-anvil:
     runs-on: ubuntu-latest
