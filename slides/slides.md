@@ -551,7 +551,7 @@ layout: default
 <div class="al-grid2 mt6">
 
 <div><div class="al-num">产物</div><div>Pocket · Studio · Read-only SDK · readiness/summary 工具</div></div>
-<div><div class="al-num">仓库</div><div>github.com/avaargsh/agent-control-plane · <b>dev</b></div></div>
+<div><div class="al-num">提交材料</div><div>评委 7 页短讲 · /demo · evidence summary.json</div></div>
 
 </div>
 
@@ -569,7 +569,7 @@ class: text-center
 <div class="mt6">
 
 ```bash
-git clone https://github.com/avaargsh/agent-control-plane
+# 从已准备好的本地项目目录运行（最终仓库由参赛者另行手动提交）
 npm ci --ignore-scripts --no-audit --no-fund
 npm run dev      # Studio 4321 · Testnet 工作台 4322 · Pocket 8081
 ```
