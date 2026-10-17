@@ -166,6 +166,7 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
    const result=await observeTaskReadOnly(contract.trim(),taskId.trim(),source);
    if(epoch!==lookupEpoch.current)return;
    onObserve(result.task);
+   setGuideStep(0);
    setLookupState("TASK OBSERVED · PaymentUnknown (no USDC verification)");
   }catch(error){if(epoch===lookupEpoch.current)setLookupState("NOT VERIFIED: "+String((error as Error).message));}
   finally{if(epoch===lookupEpoch.current)setLookupBusy(false);}
@@ -195,7 +196,8 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
    return result.match;
   }catch(error){setVerificationError("NOT VERIFIED: "+String((error as Error).message));return false;}
  }
- const choose=(next:Stage)=>{
+ const choose=(next:Stage,fromGuide=false)=>{
+  if(!fromGuide)setGuideStep(0);
   lookupEpoch.current++;
   onObserve(null);setStage(next);clearLocalEvidence();
   setVerificationError("");
@@ -203,12 +205,12 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
  };
  function guideNext(){
    const {action,next}=nextJourneyAction(guideStep);
-   if(action==="start"||action==="restart")choose("created");
-   if(action==="show-payment")choose("paid");
-   if(action==="show-evidence")choose("evidence");
+   if(action==="start"||action==="restart")choose("created",true);
+   if(action==="show-payment")choose("paid",true);
+   if(action==="show-evidence")choose("evidence",true);
    if(action==="verify"&&!verify())return;
    if(action==="show-summary")setTab("journal");
-   if(action==="show-unknown")choose("unknown");
+   if(action==="show-unknown")choose("unknown",true);
    if(action==="show-payment")setTab("payment");
    setGuideStep(next);
  }
@@ -221,7 +223,7 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
     <Text style={s.guidedTitle}>{guide.title}</Text>
     <View style={s.guidedMarkers}>{[1,2,3,4].map(n=><View key={n} style={[s.guidedMarker,n<=guide.current&&s.guidedMarkerActive]}/>)}</View>
     <Text style={s.guidedWarning}>{t("Recorder Paid ≠ USDC verified · No automatic recharge","Recorder Paid 并非 USDC 已核验 · 禁止自动重扣")}</Text>
-    {!live?<Button title={ZH?GUIDED_LABELS_ZH[guideStep]:GUIDED_LABELS[guideStep]} disabled={fileReading} onPress={guideNext}/>:
+    {!live?<Button title={(guideStep===0?"":t("Next · ","下一步 · "))+(ZH?GUIDED_LABELS_ZH[guideStep]:GUIDED_LABELS[guideStep])} disabled={fileReading} onPress={guideNext}/>:
      <Text style={s.guidedWarning}>{t("Live task-only view: return to a local demo stage to resume.","真实任务只读观察：请返回本地模拟阶段以继续。")}</Text>}
    </View>
    <View style={s.headline}><Text style={s.eyebrow}>WORKSPACE / {tab.toUpperCase()} <Text style={{color:C.mint}}> · READ ONLY</Text></Text><Text style={s.h1}>{tab==="tasks"?"Your agent tasks":tab==="payment"?"Payment clarity":tab==="evidence"?"Proof, not promises":"Your activity"}</Text>
