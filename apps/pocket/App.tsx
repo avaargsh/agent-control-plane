@@ -9,19 +9,31 @@ import {PRESENTER_LABELS,PRESENTER_STAGES,presenterIndex,presenterNext,presenter
 import {Platform, SafeAreaView, ScrollView, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions} from "react-native";
 import {StatusBar} from "expo-status-bar";
 import {DemoFact, FACTS, Stage, shorten, exportSummary} from "./src/facts";
+import {pocketCopy} from "./src/ui-locale";
 
 // Locale-aware copy: Linux CI's English Chromium lacks CJK fonts, while
 // zh-CN browsers and native Chinese devices retain Chinese product labels.
-const ZH=(()=>{
+let ZH=(()=>{
  try{return Intl.DateTimeFormat().resolvedOptions().locale.toLowerCase().startsWith("zh");}
  catch{return false;}
 })();
 const t=(en:string,zh:string)=>ZH?zh:en;
+const l=(value:string)=>pocketCopy(value,ZH);
+const LANGUAGE_KEY="agentledger.ui-language.v1";
+function initialLanguage():"en"|"zh"{
+ if(Platform.OS==="web")try{
+  const query=new URLSearchParams(window.location.search).get("lang");
+  if(query==="en"||query==="zh"){window.localStorage.setItem(LANGUAGE_KEY,query);return query;}
+  const saved=window.localStorage.getItem(LANGUAGE_KEY);
+  if(saved==="en"||saved==="zh")return saved;
+ }catch{}
+ return ZH?"zh":"en";
+}
 type Tab="tasks"|"payment"|"evidence"|"journal";
 const C={bg:"#F5F8FC",panel:"#FFFFFF",card:"#EFF1FD",line:"#E5EAF3",ink:"#18243C",sub:"#667A91",purple:"#315FC6",mint:"#138D78",amber:"#A86327",red:"#CA475B",night:"#15375F",lavender:"#EDEBFF"};
-const labels:Record<Tab,string>={tasks:t("Tasks","任务"),payment:t("Payment","支付"),evidence:t("Evidence","证据"),journal:t("Journal","记录")};
+const getLabels=():Record<Tab,string>=>({tasks:t("Tasks","任务"),payment:t("Payment","支付"),evidence:t("Evidence","证据"),journal:t("Journal","记录")});
 const tabs:Tab[]=["tasks","payment","evidence","journal"];
-const steps:{key:Stage;label:string;note:string}[]=[
+const getSteps=():{key:Stage;label:string;note:string}[]=>[
  {key:"created",label:"Created",note:t("Task registered","任务已创建")},
  {key:"paid",label:"Paid claim",note:t("Recorder claim · USDC not verified","Recorder 声明，不等于 USDC 已核验")},
  {key:"evidence",label:"Evidence",note:t("Simulated Evidence awaiting hash check","模拟证据等待验证")},
@@ -54,13 +66,14 @@ function Button({title,onPress,disabled=false,secondary=false}:{title:string;onP
  style={({pressed})=>[s.button,secondary&&s.buttonSecondary,(pressed||disabled)&&{opacity:.65}]}>
  <Text style={[s.buttonText,secondary&&{color:C.ink}]}>{title}</Text></Pressable>;
 }
-function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNotice}:{
+function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNotice,onChangeLanguage}:{
  stage:Stage;setStage:(next:Stage)=>void;observed:TaskRead|null;
  onObserve:(value:TaskRead|null)=>void;onVerified:(value:string)=>void;
- onExport:()=>void;exportNotice:string;
+ onExport:()=>void;exportNotice:string;onChangeLanguage:()=>void;
 }){
  const [tab,setTab]=useState<Tab>("tasks"),[verified,setVerified]=useState(false);
  const [presenting,setPresenting]=useState(false);
+ const labels=getLabels(),steps=getSteps();
  const scrollerRef=useRef<ScrollView|null>(null);
  const [contract,setContract]=useState(""),[taskId,setTaskId]=useState("");
  const [lookupState,setLookupState]=useState(""),[lookupBusy,setLookupBusy]=useState(false);
@@ -212,7 +225,7 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
  }
  return <SafeAreaView style={s.phone}>
   <StatusBar style="dark"/>
-  <View style={s.header}><View style={s.brandGroup}><Mark/><View><Text style={s.brand}>agentledger<Text style={{color:C.purple}}>.</Text></Text><Text style={s.kicker}>PROOF STUDIO · POCKET</Text></View></View><Chip text={live?"TASK READ-ONLY":"SIMULATED"} tone="amber"/></View>
+  <View style={s.header}><View style={s.brandGroup}><Mark/><View><Text style={s.brand}>agentledger<Text style={{color:C.purple}}>.</Text></Text><Text style={s.kicker}>{l("PROOF STUDIO · POCKET")}</Text></View></View><Pressable accessibilityRole="button" accessibilityLabel={t("Switch to Chinese","切换为英文")} style={s.languageButton} onPress={onChangeLanguage}><Text style={s.languageButtonText}>{ZH?"EN":"中文"}</Text></Pressable><Chip text={live?"TASK READ-ONLY":"SIMULATED"} tone="amber"/></View>
   {presenting&&<View style={s.presenterStrip} accessibilityLabel="Local simulated guided demonstration">
    <View style={s.presenterTop}>
     <Text style={s.presenterEyebrow}>GUIDED DEMO · LOCAL SIMULATION ONLY</Text>
@@ -360,6 +373,13 @@ function Inspector({fact,observed,verification,onExport,exportNotice}:{fact:Demo
 }
 export default function App(){
  const {width}=useWindowDimensions();const[stage,setStage]=useState<Stage>("created");
+ const [uiLang,setUiLang]=useState<"en"|"zh">(initialLanguage);
+ ZH=uiLang==="zh";
+ function changeLanguage(){
+  const next=uiLang==="zh"?"en":"zh";
+  if(Platform.OS==="web")try{window.localStorage.setItem(LANGUAGE_KEY,next);}catch{}
+  setUiLang(next);
+ }
  const [observed,setObserved]=useState<TaskRead|null>(null);
  const [verification,setVerification]=useState("NOT_VERIFIED");
  const [exportNotice,setExportNotice]=useState("");
@@ -375,7 +395,7 @@ export default function App(){
    }
  }
  const desktop=Platform.OS==="web"&&width>=1040;
- return <View style={[s.root,desktop&&s.wide]}>{desktop?<><View style={s.phoneFrame}><Phone stage={stage} setStage={setStage} observed={observed} onObserve={setObserved} onVerified={setVerification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice}/></View><View style={s.inspectorFrame}><Inspector fact={FACTS[stage]} observed={observed} verification={verification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice}/></View></>:<Phone stage={stage} setStage={setStage} observed={observed} onObserve={setObserved} onVerified={setVerification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice}/>}</View>;
+ return <View style={[s.root,desktop&&s.wide]}>{desktop?<><View style={s.phoneFrame}><Phone stage={stage} setStage={setStage} observed={observed} onObserve={setObserved} onVerified={setVerification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice} onChangeLanguage={changeLanguage}/></View><View style={s.inspectorFrame}><Inspector fact={FACTS[stage]} observed={observed} verification={verification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice}/></View></>:<Phone stage={stage} setStage={setStage} observed={observed} onObserve={setObserved} onVerified={setVerification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice} onChangeLanguage={changeLanguage}/>}</View>;
 }
 const s=StyleSheet.create({
  presenterStrip:{paddingHorizontal:18,paddingTop:12,paddingBottom:12,backgroundColor:"#EDF4FF",borderBottomColor:"#C7D9F4",borderBottomWidth:1},
@@ -402,7 +422,9 @@ const s=StyleSheet.create({
  phoneFrame:{height:"100%",maxHeight:880,width:400,borderWidth:8,borderRadius:42,borderColor:"#1D2742",overflow:"hidden",backgroundColor:C.bg,shadowColor:"#10214B",shadowOpacity:.18,shadowRadius:36,shadowOffset:{width:0,height:18}},
  inspectorFrame:{height:"100%",maxHeight:880,width:505,borderColor:"#E2E6F0",borderWidth:1,borderRadius:27,overflow:"hidden",backgroundColor:C.panel,shadowColor:"#1A2750",shadowOpacity:.06,shadowRadius:24,shadowOffset:{width:0,height:9}},
  phone:{flex:1,backgroundColor:C.bg},
- header:{paddingHorizontal:21,paddingTop:18,paddingBottom:17,flexDirection:"row",justifyContent:"space-between",alignItems:"center",borderBottomWidth:1,borderBottomColor:C.line,backgroundColor:"#fff"},
+ languageButton:{minWidth:42,minHeight:40,alignItems:"center",justifyContent:"center",backgroundColor:"#EDF4FF",borderRadius:10,borderWidth:1,borderColor:"#CADBF1"},
+ languageButtonText:{color:C.purple,fontWeight:"900",fontSize:11},
+ header:{paddingHorizontal:14,paddingTop:18,paddingBottom:17,flexDirection:"row",justifyContent:"space-between",alignItems:"center",borderBottomWidth:1,borderBottomColor:C.line,backgroundColor:"#fff"},
  brandGroup:{flexDirection:"row",alignItems:"center",gap:10},mark:{backgroundColor:C.purple,alignItems:"center",justifyContent:"center"},markText:{color:"#fff",fontWeight:"800"},
  brand:{color:C.ink,fontSize:20,fontWeight:"900",letterSpacing:-.9},kicker:{fontSize:9,fontWeight:"800",letterSpacing:1.15,color:C.sub,marginTop:3},
  chip:{paddingHorizontal:11,paddingVertical:7,borderRadius:24},chipText:{fontWeight:"800",fontSize:9,letterSpacing:.45},
