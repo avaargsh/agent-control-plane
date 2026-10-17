@@ -43,7 +43,7 @@ with sync_playwright() as p:
                 expect(page.locator('#scenario-heading')).to_have_text('Payment response missing')
             expect(page.locator('#payment-fact')).to_have_text('PaymentUnknown')
         page.locator('#guide-next').click()
-        expect(page.locator('#guide-result')).to_contain_text('完整导览完成', timeout=40000)
+        expect(page.locator('#guide-result')).to_contain_text('Guide complete', timeout=40000)
         expect(page.locator('#creation-transaction')).to_be_visible()
         assert page.locator('#network-indicator').get_attribute('data-state') == 'verified'
         with page.expect_download() as pending:
