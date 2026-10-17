@@ -243,6 +243,24 @@ try{
  }));
  if(sizes.overflow>3)throw Error("Horizontal mobile overflow "+JSON.stringify(sizes));
  await page.screenshot({path:join(output,"pocket-mobile.png"),fullPage:true});
+  // At 390px the presenter must expose the finish CTA without horizontal overflow.
+  await page.getByRole("button",{name:/Start 3-minute guided demo/}).click();
+  for(let i=0;i<3;i++) await page.getByRole("button",{name:"Guide next"}).click();
+  await page.getByText("STEP 4 / 4",{exact:true}).waitFor();
+  if(!await page.getByRole("button",{name:"Export guided summary.json"}).isVisible())
+    throw Error("Mobile guided finish export unreachable");
+  const guidedWidth=await page.evaluate(()=>({
+    scroll:document.documentElement.scrollWidth,
+    viewport:document.documentElement.clientWidth,
+    controls:[...document.querySelectorAll('[aria-label="Local simulated guided demonstration"] button')]
+      .map(el=>({label:el.getAttribute("aria-label"),right:Math.round(el.getBoundingClientRect().right)})),
+  }));
+  if(guidedWidth.scroll>guidedWidth.viewport+3 || guidedWidth.controls.some(x=>x.right>guidedWidth.viewport+3))
+    throw Error("Mobile presenter overflows "+JSON.stringify(guidedWidth));
+  await page.screenshot({path:join(output,"pocket-mobile-guided.png"),fullPage:true});
+  await page.getByRole("button",{name:"Exit guided demo"}).click();
+  if(await page.getByText("GUIDED DEMO · LOCAL SIMULATION ONLY").count())
+    throw Error("Presenter remains visible after exit");
  if(errors.length)throw Error("Browser exceptions: "+errors.join("; "));
  console.log("POCKET WEB PASS: Created → Recorder Paid → Evidence real SHA-256 → PaymentUnknown Lost ACK; unsafe lookup rejected; mobile layout okay");
 }finally{
