@@ -45,6 +45,16 @@ try{
  await page.goto(origin,{waitUntil:"networkidle"});
  await page.getByText("Your agent tasks",{exact:true}).waitFor();
  await page.getByText("JUDGE / EVIDENCE VIEW",{exact:true}).waitFor();
+ // Locale switch must update phone and inspector without changing scenario data.
+ await page.getByRole("button",{name:"Switch to Chinese"}).click();
+ await page.getByText("我的智能体任务",{exact:true}).waitFor();
+ await page.getByText("评委 / 证据视图",{exact:true}).waitFor();
+ if(!await page.getByRole("tab",{name:"支付"}).count())throw Error("Pocket tabs remained English");
+ await page.reload({waitUntil:"networkidle"});
+ await page.getByText("我的智能体任务",{exact:true}).waitFor();
+ await page.getByRole("button",{name:"切换为英文"}).click();
+ await page.getByText("Your agent tasks",{exact:true}).waitFor();
+
  // New judge-facing deterministic flow, matching slides/judge.md.
  await page.getByRole("button",{name:/Start 3-minute guided demo/}).click();
  await page.getByText("GUIDED DEMO · LOCAL SIMULATION ONLY").waitFor();
