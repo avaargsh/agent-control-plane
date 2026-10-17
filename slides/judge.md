@@ -9,6 +9,7 @@ info: |
 ---
 
 <div class="al-pitch-cover">
+  <div class="al-pitch-language"><span>语言</span><a href="../dist-judge-en/" aria-label="Switch to English">English ↗</a></div>
   <div class="al-pitch-kicker">AGENTLEDGER · MONAD × x402 · 评委演示</div>
   <h1>付款 → 执行 → <span>核验。</span></h1>
   <p>Agent 能为任务收费了。<br>但<strong>谁证明付款、执行与结果</strong>分别发生了？</p>
