@@ -7,7 +7,9 @@
     "export": "slidev export",
     "serve": "npx serve dist",
     "dev:judge": "slidev judge.md --open",
-    "build:judge": "slidev build judge.md --out dist-judge",
+    "build:judge": "slidev build judge.md --out dist-judge --base /dist-judge/",
+    "dev:judge:en": "slidev judge.en.md --open",
+    "build:judge:en": "slidev build judge.en.md --out dist-judge-en --base /dist-judge-en/",
     "export:judge:pdf": "slidev export judge.md --format pdf --output AgentLedger-Judge-Pitch.pdf",
     "export:judge:pptx": "slidev export judge.md --format pptx --output AgentLedger-Judge-Pitch.pptx"
   },
