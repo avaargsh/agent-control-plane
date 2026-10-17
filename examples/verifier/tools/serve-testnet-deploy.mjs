@@ -29,13 +29,15 @@ writeFileSync(new URL('out/testnet-deploy/AgentLedger.json', root), JSON.stringi
 const assets = new Map([
   ['/', ['deploy.html', 'text/html; charset=utf-8']],
   ['/deploy.mjs', ['deploy.mjs', 'text/javascript; charset=utf-8']],
+  ['/locale.mjs', ['../public/locale.mjs', 'text/javascript; charset=utf-8']],
+  ['/locale-copy.mjs', ['../public/locale-copy.mjs', 'text/javascript; charset=utf-8']],
   ['/wallet-connection.mjs', ['wallet-connection.mjs', 'text/javascript; charset=utf-8']],
   ['/testnet-transactions.mjs', ['testnet-transactions.mjs', 'text/javascript; charset=utf-8']],
   ['/deploy.css', ['deploy.css', 'text/css; charset=utf-8']],
   ['/style.css', ['../public/style.css', 'text/css; charset=utf-8']],
 ]);
 const verifierHandler = createVerifierHandler();
-const studioPaths = new Set(['/studio', '/demo', '/app.mjs', '/demo-scenarios.mjs', '/demo-guide.mjs', '/text-stats.mjs', '/summary.mjs', '/evidence-browser.mjs']);
+const studioPaths = new Set(['/studio', '/demo', '/app.mjs', '/demo-scenarios.mjs', '/demo-guide.mjs', '/text-stats.mjs', '/summary.mjs', '/evidence-browser.mjs', '/locale.mjs', '/locale-copy.mjs']);
 const server = createServer((req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   if (studioPaths.has(path) || path.startsWith('/api/')) {
