@@ -1,0 +1,72 @@
+name: AgentLedger Slidev Pitch
+
+on:
+  push:
+    branches:
+      - feat/agentledger-monad-hackathon
+    paths:
+      - experiments/agentledger/pitch/slidev/**
+      - .github/workflows/agentledger-slidev-pitch.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  slidev-pitch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install fonts for Chinese-language PDF and PPTX
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          fc-cache -f
+          fc-match "Noto Sans CJK SC"
+      - name: Install Slidev and Chromium exporter
+        working-directory: experiments/agentledger/pitch/slidev
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install chromium --with-deps
+      - name: Build interactive Slidev web presentation
+        working-directory: experiments/agentledger/pitch/slidev
+        run: npm run build
+      - name: Export PDF from actual Slidev renderer
+        working-directory: experiments/agentledger/pitch/slidev
+        run: npm run export:pdf
+      - name: Export slideshow-compatible PPTX from Slidev
+        working-directory: experiments/agentledger/pitch/slidev
+        run: npm run export:pptx
+      - name: Attempt editable PPTX without blocking pixel-perfect PPTX
+        working-directory: experiments/agentledger/pitch/slidev
+        continue-on-error: true
+        run: npm run export:editable
+      - name: Validate export count and create source archive
+        working-directory: experiments/agentledger/pitch/slidev
+        run: |
+          test -s AgentLedger-Pitch.pdf
+          test -s AgentLedger-Pitch.pptx
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          deck=Path('AgentLedger-Pitch.pptx')
+          with zipfile.ZipFile(deck) as z:
+              slides=[p for p in z.namelist() if p.startswith('ppt/slides/slide') and p.endswith('.xml')]
+          assert len(slides)>=13, (len(slides), 'Missing Slidev PPTX pages')
+          print('Slidev PPTX slides:',len(slides))
+          PY
+          zip -r AgentLedger-Slidev-Source.zip slides.md package.json styles/ README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentledger-slidev-pitch
+          path: |
+            experiments/agentledger/pitch/slidev/AgentLedger-Pitch.pptx
+            experiments/agentledger/pitch/slidev/AgentLedger-Pitch-editable.pptx
+            experiments/agentledger/pitch/slidev/AgentLedger-Pitch.pdf
+            experiments/agentledger/pitch/slidev/AgentLedger-Slidev-Source.zip
+          if-no-files-found: error
+          retention-days: 14
