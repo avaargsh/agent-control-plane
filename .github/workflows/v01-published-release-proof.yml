@@ -1,15 +1,12 @@
 name: v0.1-published-release-proof
 
+# Release gates only: normal development PRs run .github/workflows/test.yml.
+# Invoke manually on a candidate, or create an intentional v* release tag.
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "src/**"
-      - "scripts/verify_execution_proof.py"
-      - "scripts/verify_v01_acceptance_artifacts.py"
-      - "scripts/verify_published_v01_release.sh"
-      - "release/v0.1-acceptance-artifact-contract.json"
-      - ".github/workflows/v01-published-release-proof.yml"
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
