@@ -5,7 +5,7 @@ export const DEMO_STEPS = Object.freeze([
   { title: '重新计算证据', action: 'verify', text: '从原始输入、输出和规范化 Evidence JSON 重新计算 SHA-256。匹配证明字节一致，不会升级支付结论。' },
   { title: '尝试篡改输出', action: 'tamper', text: '修改一个输出字节，再用相同 Evidence 验证。校验必须失败；恢复原样本后可以重新验证。' },
   { title: '演示响应丢失', action: 'lost-ack', text: '没有收到 ACK 不能证明未扣款。保留 PaymentUnknown，不重新支付，也不伪造收据。' },
-  { title: '读取真实测试网任务', action: 'live', text: '读取已部署合约中的真实任务。每次都重新查询 RPC；当前链上任务与前面的本地模拟是独立的数据源。' },
+  { title: '可选 · 读取真实测试网任务', action: 'live', text: '前六步本地模拟已完成。此步只读重新查询已部署合约的真实任务；RPC 不可达不会伪装成链上成功，PaymentUnknown 保持不变。' },
 ]);
 
 export function validShowcase(value) {
