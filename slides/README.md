@@ -57,3 +57,9 @@ approximate timings.
 ## Manual hackathon submission
 
 Use [the MOJO handoff checklist](../docs/monad-blitz-submission.md) and `npm run submit:check` before copying a reviewed version to the final repository. Judge slides intentionally do not display any development-repository or target-submission repository URL. Neither presentation claims real Testnet USDC payment acceptance.
+
+## Handoff from the 7-slide pitch
+
+The **Clickable Demo** slide contains two loopback-only links: Pocket Web on `http://127.0.0.1:8081` and the six-step offline Studio guided demo on `http://127.0.0.1:4322/demo`. Start those services on the **same computer** as the presentation browser. These are development-only local navigation links, not deployed sites. If demonstrating on a separate device, use approved port forwarding and open the corresponding service directly; do not treat a failed `127.0.0.1` link as a Testnet failure.
+
+Pocket's fourth step now ends in **Export guided summary.json**, with the payment claim still `PaymentUnknown`; Studio displays a separate seventh, **optional** Testnet read. Both presentation surfaces use a restrained navy/blue visual system and retain their source labels.
