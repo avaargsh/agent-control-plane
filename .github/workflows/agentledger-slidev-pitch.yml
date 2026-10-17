@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/agentledger-monad-hackathon
+      - feat/agentledger-guided-demo-20261017
     paths:
       - experiments/agentledger/pitch/slidev/**
       - .github/workflows/agentledger-slidev-pitch.yml
