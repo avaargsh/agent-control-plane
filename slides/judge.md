@@ -134,7 +134,7 @@ class: text-center
  <h1>From claims<br><em>to verifiable facts.</em></h1>
  <p>Reviewed deployment → Real Testnet USDC → Independent reconciliation → Audited Evidence</p>
  <div class="al-pitch-warning">现在可演示；真实付款闭环仍需独立验收。</div>
- <div class="al-pitch-repo">github.com/avaargsh/agent-control-plane · branch: dev</div>
+ <div class="al-pitch-warning">现场入口：/demo · Pocket Web · summary.json</div>
 </div>
 
 <!-- 2:50–3:00。收尾并引导提问。 -->

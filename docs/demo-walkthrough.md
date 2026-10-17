@@ -10,7 +10,9 @@ Start the project with `npm run dev`, open <http://127.0.0.1:4322/demo>, and cli
 4. **Evidence check, 25 seconds:** click next. The browser hashes the exact input/output and canonical Evidence JSON. The sample matches its simulated anchor. Optionally download all three sample files and upload them for an independent repeat.
 5. **Tampered output, 20 seconds:** click next. One output byte changes, and verification rejects it. Payment stays unknown. Return to the previous step or use Verify simulated Evidence to recheck the original bytes.
 6. **Lost response, 20 seconds:** click next. A lost ACK cannot justify another charge. Show the unchanged PaymentUnknown result. No live payment is attempted.
-7. **Real public task, 40 seconds:** click next. The app reads the pinned task and its creation transaction from Monad Testnet. The response must match the contract, task ID and creator; the server checks receipt, event and block identity. Show the current Created state, creation-transaction link, last-read time and `summary.json` export. This is separate from the earlier simulated Paid/Proven story.
+7. **Optional real public task, 40 seconds:** only if RPC is available, click next. The app reads the pinned task and its creation transaction from Monad Testnet. The response must match the contract, task ID and creator; the server checks receipt, event and block identity. Show the current Created state, creation-transaction link, last-read time and `summary.json` export. This is separate from the earlier simulated Paid/Proven story.
+
+The first six steps are a self-contained offline demonstration; a failed seventh-step public RPC lookup must not be described as a failed local hash demo or a completed blockchain payment. The final repository and MOJO submission are handled manually (see [manual handoff](monad-blitz-submission.md)).
 
 ## Show the wallet workflow separately
 

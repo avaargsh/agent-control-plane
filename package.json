@@ -14,6 +14,7 @@
     "test:pocket": "npm --prefix apps/pocket test",
     "test:pocket:typecheck": "npm --prefix apps/pocket run typecheck",
     "onsite:check": "node tools/onsite-check.mjs",
+    "submit:check": "node tools/submission-preflight.mjs",
     "test:node": "node --test test/*.test.mjs examples/verifier/test/*.test.mjs examples/x402-gate/test/*.test.mjs",
     "test:python": "python3 -m pytest test/test_admission_journal.py test/test_charge_attempt_journal.py -q",
     "test:browser": "npm --prefix examples/verifier run test:browser",

@@ -38,6 +38,8 @@ jobs:
         run: npm test
       - name: Offline readiness check
         run: node tools/onsite-check.mjs
+      - name: Portable judge handoff check (offline, no publication)
+        run: npm run submit:check
       - name: Studio Chromium simulation (seven steps, local only)
         run: npm run test:browser
       - name: Real public Testnet read-only smoke (needs dev server)
