@@ -9,6 +9,7 @@ const HEX40 = /^0x[0-9a-fA-F]{40}$/;
 const HEX64 = /^0x[0-9a-fA-F]{64}$/;
 const same = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 if (['/studio', '/demo'].includes(location.pathname)) document.querySelector('a.logo').href = location.pathname;
+if (location.pathname === '/demo') document.title = 'AgentLedger · 3-minute guided demo';
 const workspaceUrl = new URL('/', location.href);
 if (location.port === '4321') workspaceUrl.port = '4322';
 byId('wallet-workspace').href = workspaceUrl.href;
@@ -241,9 +242,24 @@ function guideButtons() {
   byId('guide-reset').disabled = guideBusy;
   byId('guide-next').textContent = guideBusy ? '正在核对…' : guideIndex < 0 ? '开始完整演示' : guideIndex === DEMO_STEPS.length - 1 ? '重新核对真实任务' : '下一步';
 }
-function cancelGuide() { guideGeneration++; guideBusy = false; text('guide-result', '当前为手动查看。可以使用下一步继续导览。'); guideButtons(); }
+function cancelGuide(reset = false) {
+  guideGeneration++; guideBusy = false;
+  // Manual file verification pauses the presentation but must retain the
+  // next step. Only the explicit Exit action resets the journey.
+  if (reset) {
+    guideIndex = -1;
+    byId('guide-progress').value = 0;
+    text('guide-counter', '完整演示 · 约 3 分钟');
+  }
+  document.body.classList.remove('guided-demo-active');
+  byId('guide-exit').hidden = true;
+  text('guide-result', reset ? '已退出导览；当前为手动查看。' : '当前为手动查看。可以使用下一步继续导览。');
+  guideButtons();
+}
 async function runGuide(index) {
   if (guideBusy) return;
+  document.body.classList.add('guided-demo-active');
+  byId('guide-exit').hidden = false;
   guideBusy = true; const generation = ++guideGeneration;
   guideIndex = Math.min(Math.max(index, 0), DEMO_STEPS.length - 1);
   const step = DEMO_STEPS[guideIndex];
@@ -267,6 +283,7 @@ async function runGuide(index) {
 byId('guide-next').addEventListener('click', () => void runGuide(guideIndex + 1));
 byId('guide-prev').addEventListener('click', () => void runGuide(guideIndex - 1));
 byId('guide-reset').addEventListener('click', () => void runGuide(0));
+byId('guide-exit').addEventListener('click', () => cancelGuide(true));
 byId('show-demo').addEventListener('click', () => void runGuide(0));
 byId('show-live').addEventListener('click', () => { cancelGuide(); switchMode('live'); byId('live-controls').scrollIntoView({ behavior: 'auto', block: 'center' }); byId('contract').focus({ preventScroll: true }); });
 for (const mode of ['demo', 'live']) byId('mode-' + mode).addEventListener('click', () => { cancelGuide(); switchMode(mode); });
