@@ -32,8 +32,8 @@ jobs:
           python-version: "3.12"
       - name: Install workspace deps
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Install pytest (Python journals)
-        run: python3 -m pip install --upgrade pytest
+      - name: Install Python test and browser dependencies
+        run: python3 -m pip install --upgrade pytest playwright==1.56.0
       - name: Node + SDK + Python suite
         run: npm test
       - name: Offline readiness check
