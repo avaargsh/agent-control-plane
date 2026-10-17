@@ -338,7 +338,7 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
        <View style={s.divider}/>{steps.map((x,i)=><View key={x.key} style={s.journalItem}><Text style={s.stepNumber}>{String(i+1).padStart(2,"0")}</Text><View><Text style={s.stepTitle}>{x.label}</Text><Text style={s.small}>{x.note}</Text></View></View>)}
      </View>
      <Button title={t("Export summary.json","导出 summary.json")} secondary onPress={onExport}/>
-     {!!exportNotice&&<Text style={[s.small,{color:exportNotice.startsWith("EXPORT_FAILED")?C.red:C.mint}]}>{exportNotice}</Text>}
+     {!!exportNotice&&<Text style={[s.small,{color:exportNotice.startsWith("EXPORT_FAILED")?C.red:C.mint}]}>{l(exportNotice)}</Text>}
    </>}
   </ScrollView>
   <View style={s.tabbar}>{tabs.map((item,i)=><Pressable key={item} accessibilityRole="tab" accessibilityState={{selected:tab===item}} onPress={()=>setTab(item)} style={[s.tab,tab===item&&s.tabSelected]}>
@@ -351,24 +351,24 @@ function Inspector({fact,observed,verification,onExport,exportNotice}:{fact:Demo
  const isLive=observed!==null;
  const chainState=observed?.status??fact.state;
  const assertions=[
-  ["Task identity",isLive?"RPC task identity · Chain 10143 · read-only":"fixture domain only",true],
-  ["Recorder status",(isLive?(chainState==="Created"?"NotRecorded":"Paid"):fact.recorderClaim)+" · NOT payment proof",true],
-  ["USDC Transfer","not independently observed",false],
-  ["EIP-3009 nonce","not independently observed",false],
-  ["Evidence anchor",verification.startsWith("HASH_MATCHED")?"SHA-256 MATCH (payment unknown)":chainState==="Proven"?"hash available; bytes unchecked":"not established",verification.startsWith("HASH_MATCHED")],
-  ["Reviewed deployment","not registered",false],
+  [l("Task identity"),isLive?l("RPC task identity · Chain 10143 · read-only"):l("fixture domain only"),true],
+  [l("Recorder status"),(isLive?(chainState==="Created"?"NotRecorded":"Paid"):fact.recorderClaim)+l(" · NOT payment proof"),true],
+  [l("USDC Transfer"),l("not independently observed"),false],
+  ["EIP-3009 nonce",l("not independently observed"),false],
+  [l("Evidence anchor"),verification.startsWith("HASH_MATCHED")?l("SHA-256 MATCH (payment unknown)"):chainState==="Proven"?l("hash available; bytes unchecked"):l("not established"),verification.startsWith("HASH_MATCHED")],
+  [l("Reviewed deployment"),l("not registered"),false],
  ] as const;
  const report=observed?taskReadSummary(observed,verification):exportSummary(fact,verification.startsWith("HASH_MATCHED"));
  return <ScrollView style={s.inspector} contentContainerStyle={{padding:28}}>
-  <View style={s.inspectorBrand}><Mark size={38}/><View><Text style={s.inspectorEyebrow}>AGENTLEDGER / REVIEW DESK</Text><Text style={s.inspectorBrandSub}>READ-ONLY OBSERVATION CONSOLE</Text></View></View>
-  <Text style={s.eyebrow}>JUDGE / EVIDENCE VIEW</Text><Text style={s.h2}>Every claim has a boundary.</Text><Text style={s.inspectorIntro}>Inspect the observed facts, their sources and what still needs independent verification.</Text>
-  <View style={[s.notice,{marginTop:18}]}><Text style={{color:C.amber,fontWeight:"700"}}>{isLive?"TESTNET TASK ONLY · PAYMENT UNKNOWN":"LOCAL SIMULATION · NOT TESTNET ACCEPTED"}</Text><Text style={s.small}>{isLive?"Task fetched read-only via verifier. Payment not independently accepted.":"No RPC contacted. No funds spent. No real payment verified."}</Text></View>
-  <InfoHeader index="01" title="Chain context"/><Row label={l("Chain ID")} value={isLive?"10143 (task read)":"10143 (simulated)"}/><Row label={l("Contract")} value={shorten(observed?.contract??fact.ledger)}/><Row label={l("RPC identity")} value={isLive?"local GET verifier → Monad RPC":"testnet-rpc.monad.xyz (label only)"}/><Row label={l("Task ID")} value={shorten(observed?.taskId??fact.taskId)}/><Row label={l("Description")} value={shorten(observed?.descriptionHash??fact.descriptionHash)}/>
-  <InfoHeader index="02" title="Read-only assertions"/>{assertions.map(([title,detail,ok])=><View key={title} style={s.assertion}><Text style={{color:ok?C.mint:C.amber,fontWeight:"800"}}>{ok?"✓":"○"}</Text><View style={{flex:1}}><Text style={s.stepTitle}>{title}</Text><Text style={s.small}>{detail}</Text></View></View>)}
-  <InfoHeader index="03" title="summary.json preview"/><View style={s.jsonBox}><Text style={s.json} selectable>{JSON.stringify(report,null,2)}</Text></View>
-  <Button title="Export summary.json" secondary onPress={onExport}/>
+  <View style={s.inspectorBrand}><Mark size={38}/><View><Text style={s.inspectorEyebrow}>{l("AGENTLEDGER / REVIEW DESK")}</Text><Text style={s.inspectorBrandSub}>{l("READ-ONLY OBSERVATION CONSOLE")}</Text></View></View>
+  <Text style={s.eyebrow}>{l("JUDGE / EVIDENCE VIEW")}</Text><Text style={s.h2}>{l("Every claim has a boundary.")}</Text><Text style={s.inspectorIntro}>{l("Inspect the observed facts, their sources and what still needs independent verification.")}</Text>
+  <View style={[s.notice,{marginTop:18}]}><Text style={{color:C.amber,fontWeight:"700"}}>{l(isLive?"TESTNET TASK ONLY · PAYMENT UNKNOWN":"LOCAL SIMULATION · NOT TESTNET ACCEPTED")}</Text><Text style={s.small}>{l(isLive?"Task fetched read-only via verifier. Payment not independently accepted.":"No RPC contacted. No funds spent. No real payment verified.")}</Text></View>
+  <InfoHeader index="01" title={l("Chain context")}/><Row label={l("Chain ID")} value={l(isLive?"10143 (task read)":"10143 (simulated)")}/><Row label={l("Contract")} value={shorten(observed?.contract??fact.ledger)}/><Row label={l("RPC identity")} value={l(isLive?"local GET verifier → Monad RPC":"testnet-rpc.monad.xyz (label only)")}/><Row label={l("Task ID")} value={shorten(observed?.taskId??fact.taskId)}/><Row label={l("Description")} value={shorten(observed?.descriptionHash??fact.descriptionHash)}/>
+  <InfoHeader index="02" title={l("Read-only assertions")}/>{assertions.map(([title,detail,ok])=><View key={title} style={s.assertion}><Text style={{color:ok?C.mint:C.amber,fontWeight:"800"}}>{ok?"✓":"○"}</Text><View style={{flex:1}}><Text style={s.stepTitle}>{title}</Text><Text style={s.small}>{detail}</Text></View></View>)}
+  <InfoHeader index="03" title={l("summary.json preview")}/><View style={s.jsonBox}><Text style={s.json} selectable>{JSON.stringify(report,null,2)}</Text></View>
+  <Button title={l("Export summary.json")} secondary onPress={onExport}/>
   {!!exportNotice&&<Text style={[s.small,{color:exportNotice.startsWith("EXPORT_FAILED")?C.red:C.mint}]}>{exportNotice}</Text>}
-  <Text style={[s.small,{marginTop:20}]}>Read-only evidence viewer · No signing, payment, execution or automatic recharge.</Text>
+  <Text style={[s.small,{marginTop:20}]}>{l("Read-only evidence viewer · No signing, payment, execution or automatic recharge.")}</Text>
  </ScrollView>;
 }
 export default function App(){
