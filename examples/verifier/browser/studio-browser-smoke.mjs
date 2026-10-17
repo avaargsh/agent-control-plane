@@ -146,14 +146,14 @@ try {
   assert(await page.locator('#payment-fact').innerText()==='PaymentUnknown','tamper demonstration changed payment fact');
   await page.locator('#guide-next').click();
   await page.waitForFunction(()=>document.querySelector('#scenario-heading').textContent==='Payment response missing');
-  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('本地六步演示已完成'));
-  assert((await page.locator('#guide-next').innerText()).includes('可选'),'Public Testnet optional step not distinguished');
+  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('Six offline steps complete'));
+  assert((await page.locator('#guide-next').innerText()).includes('Optional'),'Public Testnet optional step not distinguished');
   const reference=JSON.parse(readFileSync(new URL('../../../phase0/demo-showcase.json',import.meta.url),'utf8'));
   const fixture={...sample.task,status:'Created',taskId:reference.taskId,contract:reference.contract};
   await page.route(/\/api\/task\?/,route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(fixture)}));
   await page.route(/\/api\/task-creation\?/,route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({state:'CONFIRMED',chainId:10143,contract:reference.contract,taskId:reference.taskId,transactionHash:reference.creationTransaction,from:fixture.creator,task:fixture,blockNumber:'100'})}));
   await page.locator('#guide-next').click();
-  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('完整导览完成'));
+  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('Guide complete'));
   assert(await page.locator('[data-guide-step="6"][aria-current="step"]').count()===1,"Optional Testnet step not marked");
   assert(await page.locator('#guide-timeline li').count()===7,"Guide must display seven stages");
   assert((await page.locator('#guide-source').innerText()).includes('OPTIONAL TESTNET'),'Live-source guide label absent');
@@ -190,11 +190,26 @@ try {
   await page.route('**/api/showcase',route=>route.fulfill({status:503,contentType:'application/json',body:'{}'}));
   await page.locator('#guide-reset').click();
   for(let index=1;index<6;index++) await page.locator('#guide-next').click();
-  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('本地六步演示已完成'));
+  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('Six offline steps complete'));
   await page.locator('#guide-next').click();
-  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('可选 Testnet 只读查询未成功'));
+  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('Optional Testnet read failed'));
   assert(await page.locator('#payment-fact').innerText()==='PaymentUnknown','Unavailable public RPC changed payment status');
   assert(await page.locator('#save-summary').isDisabled(),'Unavailable live task can export a fake receipt');
+
+  // Both languages cover static pages AND dynamic scenarios, with persistence.
+  await page.locator('#language-switch').click();
+  assert(await page.locator('html').getAttribute('lang')==='zh-CN','Studio did not switch to Chinese');
+  assert((await page.locator('.hero h1').innerText()).includes('相信证据'),'Studio headline remained English');
+  assert((await page.locator('.nav-items').innerText()).includes('总览'),'Sidebar remained English');
+  await page.locator('#mode-demo').click();
+  await page.locator('[data-scenario="paid"]').click();
+  assert((await page.locator('#scenario-heading').innerText()).includes('记录者'),'Dynamic scenario remained English after switching');
+  await page.reload({waitUntil:'networkidle'});
+  assert(await page.locator('html').getAttribute('lang')==='zh-CN','Studio locale not persisted after refresh');
+  assert((await page.locator('#language-switch').innerText()).includes('English'),'Wrong alternate-language switch label');
+  await page.locator('#language-switch').click();
+  assert(await page.locator('html').getAttribute('lang')==='en','English switch did not restore locale');
+  assert((await page.locator('.hero h1').innerText()).includes('Trust the evidence'),'English headline not restored');
   assert(errors.length===0,"browser page errors: "+errors.join("; "));
   console.log("CHROMIUM STUDIO PASS: seven-step guide (live lookup mocked), real local text calculation/WebCrypto, downloaded/reuploaded Evidence, tamper rejection, stale-read isolation, identity mismatch, PaymentUnknown, responsive mobile. No public RPC or signing.");
 }finally{
