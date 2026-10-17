@@ -45,3 +45,14 @@ main{max-width:1530px;padding-top:30px}.hero{display:grid;grid-template-columns:
 .guide-exit{margin-left:auto;padding:6px 8px;border:0;background:transparent;color:#315b92;font-size:11px;font-weight:650;white-space:nowrap;border-radius:6px}
 .guide-exit:hover{background:#e8effa}
 @media(max-width:650px){.director-progress{flex-wrap:wrap;gap:8px}.director-progress progress{max-width:none;min-width:60px}.guide-exit{padding-inline:6px}}
+
+/* Judge onsite navigation: horizontal mobile sections instead of a hidden menu. */
+@media(max-width:850px){
+  .sidebar{height:auto;position:static;z-index:1}
+  .nav-items{display:flex;gap:5px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:14px 0 0;padding:2px 0 4px}
+  .nav-items::-webkit-scrollbar{display:none}
+  .nav-item{flex:0 0 auto;white-space:nowrap;min-height:40px;font-size:12px;padding:10px 12px}
+  .nav-symbol{font-size:15px;width:16px}
+}
+.director-source{white-space:nowrap;font-size:10px;letter-spacing:.3px;font-weight:750;color:#416592;background:#e4eefc;border:1px solid #c9d9f0;padding:5px 8px;border-radius:6px}
+@media(max-width:650px){.director-source{order:3}.director-progress progress{flex:1}}

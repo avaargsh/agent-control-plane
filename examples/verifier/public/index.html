@@ -55,12 +55,12 @@
         </section>
 
         <section id="demo-guide" class="demo-director" lang="zh-CN" aria-labelledby="guide-title">
-          <div class="director-progress"><span id="guide-counter">完整演示 · 约 3 分钟</span><progress id="guide-progress" max="7" value="0" aria-label="演示进度"></progress><button id="guide-exit" class="guide-exit" type="button" hidden aria-label="退出引导演示">退出导览 ×</button></div>
+          <div class="director-progress"><span id="guide-counter">完整演示 · 约 3 分钟</span><progress id="guide-progress" max="7" value="0" aria-label="演示进度"></progress><span id="guide-source" class="director-source">LOCAL SIMULATION · NO WALLET</span><button id="guide-exit" class="guide-exit" type="button" hidden aria-label="退出引导演示">退出导览 ×</button></div>
           <div class="director-body"><div><h2 id="guide-title">从任务记录到可以复核的证据。</h2><p id="guide-description">逐步展示支付声明、本地工具结果、SHA-256 验证与异常恢复，最后读取真实测试网任务。前六步不花费 gas。</p><p id="guide-result" class="director-result" role="status" aria-live="polite"></p></div>
           <div class="director-actions"><button id="guide-prev" type="button" class="button secondary" disabled>上一步</button><button id="guide-next" type="button" class="button primary">开始完整演示</button><button id="guide-reset" type="button" class="button secondary">重新开始</button></div></div>
         </section>
 
-        <section class="live-demo-card" lang="zh-CN" aria-label="真实测试网演示入口"><div><h2>已有一条真实链上任务。</h2><p>一键核对创建交易，再读取当前链上状态。无需钱包，不会发送新交易。</p><p id="showcase-message" class="response" role="status" aria-live="polite">真实状态以本次 RPC 查询结果为准。</p></div><button id="load-showcase" type="button" class="button secondary">读取真实测试网任务</button></section>
+        <section class="live-demo-card" lang="zh-CN" aria-label="真实测试网演示入口"><div><h2>已有一条真实链上任务。</h2><p>可选只读核对创建交易和当前链上状态；无钱包、无新交易。离线六步演示不依赖此查询。</p><p id="showcase-message" class="response" role="status" aria-live="polite">真实状态以本次 RPC 查询结果为准。</p></div><button id="load-showcase" type="button" class="button secondary">读取真实测试网任务</button></section>
 
         <section id="proof-journey" class="section proof-journey" aria-labelledby="journey-title">
           <div class="section-head"><div><span class="overline">THE PROOF JOURNEY</span><h2 id="journey-title">Three steps. Two independent facts.</h2></div><p class="section-sub">A recorder claim is not a USDC receipt. A digest match is not proof of correct Agent execution.</p></div>
@@ -106,7 +106,7 @@
               <div class="observation-header"><div><span class="overline">CURRENT OBSERVATION</span><h3 id="observation-title">Created task</h3></div><span id="ledger-badge" class="state-pill">CREATED</span></div>
               <div class="fact-list">
                 <div class="fact-item"><div class="fact-head"><span>Ledger status</span><span id="chain-flag" class="fact-source">SIMULATED</span></div><strong id="chain-state">Created</strong><small>Contract-reported state, not full settlement validation</small></div>
-                <div class="fact-item"><div class="fact-head"><span>Payment observation</span><span class="fact-source">USDC RECEIPT</span></div><strong id="payment-fact" class="text-warn">PaymentUnknown</strong><small id="payment-detail">No independent Transfer + AuthorizationUsed + quote proof</small><div class="fact-metadata"><span>Transfer</span><code id="payment-transfer">NOT VERIFIED</code><span>AuthorizationUsed / Nonce</span><code id="payment-nonce">NOT VERIFIED</code></div></div>
+                <div class="fact-item"><div class="fact-head"><span>Payment observation</span><span class="fact-source">RECEIPT NOT VERIFIED</span></div><strong id="payment-fact" class="text-warn">PaymentUnknown</strong><small id="payment-detail">No independent Transfer + AuthorizationUsed + quote proof</small><div class="fact-metadata"><span>Transfer</span><code id="payment-transfer">NOT VERIFIED</code><span>AuthorizationUsed / Nonce</span><code id="payment-nonce">NOT VERIFIED</code></div></div>
                 <div class="fact-item"><div class="fact-head"><span>Evidence fact</span><span class="fact-source">SHA-256</span></div><strong id="evidence-fact">Not anchored</strong><small id="evidence-detail">Check original bytes to establish digest equality</small></div>
               </div>
               <div class="readonly-warning"><span>ⓘ</span><p><strong>No recharge.</strong> Unknown payment does not mean unpaid. ACP exclusively owns Agent execution and recovery.</p></div>

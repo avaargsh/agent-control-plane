@@ -86,6 +86,9 @@ function switchMode(mode) {
   strong.textContent = mode === 'demo' ? 'LOCAL SIMULATION' : 'PUBLIC TESTNET STATE ONLY';
   description.textContent = mode === 'demo' ? 'Browser-local tool calculation and illustrative ledger data. No public transaction or USDC payment.' : 'Read-only chain query. Paid / Proven are Recorder and hash-anchor claims, NOT independently verified settlement.';
   byId('source-note').replaceChildren(strong, description); clearTask();
+  text('guide-source', mode === 'demo' ? 'LOCAL SIMULATION · NO WALLET'
+    : document.body.classList.contains('guided-demo-active') ? 'OPTIONAL TESTNET · READ ONLY' : 'TESTNET · READ ONLY');
+  if (mode === 'demo') message('showcase-message', '真实状态以本次 RPC 查询结果为准。');
   if (mode === 'demo') return showScenario('created');
 }
 async function showScenario(key) {
@@ -154,10 +157,14 @@ async function loadShowcase() {
     if (sequence !== lookupSequence || currentMode !== 'live') return false;
     byId('contract').value = reference.contract; byId('taskId').value = reference.taskId;
     const loaded = await queryTask(reference.contract, reference.taskId, reference.creationTransaction);
+    if (currentMode !== 'live' || lookupSequence !== sequence + 1) return false;
     if (loaded) message('showcase-message', '本次链上状态：' + loadedTask.status + '；创建交易已核对，支付仍未验证。', 'success');
     else message('showcase-message', '本次未完成链上核对，请查看查询提示。不会回退为模拟成功。', 'error');
     return loaded;
-  } catch (error) { message('showcase-message', error.message, 'error'); return false; }
+  } catch (error) {
+    if (currentMode === 'live' && lookupSequence === sequence) message('showcase-message', error.message, 'error');
+    return false;
+  }
   finally { byId('load-showcase').disabled = false; }
 }
 function verificationContext() {
@@ -240,16 +247,22 @@ function guideButtons() {
   byId('guide-prev').disabled = guideBusy || guideIndex <= 0;
   byId('guide-next').disabled = guideBusy;
   byId('guide-reset').disabled = guideBusy;
-  byId('guide-next').textContent = guideBusy ? '正在核对…' : guideIndex < 0 ? '开始完整演示' : guideIndex === DEMO_STEPS.length - 1 ? '重新核对真实任务' : '下一步';
+  byId('guide-next').textContent = guideBusy ? '正在核对…' : guideIndex < 0 ? '开始本地演示' : guideIndex === DEMO_STEPS.length - 1 ? '重试可选 Testnet 查询' : guideIndex === DEMO_STEPS.length - 2 ? '可选：读取真实 Testnet' : '下一步';
 }
 function cancelGuide(reset = false) {
+  const wasBusy = guideBusy;
   guideGeneration++; guideBusy = false;
+  if (reset && wasBusy && currentMode === 'live') {
+    lookupSequence++; liveAbort?.abort(); clearTask();
+    message('showcase-message', '已取消等待中的只读查询；未取得新的 Testnet 事实。');
+  }
   // Manual file verification pauses the presentation but must retain the
   // next step. Only the explicit Exit action resets the journey.
   if (reset) {
     guideIndex = -1;
     byId('guide-progress').value = 0;
     text('guide-counter', '完整演示 · 约 3 分钟');
+    text('guide-source', currentMode === 'live' ? 'TESTNET · READ ONLY' : 'LOCAL SIMULATION · NO WALLET');
   }
   document.body.classList.remove('guided-demo-active');
   byId('guide-exit').hidden = true;
@@ -264,6 +277,7 @@ async function runGuide(index) {
   guideIndex = Math.min(Math.max(index, 0), DEMO_STEPS.length - 1);
   const step = DEMO_STEPS[guideIndex];
   text('guide-counter', `完整演示 · ${guideIndex + 1} / ${DEMO_STEPS.length}`);
+  text('guide-source', step.action === 'live' ? 'OPTIONAL TESTNET · READ ONLY' : 'LOCAL SIMULATION · NO WALLET');
   byId('guide-progress').value = guideIndex + 1;
   text('guide-title', step.title); text('guide-description', step.text); text('guide-result', '正在准备此步骤…'); guideButtons();
   try {
@@ -275,7 +289,15 @@ async function runGuide(index) {
       if (success && ['verify', 'tamper'].includes(step.action)) success = await runSampleProof(step.action === 'tamper');
     }
     if (generation !== guideGeneration) return;
-    text('guide-result', success ? step.action === 'live' ? '真实创建交易与任务已重新核对。完整导览完成；支付与证据锚定尚未完成。' : step.action === 'verify' ? '原始输入、输出和 Evidence 全部匹配。' : step.action === 'tamper' ? '篡改后的输出已被拒绝。支付结论保持不变。' : step.action === 'proven' ? '本地工具输出已生成，可以下载原始文件并独立复核。' : '此步骤已加载；数据来源与当前事实见下方。' : '此步骤尚未核对成功，请查看提示后重试。');
+    text('guide-result', step.action === 'live'
+      ? (success ? '真实创建交易与任务已重新核对。完整导览完成；支付仍未独立验证。'
+        : '本地六步演示已完成（模拟）。可选 Testnet 只读查询未成功；不回退为链上成功，也不重新付款。')
+      : !success ? '此步骤尚未核对成功，请查看提示后重试。'
+      : step.action === 'lost-ack' ? '本地六步演示已完成（模拟）：Lost ACK → PaymentUnknown → NO RECHARGE。下一步真实 Testnet 查询为可选项。'
+      : step.action === 'verify' ? '原始输入、输出和 Evidence 全部匹配；并不证明支付成功。'
+      : step.action === 'tamper' ? '篡改后的输出已被拒绝。支付结论保持不变。'
+      : step.action === 'proven' ? '本地工具输出已生成，可以下载原始文件并独立复核。'
+      : '此步骤已加载；数据来源与当前事实见下方。');
     if (step.action !== 'live') byId('studio-title').scrollIntoView({ behavior: 'auto', block: 'start' });
   } catch (error) { if (generation === guideGeneration) text('guide-result', '演示未完成：' + error.message); }
   finally { if (generation === guideGeneration) { guideBusy = false; guideButtons(); } }
