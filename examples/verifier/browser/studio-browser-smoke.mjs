@@ -85,6 +85,8 @@ try {
   await page.locator("#mode-live").click();
   assert((await page.locator("#source-note").innerText()).includes("PUBLIC TESTNET STATE ONLY"),
     "mode switch did not show source boundary");
+  assert((await page.locator('#guide-source').innerText()).includes('TESTNET'),
+    'Guide source cannot contradict manual Testnet selection');
   assert(await page.locator("#verify-button").isDisabled(),"stale simulated proof survived mode switch");
   await page.locator("#mode-demo").click();
 
