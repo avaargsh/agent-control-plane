@@ -45,6 +45,23 @@ try{
  await page.goto(origin,{waitUntil:"networkidle"});
  await page.getByText("Your agent tasks",{exact:true}).waitFor();
  await page.getByText("JUDGE / EVIDENCE VIEW",{exact:true}).waitFor();
+ // User-facing pitch path: no tab knowledge or operator memorized clicks.
+ await page.getByRole("button",{name:"Start guided demo"}).click();
+ await page.getByText("TASK / CREATED",{exact:true}).waitFor();
+ await page.getByRole("button",{name:"Next · Observe Recorder Paid"}).click();
+ await page.getByText("SETTLEMENT / RECORDER CLAIM",{exact:true}).waitFor();
+ await page.getByText("PaymentUnknown",{exact:true}).first().waitFor();
+ await page.getByRole("button",{name:"Next · Inspect Evidence"}).click();
+ await page.getByText("EVIDENCE / ANCHOR",{exact:true}).waitFor();
+ await page.getByRole("button",{name:"Next · Verify SHA-256 locally"}).click();
+ await page.getByText("SIMULATED HASH MATCH · VERIFIED BY SHA-256").waitFor();
+ await page.getByRole("button",{name:"Next · Open audit summary"}).click();
+ await page.getByText("Recent observations").waitFor();
+ await page.getByRole("button",{name:"Next · Show lost ACK"}).click();
+ await page.getByText("SAFETY / LOST ACK").waitFor();
+ await page.getByText("PaymentUnknown",{exact:true}).first().waitFor();
+ await page.getByRole("button",{name:"Next · Restart demo"}).click();
+ await page.getByText("TASK / CREATED",{exact:true}).waitFor();
  await page.getByText("Paid claim",{exact:true}).first().click();
  await page.getByText("PaymentUnknown",{exact:false}).first().waitFor();
  await page.getByText("Evidence",{exact:true}).first().click();
