@@ -117,6 +117,7 @@ try {
   assert(await page.evaluate(()=>getComputedStyle(document.querySelector('.director-actions')).position!=='fixed'),
     "exiting mobile guide must release fixed controls");
   assert(await page.locator('#guide-exit').isHidden(),"guide exit should hide after dismissal");
+  assert(await page.locator('[data-guide-step][aria-current="step"]').count()===0,"Guide exit retained an active step");
   // Complete presenter journey. Testnet reads below are explicitly mocked;
   // all local stages still use the real browser tool calculation/WebCrypto.
   await page.setViewportSize({width:1440,height:1000});
@@ -153,6 +154,8 @@ try {
   await page.route(/\/api\/task-creation\?/,route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({state:'CONFIRMED',chainId:10143,contract:reference.contract,taskId:reference.taskId,transactionHash:reference.creationTransaction,from:fixture.creator,task:fixture,blockNumber:'100'})}));
   await page.locator('#guide-next').click();
   await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('完整导览完成'));
+  assert(await page.locator('[data-guide-step="6"][aria-current="step"]').count()===1,"Optional Testnet step not marked");
+  assert(await page.locator('#guide-timeline li').count()===7,"Guide must display seven stages");
   assert((await page.locator('#guide-source').innerText()).includes('OPTIONAL TESTNET'),'Live-source guide label absent');
   assert(await page.locator('#chain-state').innerText()==='Created','mocked live guide result missing');
   assert(await page.locator('#creation-transaction').isVisible(),'creation provenance link missing');
