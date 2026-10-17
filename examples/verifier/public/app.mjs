@@ -244,6 +244,9 @@ function guideButtons() {
 }
 function cancelGuide() {
   guideGeneration++; guideBusy = false;
+  guideIndex = -1;
+  byId('guide-progress').value = 0;
+  text('guide-counter', '完整演示 · 约 3 分钟');
   document.body.classList.remove('guided-demo-active');
   byId('guide-exit').hidden = true;
   text('guide-result', '已退出导览；当前为手动查看。');
