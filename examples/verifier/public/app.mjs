@@ -86,6 +86,7 @@ function switchMode(mode) {
   strong.textContent = mode === 'demo' ? 'LOCAL SIMULATION' : 'PUBLIC TESTNET STATE ONLY';
   description.textContent = mode === 'demo' ? 'Browser-local tool calculation and illustrative ledger data. No public transaction or USDC payment.' : 'Read-only chain query. Paid / Proven are Recorder and hash-anchor claims, NOT independently verified settlement.';
   byId('source-note').replaceChildren(strong, description); clearTask();
+  text('guide-source', mode === 'demo' ? 'LOCAL SIMULATION · NO WALLET' : 'TESTNET · READ ONLY');
   if (mode === 'demo') message('showcase-message', '真实状态以本次 RPC 查询结果为准。');
   if (mode === 'demo') return showScenario('created');
 }
@@ -260,7 +261,7 @@ function cancelGuide(reset = false) {
     guideIndex = -1;
     byId('guide-progress').value = 0;
     text('guide-counter', '完整演示 · 约 3 分钟');
-    text('guide-source', 'LOCAL SIMULATION · NO WALLET');
+    text('guide-source', currentMode === 'live' ? 'TESTNET · READ ONLY' : 'LOCAL SIMULATION · NO WALLET');
   }
   document.body.classList.remove('guided-demo-active');
   byId('guide-exit').hidden = true;
