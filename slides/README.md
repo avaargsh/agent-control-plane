@@ -1,6 +1,6 @@
 # AgentLedger presentations
 
-There are **two presentations**, both sourced from this repo's `dev` branch.
+There are **two presentations**, both included with the portable project sources.
 
 | Source | Purpose | Talk length |
 |---|---|---|
@@ -53,3 +53,7 @@ native release. The reviewed-deployment registry remains empty.
 The old `slides.md` is retained for judge Q&A; do not present all of
 its pages before the demo. Presenter notes in `judge.md` include
 approximate timings.
+
+## Manual hackathon submission
+
+Use [the MOJO handoff checklist](../docs/monad-blitz-submission.md) and `npm run submit:check` before copying a reviewed version to the final repository. Judge slides intentionally do not display any development-repository or target-submission repository URL. Neither presentation claims real Testnet USDC payment acceptance.
