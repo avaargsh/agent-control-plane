@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 export const PRESENTATION_FILES = Object.freeze([
   "examples/verifier/public/index.html",
   "examples/verifier/tools/deploy.html",
-  "slides/judge.md",
+  "slides/judge.md", "slides/judge.en.md",
   "slides/slides.md",
 ]);
 const HANDOFF_FILES = Object.freeze([
