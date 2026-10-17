@@ -20,7 +20,7 @@ Use a browser with MetaMask enabled for signing. For remote development, forward
 
 You can run the services separately with `npm start` and `npm run deploy:testnet`. `npm run dev` owns only its own processes and stops both on Ctrl+C. It does not terminate existing services using those ports.
 
-## Presenter-ready Pocket + pitch (dev)
+## Presenter-ready Pocket + pitch
 
 For a judge presentation, **do not start with the long engineering slides**:
 
@@ -45,7 +45,7 @@ is blocked without an approved reviewed deployment.
 
 ## Complete demo (about three minutes)
 
-Open **<http://127.0.0.1:4322/demo>** and click **开始完整演示**. No wallet is needed for this walkthrough.
+Open **<http://127.0.0.1:4322/demo>** and click **开始本地演示**. The first six steps are offline and wallet-free; the seventh is a strictly optional read-only Testnet lookup.
 
 | Step | What the audience sees | Source |
 | --- | --- | --- |
@@ -55,13 +55,17 @@ Open **<http://127.0.0.1:4322/demo>** and click **开始完整演示**. No walle
 | 4. Evidence | Exact input/output plus canonical Evidence SHA-256 match | Browser WebCrypto; simulated anchor |
 | 5. Tampering | Changing one output byte is rejected | Actual local verification |
 | 6. Lost ACK | Unknown outcome never becomes an automatic recharge | Local simulation |
-| 7. Public task | The pinned creation transaction and current task are queried afresh | Real Monad Testnet read-only RPC |
+| 7. Optional public task | The pinned creation transaction and current task are queried afresh, if RPC is reachable | Real Monad Testnet read-only RPC; independent from the six-step offline demo |
 
 The final step uses `phase0/demo-showcase.json` as a public identity reference, **not** an approval registry or cached claim of current success. RPC errors and identity mismatches remain visible failures. The **读取真实测试网任务** shortcut jumps to that check; **测试网工作台** opens wallet-assisted deployment and creation.
 
 From the local Proven scenario you can download `evidence.json`, `input.txt`, and `output.json`, then upload them to reproduce the check. **篡改一个输出字节并验证** demonstrates rejection; verifying the original sample again restores the match. `summary.json` separates simulation from real observations and includes read time and verified creation provenance when available. The share link is read-only and carries no wallet authority.
 
 Use **上一步**, **下一步**, or **重新开始** to present at your own pace. Restarting the walkthrough resets only the local simulation; it never deletes wallet journals or repeats a public transaction. On mobile these controls remain at the bottom of the screen. See the [presenter script](docs/demo-walkthrough.md).
+
+## Monad Blitz manual handoff
+
+See [MOJO submission readiness and official developer references](docs/monad-blitz-submission.md). Check portable presentation links and local sensitive files using `npm run submit:check`. This command is offline-only: it never pushes a repository, signs a transaction or submits to MOJO. The final competition repository is managed and published manually by the participant.
 
 ## Testnet walkthrough
 
@@ -133,6 +137,7 @@ separate Phase 0 signed-intent/precharge workflow succeeds. See
 ```bash
 npm test                 # Node + SDK + Python; failures return nonzero
 npm run onsite:check     # Offline readiness.json preview; no wallet, no signature
+npm run submit:check     # Manual handoff guard: portable slides/UI and no sensitive files
 npm run test:pocket      # Pocket TypeScript + portable SHA-256 unit tests
 npm run test:pocket:typecheck
 npm run test:browser     # Studio simulation in real headless Chromium
