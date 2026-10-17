@@ -5,6 +5,7 @@ import {pickLocalDocument} from "./src/local-files";
 import {DocumentKind,PickedLocalFile,parseEvidenceBytes,readPickedDocument} from "./src/file-contract";
 import {TaskRead,observeTaskReadOnly,taskReadSummary} from "./src/observe";
 import {saveSummaryJson} from "./src/export-summary";
+import {PRESENTER_LABELS,PRESENTER_STAGES,presenterIndex,presenterNext,presenterPrevious} from "./src/presenter-journey";
 import {Platform, SafeAreaView, ScrollView, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions} from "react-native";
 import {StatusBar} from "expo-status-bar";
 import {DemoFact, FACTS, Stage, shorten, exportSummary} from "./src/facts";
@@ -59,6 +60,7 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
  onExport:()=>void;exportNotice:string;
 }){
  const [tab,setTab]=useState<Tab>("tasks"),[verified,setVerified]=useState(false);
+ const [presenting,setPresenting]=useState(false);
  const [contract,setContract]=useState(""),[taskId,setTaskId]=useState("");
  const [lookupState,setLookupState]=useState(""),[lookupBusy,setLookupBusy]=useState(false);
  const [evidenceJson,setEvidenceJson]=useState("");
@@ -197,14 +199,44 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
   setVerificationError("");
   setTab(next==="evidence"?"evidence":next==="unknown"?"payment":"tasks");
  };
+ function gotoPresenter(next:Stage){
+  choose(next);
+  setTab(next==="created"?"tasks":next==="evidence"?"evidence":"payment");
+ }
+ function startPresenter(){
+  setPresenting(true);
+  gotoPresenter("created"); // reset local demo only, not wallet journals
+ }
  return <SafeAreaView style={s.phone}>
   <StatusBar style="light"/>
   <View style={s.header}><View style={s.brandGroup}><Mark/><View><Text style={s.brand}>agentledger<Text style={{color:C.purple}}>.</Text></Text><Text style={s.kicker}>PROOF STUDIO · POCKET</Text></View></View><Chip text={live?"TASK READ-ONLY":"SIMULATED"} tone="amber"/></View>
+  {presenting&&<View style={s.presenterStrip} accessibilityLabel="Local simulated guided demonstration">
+   <View style={s.presenterTop}>
+    <Text style={s.presenterEyebrow}>GUIDED DEMO · LOCAL SIMULATION ONLY</Text>
+    <Pressable accessibilityRole="button" onPress={()=>setPresenting(false)}><Text style={s.presenterClose}>×</Text></Pressable>
+   </View>
+   <View style={s.presenterProgress}>{PRESENTER_STAGES.map((item,i)=>
+    <View key={item} style={[s.presenterSegment,i<=presenterIndex(stage)&&s.presenterSegmentOn]}/>)}</View>
+   <View style={s.presenterActions}>
+    <Pressable accessibilityRole="button" accessibilityLabel="Guide back" disabled={presenterIndex(stage)===0}
+      onPress={()=>gotoPresenter(presenterPrevious(stage))}>
+      <Text style={[s.presenterAction,presenterIndex(stage)===0&&{opacity:.35}]}>← {t("Back","上一步")}</Text>
+    </Pressable>
+    <Text style={s.presenterCurrent}>{ZH?PRESENTER_LABELS[stage].zh:PRESENTER_LABELS[stage].en}</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel="Guide next"
+      disabled={presenterIndex(stage)===PRESENTER_STAGES.length-1}
+      onPress={()=>gotoPresenter(presenterNext(stage))}>
+      <Text style={[s.presenterAction,presenterIndex(stage)===PRESENTER_STAGES.length-1&&{opacity:.35}]}>{t("Next","下一步")} →</Text>
+    </Pressable>
+   </View>
+   <Text style={s.presenterCaution}>PaymentUnknown · NO RECHARGE · NOT TESTNET PAYMENT ACCEPTANCE</Text>
+  </View>}
   <ScrollView style={s.scroller} contentContainerStyle={{padding:20,paddingBottom:42}}>
    <View style={s.headline}><Text style={s.eyebrow}>WORKSPACE / {tab.toUpperCase()} <Text style={{color:C.mint}}> · READ ONLY</Text></Text><Text style={s.h1}>{tab==="tasks"?"Your agent tasks":tab==="payment"?"Payment clarity":tab==="evidence"?"Proof, not promises":"Your activity"}</Text>
     <Text style={s.lede}>{live?t("Read-only chain task. USDC, signed intent and deployment review remain unverified.","链上任务状态来自只读查询；USDC 转账、付款授权及部署审查尚未独立核验。"):t("Offline demo. Recorder status is not independent payment proof.","模拟场景无需网络。链上 Recorder 状态不代表独立支付事实。")}</Text></View>
    {tab==="tasks"&&<>
     <Hero state={state} live={live}/>
+    {!presenting&&<Button title={t("▶ Start 3-minute guided demo","▶ 开始三分钟演示")} onPress={startPresenter}/>}
     <InfoHeader index="01" title={t("Current task","当前任务")} sub={t("A clear record of what the ledger actually claims.","只展示合约声明，不混淆链上事实。")}/>
     <View style={s.card}><View style={s.inline}><Text style={s.cardTitle}>{live?"Observed Task":"Agent Task 023"}</Text><Chip text={state} tone={state==="Proven"?"mint":"purple"}/></View>
      <Text style={s.muted}>A task you can inspect, not a task you can spend on.</Text>
@@ -343,6 +375,17 @@ export default function App(){
  return <View style={[s.root,desktop&&s.wide]}>{desktop?<><View style={s.phoneFrame}><Phone stage={stage} setStage={setStage} observed={observed} onObserve={setObserved} onVerified={setVerification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice}/></View><View style={s.inspectorFrame}><Inspector fact={FACTS[stage]} observed={observed} verification={verification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice}/></View></>:<Phone stage={stage} setStage={setStage} observed={observed} onObserve={setObserved} onVerified={setVerification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice}/>}</View>;
 }
 const s=StyleSheet.create({
+ presenterStrip:{paddingHorizontal:18,paddingTop:11,paddingBottom:10,backgroundColor:"#EDF0FE",borderBottomColor:C.line,borderBottomWidth:1},
+ presenterTop:{flexDirection:"row",alignItems:"center",justifyContent:"space-between"},
+ presenterEyebrow:{fontSize:9,fontWeight:"800",letterSpacing:1.0,color:C.purple},
+ presenterClose:{color:C.sub,fontSize:21,fontWeight:"700",paddingHorizontal:10},
+ presenterProgress:{flexDirection:"row",gap:5,marginTop:6,marginBottom:6},
+ presenterSegment:{flex:1,height:4,borderRadius:4,backgroundColor:"#CFD6EC"},
+ presenterSegmentOn:{backgroundColor:C.purple},
+ presenterActions:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:6},
+ presenterAction:{fontSize:12,fontWeight:"800",color:C.purple},
+ presenterCurrent:{fontSize:10,fontWeight:"800",color:C.ink,flexShrink:1,textAlign:"center"},
+ presenterCaution:{fontSize:9,color:C.amber,fontWeight:"700",marginTop:6,textAlign:"center"},
  root:{flex:1,backgroundColor:"#EBEEF5"},
  wide:{flexDirection:"row",justifyContent:"center",alignItems:"center",gap:34,padding:28,backgroundColor:"#ECF0F7"},
  phoneFrame:{height:"100%",maxHeight:880,width:400,borderWidth:8,borderRadius:42,borderColor:"#1D2742",overflow:"hidden",backgroundColor:C.bg,shadowColor:"#10214B",shadowOpacity:.18,shadowRadius:36,shadowOffset:{width:0,height:18}},
