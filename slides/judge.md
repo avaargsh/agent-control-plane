@@ -9,12 +9,13 @@ info: |
 ---
 
 <div class="al-pitch-cover">
-  <div class="al-pitch-kicker">MONAD × x402 · AGENTLEDGER · PHASE 0</div>
+  <div class="al-pitch-kicker">AGENTLEDGER · MONAD × x402 · JUDGE DEMO</div>
   <h1>Pay → Execute → <span>Prove.</span></h1>
   <p>Agent 能为任务收费了。<br>但<strong>谁证明付款、执行与结果</strong>分别发生了？</p>
   <div class="al-pitch-tags">
-    <span>Task identity</span><span>Payment observation</span><span>Evidence SHA-256</span>
+    <span>01 · Task</span><span>02 · PaymentUnknown</span><span>03 · Evidence</span>
   </div>
+  <div class="al-pitch-flow">3 分钟短讲 <b>→</b> Pocket 四步导览 <b>→</b> Studio 六步离线验证 + 可选 Testnet 只读</div>
   <div class="al-pitch-warning">原型 · 公网只读任务已观察 · 真实 USDC 付款验收尚未完成</div>
 </div>
 
@@ -56,7 +57,7 @@ layout: default
  <div class="al-pitch-right">
   <div class="al-pitch-card"><b>AgentLedger Pocket</b><p>移动端任务与证据旅程；桌面端显示 Inspector 和 summary.json。</p></div>
   <div class="al-pitch-card"><b>Verification Studio + SDK</b><p>只读 <code>observe / verify / reconcile</code>，严格检查链 ID、合约、任务和哈希。</p></div>
-  <div class="al-pitch-card green"><b>ACP owns execution</b><p>Lease、重试、AgentRun、执行证明继续属于已有 Control Plane。</p></div>
+  <div class="al-pitch-card green"><b>No hidden payment authority</b><p>展示端只读、哈希在本地核验；不发起扣款或 Agent 任务执行。</p></div>
  </div>
 </div>
 <div class="al-pitch-bottom">Ledger 是结算与存证适配层，不是第二个 Agent Runtime。</div>
@@ -75,7 +76,9 @@ layout: default
  <div class="al-pitch-stage"><i>03</i><strong>Evidence</strong><p>选择 JSON + 原始文件，SHA-256 校验</p></div>
  <div class="al-pitch-stage"><i>04</i><strong>Lost ACK</strong><p>结果不明 → 不重扣、不放行</p></div>
 </div>
-<div class="al-pitch-demo-bar">Pocket → <b>▶ Start 3-minute guided demo</b> → Next / Back · 最后导出 <b>summary.json</b></div>
+<div class="al-pitch-demo-bar"><span>Pocket：Start guide → Next / Back → Lost ACK → <b>summary.json</b></span>
+<a href="http://127.0.0.1:8081" target="_blank" rel="noopener noreferrer">打开 Pocket ↗</a>
+<a href="http://127.0.0.1:4322/demo" target="_blank" rel="noopener noreferrer">完整 Demo ↗</a></div>
 <div class="al-pitch-two">
  <div><b class="al-mint">模拟的事实</b><p>本地哈希实际计算；改变原始字节就拒绝；没有钱包调用。</p></div>
  <div><b class="al-amber">公网的事实</b><p>已有真实 Testnet 的 <em>Created</em> 只读任务观察；没有真实付款 PASS。</p></div>
@@ -120,7 +123,7 @@ layout: default
   <p>生产发布、公开 npm SDK</p>
  </div>
 </div>
-<div class="al-pitch-bottom">单一输出：<b>summary.json</b> · 来源、chainId、contract、task、nonce、evidenceHash 与验证结论均可审查。</div>
+<div class="al-pitch-bottom">可带走的证据：<b>summary.json</b> · 来源、chainId、contract、task、nonce、evidenceHash 与验证边界。付款仍为 PaymentUnknown。</div>
 
 <!-- 2:35–2:50。只挑关键边界讲，不把 CI 成功解读成支付成功。 -->
 
@@ -133,7 +136,7 @@ class: text-center
  <div class="al-pitch-kicker">AGENTLEDGER · NEXT MILESTONE</div>
  <h1>From claims<br><em>to verifiable facts.</em></h1>
  <p>Reviewed deployment → Real Testnet USDC → Independent reconciliation → Audited Evidence</p>
- <div class="al-pitch-warning">现在可演示；真实付款闭环仍需独立验收。</div>
+ <div class="al-pitch-warning">可以现场演示本地校验 + Testnet Created 只读；真实 USDC 付款闭环仍未验收。</div>
  <div class="al-pitch-warning">现场入口：/demo · Pocket Web · summary.json</div>
 </div>
 
