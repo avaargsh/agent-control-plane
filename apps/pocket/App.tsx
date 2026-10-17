@@ -40,7 +40,7 @@ function Hero({state,live}:{state:string;live:boolean}){
     <View style={s.heroTop}><Text style={s.heroLabel}>AGENT PROOF / 01</Text><Text style={s.heroStamp}>↗</Text></View>
     <Text style={s.heroTitle}>{t("Your work.\nVerifiable.","每次执行，\n都有据可查。")}</Text>
     <Text style={s.heroBody}>{t("One place for the task, the payment observation and its evidence.","从任务到支付观察、再到证据核验，一目了然。")}</Text>
-    <View style={s.heroBottom}><View style={s.heroStatusDot}/><Text style={s.heroFoot}>{live?"TESTNET · TASK OBSERVED":"LOCAL DEMONSTRATION"}</Text><View style={s.heroFootRight}><Text style={s.heroFootRightText}>{state.toUpperCase()}</Text></View></View>
+    <View style={s.heroBottom}><View style={[s.heroStatusDot,{backgroundColor:live?"#90B8FF":"#A7B0CB"}]}/><Text style={s.heroFoot}>{live?"TESTNET · TASK OBSERVED":"LOCAL DEMONSTRATION"}</Text><View style={s.heroFootRight}><Text style={s.heroFootRightText}>{state.toUpperCase()}</Text></View></View>
   </View>;
 }
 function InfoHeader({index,title,sub}:{index:string;title:string;sub?:string}){
@@ -208,7 +208,7 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
   gotoPresenter("created"); // reset local demo only, not wallet journals
  }
  return <SafeAreaView style={s.phone}>
-  <StatusBar style="light"/>
+  <StatusBar style="dark"/>
   <View style={s.header}><View style={s.brandGroup}><Mark/><View><Text style={s.brand}>agentledger<Text style={{color:C.purple}}>.</Text></Text><Text style={s.kicker}>PROOF STUDIO · POCKET</Text></View></View><Chip text={live?"TASK READ-ONLY":"SIMULATED"} tone="amber"/></View>
   {presenting&&<View style={s.presenterStrip} accessibilityLabel="Local simulated guided demonstration">
    <View style={s.presenterTop}>
@@ -335,7 +335,7 @@ function Inspector({fact,observed,verification,onExport,exportNotice}:{fact:Demo
  const isLive=observed!==null;
  const chainState=observed?.status??fact.state;
  const assertions=[
-  ["Task identity","fixture domain only",true],
+  ["Task identity",isLive?"RPC task identity · Chain 10143 · read-only":"fixture domain only",true],
   ["Recorder status",(isLive?(chainState==="Created"?"NotRecorded":"Paid"):fact.recorderClaim)+" · NOT payment proof",true],
   ["USDC Transfer","not independently observed",false],
   ["EIP-3009 nonce","not independently observed",false],
