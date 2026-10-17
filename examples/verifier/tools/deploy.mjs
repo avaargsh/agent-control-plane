@@ -1,7 +1,9 @@
+import { initLanguage } from '../public/locale.mjs';
 import { createWalletConnection } from './wallet-connection.mjs';
 import { createTransactionJournal, prepareTask, readTaskCreation, verifyTransaction } from './testnet-transactions.mjs';
 
 const $ = id => document.getElementById(id);
+initLanguage({ fallback: 'zh' });
 const KEY = 'agentledger.monad-testnet.deployment.v1';
 const address = /^0x[0-9a-fA-F]{40}$/;
 let artifact;
