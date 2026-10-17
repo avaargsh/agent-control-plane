@@ -45,6 +45,29 @@ try{
  await page.goto(origin,{waitUntil:"networkidle"});
  await page.getByText("Your agent tasks",{exact:true}).waitFor();
  await page.getByText("JUDGE / EVIDENCE VIEW",{exact:true}).waitFor();
+ // New judge-facing deterministic flow, matching slides/judge.md.
+ await page.getByRole("button",{name:/Start 3-minute guided demo/}).click();
+ await page.getByText("GUIDED DEMO · LOCAL SIMULATION ONLY").waitFor();
+ for(const expected of ["02 · Recorder Paid claim","03 · Evidence / Verify","04 · Lost ACK / No recharge"]){
+   await page.getByRole("button",{name:"Guide next"}).click();
+   await page.getByText(expected,{exact:true}).waitFor();
+   await page.getByText(/PaymentUnknown/).first().waitFor();
+ }
+ if(!await page.getByRole("button",{name:"Guide next"}).isDisabled())
+   throw Error("Guided demonstration ran past no-recharge endpoint");
+ await page.getByRole("button",{name:"Guide back"}).click();
+ await page.getByText("03 · Evidence / Verify",{exact:true}).waitFor();
+ await page.getByRole("button",{name:"Guide next"}).click();
+ // Close guide; restore familiar Task tab for the existing regression suite.
+ await page.getByRole("button",{name:"Guide back"}).click();
+ await page.getByRole("button",{name:"Guide back"}).click();
+ await page.getByRole("button",{name:"Guide back"}).click();
+ await page.getByText("01 · Created",{exact:true}).waitFor();
+ await page.getByRole("button",{name:"Tasks"}).first().catch(()=>{});
+ await page.locator('[aria-label="Local simulated guided demonstration"]').getByRole("button",{name:"×"}).click().catch(async()=>{
+   await page.locator('[aria-label="Local simulated guided demonstration"]').locator('button').first().click();
+ });
+
  await page.getByText("Paid claim",{exact:true}).first().click();
  await page.getByText("PaymentUnknown",{exact:false}).first().waitFor();
  await page.getByText("Evidence",{exact:true}).first().click();
