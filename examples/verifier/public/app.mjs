@@ -3,6 +3,7 @@ import { verifyEvidence } from './evidence-browser.mjs';
 import { buildDemoCase } from './demo-scenarios.mjs';
 import { makeSummary, RPC_LABEL } from './summary.mjs';
 import { DEMO_STEPS, validShowcase } from './demo-guide.mjs';
+import { initLanguage } from './locale.mjs';
 
 const byId = id => document.getElementById(id);
 const HEX40 = /^0x[0-9a-fA-F]{40}$/;
@@ -10,6 +11,7 @@ const HEX64 = /^0x[0-9a-fA-F]{64}$/;
 const same = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 if (['/studio', '/demo'].includes(location.pathname)) document.querySelector('a.logo').href = location.pathname;
 if (location.pathname === '/demo') document.title = 'AgentLedger · 3-minute guided demo';
+initLanguage({ fallback: 'en' });
 const workspaceUrl = new URL('/', location.href);
 if (location.port === '4321') workspaceUrl.port = '4322';
 byId('wallet-workspace').href = workspaceUrl.href;
