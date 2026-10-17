@@ -8,6 +8,7 @@ import {saveSummaryJson} from "./src/export-summary";
 import {Platform, SafeAreaView, ScrollView, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions} from "react-native";
 import {StatusBar} from "expo-status-bar";
 import {DemoFact, FACTS, Stage, shorten, exportSummary} from "./src/facts";
+import {JourneyStep,nextJourneyAction,journeyPosition,GUIDED_LABELS,GUIDED_LABELS_ZH} from "./src/demo-flow";
 
 // Locale-aware copy: Linux CI's English Chromium lacks CJK fonts, while
 // zh-CN browsers and native Chinese devices retain Chinese product labels.
@@ -59,6 +60,8 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
  onExport:()=>void;exportNotice:string;
 }){
  const [tab,setTab]=useState<Tab>("tasks"),[verified,setVerified]=useState(false);
+ const [guideStep,setGuideStep]=useState<JourneyStep>(0);
+ const guide=journeyPosition(guideStep);
  const [contract,setContract]=useState(""),[taskId,setTaskId]=useState("");
  const [lookupState,setLookupState]=useState(""),[lookupBusy,setLookupBusy]=useState(false);
  const [evidenceJson,setEvidenceJson]=useState("");
@@ -167,11 +170,11 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
   }catch(error){if(epoch===lookupEpoch.current)setLookupState("NOT VERIFIED: "+String((error as Error).message));}
   finally{if(epoch===lookupEpoch.current)setLookupBusy(false);}
  }
- function verify(){
+ function verify():boolean{
   setVerificationError("");setVerified(false);onVerified("NOT_VERIFIED");
   if(fileReading || fileDiagnostic.startsWith("FILE_NOT_VERIFIED")){
     setVerificationError("NOT VERIFIED: unresolved local file error");
-    return;
+    return false;
   }
   try{
    const evidence=localFiles.evidence?
@@ -189,7 +192,8 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
    onVerified(result.match?
      (result.inputChecked&&result.outputChecked?"HASH_MATCHED_WITH_INPUT_OUTPUT":"HASH_MATCHED_EVIDENCE_ONLY"):
      "NOT_VERIFIED");
-  }catch(error){setVerificationError("NOT VERIFIED: "+String((error as Error).message));}
+   return result.match;
+  }catch(error){setVerificationError("NOT VERIFIED: "+String((error as Error).message));return false;}
  }
  const choose=(next:Stage)=>{
   lookupEpoch.current++;
@@ -197,10 +201,29 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
   setVerificationError("");
   setTab(next==="evidence"?"evidence":next==="unknown"?"payment":"tasks");
  };
+ function guideNext(){
+   const {action,next}=nextJourneyAction(guideStep);
+   if(action==="start"||action==="restart")choose("created");
+   if(action==="show-payment")choose("paid");
+   if(action==="show-evidence")choose("evidence");
+   if(action==="verify"&&!verify())return;
+   if(action==="show-summary")setTab("journal");
+   if(action==="show-unknown")choose("unknown");
+   if(action==="show-payment")setTab("payment");
+   setGuideStep(next);
+ }
  return <SafeAreaView style={s.phone}>
   <StatusBar style="light"/>
   <View style={s.header}><View style={s.brandGroup}><Mark/><View><Text style={s.brand}>agentledger<Text style={{color:C.purple}}>.</Text></Text><Text style={s.kicker}>PROOF STUDIO · POCKET</Text></View></View><Chip text={live?"TASK READ-ONLY":"SIMULATED"} tone="amber"/></View>
   <ScrollView style={s.scroller} contentContainerStyle={{padding:20,paddingBottom:42}}>
+   <View style={s.guidedCard}>
+    <View style={s.guidedTop}><Text style={s.guidedKicker}>{t("GUIDED DEMO · OFFLINE / READ ONLY","引导演示 · 离线 / 只读")}</Text><Text style={s.guidedCounter}>{guide.current} / {guide.total}</Text></View>
+    <Text style={s.guidedTitle}>{guide.title}</Text>
+    <View style={s.guidedMarkers}>{[1,2,3,4].map(n=><View key={n} style={[s.guidedMarker,n<=guide.current&&s.guidedMarkerActive]}/>)}</View>
+    <Text style={s.guidedWarning}>{t("Recorder Paid ≠ USDC verified · No automatic recharge","Recorder Paid 并非 USDC 已核验 · 禁止自动重扣")}</Text>
+    {!live?<Button title={ZH?GUIDED_LABELS_ZH[guideStep]:GUIDED_LABELS[guideStep]} disabled={fileReading} onPress={guideNext}/>:
+     <Text style={s.guidedWarning}>{t("Live task-only view: return to a local demo stage to resume.","真实任务只读观察：请返回本地模拟阶段以继续。")}</Text>}
+   </View>
    <View style={s.headline}><Text style={s.eyebrow}>WORKSPACE / {tab.toUpperCase()} <Text style={{color:C.mint}}> · READ ONLY</Text></Text><Text style={s.h1}>{tab==="tasks"?"Your agent tasks":tab==="payment"?"Payment clarity":tab==="evidence"?"Proof, not promises":"Your activity"}</Text>
     <Text style={s.lede}>{live?t("Read-only chain task. USDC, signed intent and deployment review remain unverified.","链上任务状态来自只读查询；USDC 转账、付款授权及部署审查尚未独立核验。"):t("Offline demo. Recorder status is not independent payment proof.","模拟场景无需网络。链上 Recorder 状态不代表独立支付事实。")}</Text></View>
    {tab==="tasks"&&<>
@@ -353,6 +376,15 @@ const s=StyleSheet.create({
  brand:{color:C.ink,fontSize:20,fontWeight:"900",letterSpacing:-.9},kicker:{fontSize:9,fontWeight:"800",letterSpacing:1.15,color:C.sub,marginTop:3},
  chip:{paddingHorizontal:11,paddingVertical:7,borderRadius:24},chipText:{fontWeight:"800",fontSize:9,letterSpacing:.45},
  scroller:{flex:1},headline:{marginBottom:16},
+ guidedCard:{borderWidth:1,borderColor:"#D9D9FF",borderRadius:19,backgroundColor:"#F0F0FF",padding:17,marginBottom:18},
+ guidedTop:{flexDirection:"row",alignItems:"center",justifyContent:"space-between"},
+ guidedKicker:{fontSize:10,letterSpacing:1.1,color:"#5C54A9",fontWeight:"900"},
+ guidedCounter:{fontSize:12,fontWeight:"900",color:C.purple},
+ guidedTitle:{fontSize:15,fontWeight:"900",color:C.ink,marginTop:10},
+ guidedMarkers:{flexDirection:"row",gap:5,marginTop:12},
+ guidedMarker:{height:5,flex:1,backgroundColor:"#D7D4EC",borderRadius:5},
+ guidedMarkerActive:{backgroundColor:C.purple},
+ guidedWarning:{fontSize:10.5,lineHeight:15,color:"#6F7194",marginTop:10},
  eyebrow:{fontSize:10,fontWeight:"900",letterSpacing:1.2,color:C.purple},
  h1:{fontSize:29,fontWeight:"900",color:C.ink,marginTop:10,letterSpacing:-.9},
  h2:{fontSize:28,fontWeight:"900",color:C.ink,marginTop:13,lineHeight:35,letterSpacing:-1},
