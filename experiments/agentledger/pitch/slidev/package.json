@@ -1,0 +1,18 @@
+{
+  "name": "agentledger-slidev-pitch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentLedger Pocket / Monad x402 hackathon pitch deck (source of truth: Slidev)",
+  "scripts": {
+    "dev": "slidev slides.md --open",
+    "build": "slidev build slides.md",
+    "export:pdf": "slidev export slides.md --format pdf --output AgentLedger-Pitch.pdf --timeout 120000",
+    "export:pptx": "slidev export slides.md --format pptx --output AgentLedger-Pitch.pptx --timeout 120000",
+    "export:editable": "slidev export slides.md --format pptx-editable --output AgentLedger-Pitch-editable.pptx --timeout 120000"
+  },
+  "devDependencies": {
+    "@slidev/cli": "latest",
+    "@slidev/theme-default": "latest",
+    "playwright-chromium": "latest"
+  }
+}
