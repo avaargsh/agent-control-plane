@@ -5,7 +5,11 @@
     "dev": "slidev --open",
     "build": "slidev build",
     "export": "slidev export",
-    "serve": "npx serve dist"
+    "serve": "npx serve dist",
+    "dev:judge": "slidev judge.md --open",
+    "build:judge": "slidev build judge.md --out dist-judge",
+    "export:judge:pdf": "slidev export judge.md --format pdf --output AgentLedger-Judge-Pitch.pdf",
+    "export:judge:pptx": "slidev export judge.md --format pptx --output AgentLedger-Judge-Pitch.pptx"
   },
   "devDependencies": {
     "@slidev/cli": "^53.0.0",
