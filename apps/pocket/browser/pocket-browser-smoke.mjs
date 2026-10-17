@@ -252,7 +252,7 @@ try{
   const guidedWidth=await page.evaluate(()=>({
     scroll:document.documentElement.scrollWidth,
     viewport:document.documentElement.clientWidth,
-    controls:[...document.querySelectorAll('[aria-label="Local simulated guided demonstration"] button')]
+    controls:[...document.querySelectorAll('[aria-label="Local simulated guided demonstration"] [role="button"]')]
       .map(el=>({label:el.getAttribute("aria-label"),right:Math.round(el.getBoundingClientRect().right)})),
   }));
   if(guidedWidth.scroll>guidedWidth.viewport+3 || guidedWidth.controls.some(x=>x.right>guidedWidth.viewport+3))
