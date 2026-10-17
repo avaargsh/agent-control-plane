@@ -10,6 +10,7 @@ info: |
 ---
 
 <div class="al-pitch-cover">
+  <div class="al-pitch-language"><span>Language</span><a href="../dist-judge/" aria-label="切换为中文">中文 ↗</a></div>
   <div class="al-pitch-kicker">AGENTLEDGER · MONAD × x402 · JUDGE PITCH</div>
   <h1>Pay → Execute → <span>Prove.</span></h1>
   <p>Agents can charge for tasks.<br>But <strong>who can verify the payment, execution and evidence</strong> independently?</p>
