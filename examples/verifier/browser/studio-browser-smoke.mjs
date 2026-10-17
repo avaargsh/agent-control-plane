@@ -95,6 +95,16 @@ try {
     viewport:document.documentElement.clientWidth,
   }));
   assert(widths.scroll<=widths.viewport+2,"mobile layout overflows horizontally");
+  assert(await page.evaluate(()=>getComputedStyle(document.querySelector('.director-actions')).position!=='fixed'),
+    "inactive mobile guide must not cover page content");
+  await page.locator('#guide-reset').click();
+  await page.waitForFunction(()=>document.querySelector('#guide-counter').textContent.includes('1 / 7'));
+  assert(await page.evaluate(()=>getComputedStyle(document.querySelector('.director-actions')).position==='fixed'),
+    "active mobile guide controls should remain reachable");
+  await page.locator('#guide-exit').click();
+  assert(await page.evaluate(()=>getComputedStyle(document.querySelector('.director-actions')).position!=='fixed'),
+    "exiting mobile guide must release fixed controls");
+  assert(await page.locator('#guide-exit').isHidden(),"guide exit should hide after dismissal");
   // Complete presenter journey. Testnet reads below are explicitly mocked;
   // all local stages still use the real browser tool calculation/WebCrypto.
   await page.setViewportSize({width:1440,height:1000});
