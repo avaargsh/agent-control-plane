@@ -25,12 +25,12 @@ transition: fade-out
     <div class="subtitle">让 Agent 的付款与执行证据<br>成为<span class="highlight">可独立核验的事实</span></div>
     <div class="rowline" style="margin-top:15px"><span class="pill teal">Pocket App</span><span class="pill">Read-only Verification</span><span class="pill gold">Fail Closed</span></div>
   </div>
-  <div class="deck-bottom"><span>AGENTLEDGER / EXPERIMENTAL PHASE 0</span><span>Local PoC demonstrated · Public Testnet paid acceptance pending</span></div>
+  <div class="deck-bottom"><span>AGENTLEDGER / EXPERIMENTAL PHASE 0</span><span>Pocket guided demo · Testnet operation reported / independent acceptance pending</span></div>
 </div>
 
 <!--
 开场 20 秒：我们不是在做另一个 Agent 框架。要解决的是「付过款」和「留有证据」如何被独立确认。
-注意：目前本地 Anvil 和模拟流程跑通；没有声明真实 Monad Testnet 付费验收。
+注意：开发者反馈已做 Monad Testnet 操作；当前仓库 reviewed 部署登记为空，未见可独立复核的完整资金回执、Nonce 与部署审查证据。请区别“跑过”“任务状态可读”“独立验收通过”。
 -->
 
 ---
@@ -124,12 +124,12 @@ transition: fade-out
     <div class="flow-item"><span class="n">04 · EVIDENCE</span><h3>Verify</h3><p>Canonical metadata SHA-256，原始输入输出 byte-level 校验</p><div style="margin-top:22px"><span class="pill teal">Digest Match</span></div></div>
   </div>
   <div class="flow-line"></div>
-  <div class="gate warn" style="margin-top:33px"><b style="color:var(--gold)">当前可现场运行：</b>本地模拟 + Anvil 生命周期；Paid claim、执行声明与真实结算必须区别展示。</div>
+  <div class="gate warn" style="margin-top:33px"><b style="color:var(--gold)">当前可现场运行：</b>Pocket 引导演示 + Anvil；已有 Testnet 运行信息可只读展示，但必须单独审查交易/Nonce/部署来源。</div>
   <div class="deck-bottom"><span>IDEAL UX: PAY → EXECUTE → PROVE</span><span>PROJECT STATUS: PHASE 0 LOCAL ACCEPTANCE</span></div>
 </div>
 
 <!--
-不要宣称本轮存在真实 Testnet 付款。展示的是最小可验证协议边界及本地模拟闭环。
+开发者称已运行过 Testnet；仍不能将运行记录等同于独立验证的真实付款验收。展示任务观察与独立结算断言的分界。
 -->
 
 ---
@@ -276,10 +276,10 @@ Monad 的高性能特性是目标环境的技术背景，不对项目实际性�
   <div class="section-tag">LIVE DEMO · 2 MINUTES</div>
   <h1 class="head">现场只演<span class="highlight">一条产品线</span>，然后亮出反例</h1>
   <div class="timeline">
-    <div class="time-step"><span class="pill">0:00—0:25</span><b>Pocket / Created</b><p>打开任务，展示 taskId、descriptionHash、chain ID。</p></div>
-    <div class="time-step"><span class="pill gold">0:25—0:50</span><b>Recorder Paid</b><p>展示合约声明 Paid，但独立付款仍为 PaymentUnknown。</p></div>
-    <div class="time-step"><span class="pill teal">0:50—1:20</span><b>Evidence / Verify</b><p>选择原始文件，重算 SHA-256；修改字节立刻拒绝。</p></div>
-    <div class="time-step"><span class="pill red">1:20—2:00</span><b>Lost ACK / Reject</b><p>不重扣；Studio 展示错误身份 / 跨 Ledger 的拒绝。</p></div>
+    <div class="time-step"><span class="pill">0:00—0:25</span><b>Start guided demo → Created</b><p>一键开始；查看 taskId、descriptionHash、chain ID。</p></div>
+    <div class="time-step"><span class="pill gold">0:25—0:50</span><b>Next → Recorder Paid</b><p>跟随固定下一步按钮，区分 Recorder 声明和 USDC 独立核验。</p></div>
+    <div class="time-step"><span class="pill teal">0:50—1:20</span><b>Next → Evidence → Verify</b><p>本机 SHA-256 真校验；进入 summary.json 展示来源。</p></div>
+    <div class="time-step"><span class="pill red">1:20—2:00</span><b>Next → Audit → Lost ACK</b><p>零重扣；必要时切 Studio 展示错身份拒绝。</p></div>
   </div>
   <div class="cols" style="margin-top:24px;grid-template-columns:.92fr 1.08fr">
     <div class="panel"><div class="meta">MAIN ENTRY</div><div style="font-size:24px;font-weight:800">AgentLedger Pocket</div><p style="margin-top:8px!important">现场观众看到完整的任务与证据旅程。</p><div style="margin-top:13px" class="pill teal">USER EXPERIENCE</div></div>
@@ -289,7 +289,7 @@ Monad 的高性能特性是目标环境的技术背景，不对项目实际性�
 </div>
 
 <!--
-约两分钟。不要先展示控制台。先 Pocket，让观众看到端到端产品价值，再打开 Studio 技术反例。
+约两分钟。不要先展示控制台。Pocket 顶部固定的 Next 引导了 Created、Recorder 声明、Evidence 校验、summary.json 和 Lost ACK；最后才打开 Studio 反例。
 如实标注：支付是模拟/Recorder claim；Evidence 的字节校验是真哈希。
 -->
 
@@ -311,13 +311,13 @@ Monad 的高性能特性是目标环境的技术背景，不对项目实际性�
     <div class="panel" style="border-color:#8c6147"><span class="pill gold">PUBLIC ACCEPTANCE BLOCKED</span>
       <div class="stack" style="margin-top:23px;gap:18px">
         <div class="rowline"><span class="gold" style="font-size:24px">○</span><span>审核过的 Monad Testnet 合约部署</span></div>
-        <div class="rowline"><span class="gold" style="font-size:24px">○</span><span>真实 Testnet USDC Transfer / consumed Nonce</span></div>
+        <div class="rowline"><span class="gold" style="font-size:24px">○</span><span>已运行 Testnet 的交易哈希 / USDC 事件 / Nonce 证据归档审查</span></div>
         <div class="rowline"><span class="gold" style="font-size:24px">○</span><span>完整 EIP-712 / precharge / Recorder 真实联调</span></div>
         <div class="rowline"><span class="gold" style="font-size:24px">○</span><span>不可逆最终性、独立 Agent 执行证明</span></div>
       </div>
     </div>
   </div>
-  <div class="gate warn" style="margin-top:26px"><b>当前准确表述：</b>已具备可复现的本地可信演示与 fail-closed 审计边界；真实公网付款验收尚未完成。</div>
+  <div class="gate warn" style="margin-top:26px"><b>当前准确表述：</b>本地演示与负向测试通过；开发者报告 Testnet 已运行，但尚需将部署、付款事件和 Nonce 形成可独立复查的验收材料。</div>
   <div class="deck-bottom"><span>NO REVIEWED DEPLOYMENT → NO PUBLIC SUCCESS CLAIM</span><span>HONEST PROVENANCE IS PART OF THE PRODUCT</span></div>
 </div>
 
@@ -333,7 +333,7 @@ Monad 的高性能特性是目标环境的技术背景，不对项目实际性�
   <div class="content">
     <div class="section-tag" style="margin-top:40px">OPEN INFRASTRUCTURE FOR THE AGENT ECONOMY</div>
     <h1 class="title" style="font-size:75px!important;margin:32px 0 24px!important">把信任从<span class="highlight">承诺</span><br>变成<span class="mint">证据</span><span class="highlight">.</span></h1>
-    <div class="subtitle" style="font-size:28px">下一步：Reviewed Deployment → Real Testnet USDC<br>→ Independent Reconcile → Audited Evidence</div>
+    <div class="subtitle" style="font-size:28px">下一步：Review Testnet run evidence → Deployment provenance<br>→ Independent Reconcile → Audited Evidence</div>
     <div class="rowline" style="margin-top:32px"><span class="pill teal">Open Source</span><span class="pill">Pocket · Studio · Read-only SDK</span></div>
     <div class="code-preview" style="margin-top:27px;width:680px;font-size:17px">github.com/avaargsh/agent-control-plane<br>experiments/agentledger</div>
   </div>
