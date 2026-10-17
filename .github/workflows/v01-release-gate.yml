@@ -1,26 +1,13 @@
 name: v0.1-release-gate
 
+# Release gates only: normal development PRs run .github/workflows/test.yml.
+# Invoke manually on a candidate, or create an intentional v* release tag.
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "src/**"
-      - "schemas/**"
-      - "examples/**"
-      - "experiments/**"
-      - "scripts/verify_release.py"
-      - "scripts/verify_v01_public_contract.py"
-      - "scripts/fresh_clone_release_smoke.sh"
-      - "release/**"
-      - "pyproject.toml"
-      - "Makefile"
-      - "RELEASE_NOTES.md"
-      - "RELEASE_READINESS.md"
-      - "docs/V0.1_ACCEPTANCE_ARTIFACT_CONTRACT.md"
-      - "docs/V0.1_PUBLIC_COMPATIBILITY.md"
-      - "docs/V0.1_FREEZE.md"
-      - "docs/RELEASE_VERIFICATION.md"
-      - ".github/workflows/v01-release-gate.yml"
+  push:
+    tags:
+      - 'v*'
+
 permissions:
   contents: read
 
