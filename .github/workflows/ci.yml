@@ -82,6 +82,47 @@ jobs:
         run: npm run test:browser:live
         working-directory: apps/pocket
 
+  judge-pitch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: slides/package-lock.json
+      - name: Install pinned Slidev tooling
+        working-directory: slides
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build the 7-slide judge pitch
+        working-directory: slides
+        run: |
+          npm run build:judge
+          test -f dist-judge/index.html
+          test $(grep -c '^---    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Node deps (viem for acceptance script)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Forge build + contract tests
+        run: |
+          forge --version
+          forge build --sizes
+          forge test -vvv
+      - name: Hermetic Anvil acceptance (simulated recorder payment, loopback)
+        run: |
+          anvil --port 18545 --chain-id 10143 &
+          sleep 2
+          node examples/verifier/tools/anvil-acceptance.mjs
+ judge.md) -ge 7
+
   forge-anvil:
     runs-on: ubuntu-latest
     timeout-minutes: 15
