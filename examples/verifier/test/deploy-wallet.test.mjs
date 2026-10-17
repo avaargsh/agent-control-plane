@@ -52,7 +52,9 @@ async function page(wallet, { announced = false, preparedRequest = null, stored 
   const context = { window: host, document: { getElementById: element }, Event, TextEncoder, URL, URLSearchParams, console, setTimeout,
     fetch: async path => ({ ok: true, json: async () => path === '/prepared-task.json' ? preparedRequest : artifact }),
     localStorage: { getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value), removeItem: key => saved.delete(key) }, createWalletConnection,
-    createTransactionJournal, prepareTask, readTaskCreation, verifyTransaction };
+    createTransactionJournal, prepareTask, readTaskCreation, verifyTransaction,
+    // The VM harness strips imports; localization is a DOM-only concern, not a wallet RPC action.
+    initLanguage:()=>({language:"zh"}) };
   await vm.runInNewContext('(async () => {\n' + source + '\n})()', context);
   return { host, element, saved };
 }
