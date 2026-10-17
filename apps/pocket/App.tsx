@@ -18,7 +18,7 @@ const ZH=(()=>{
 })();
 const t=(en:string,zh:string)=>ZH?zh:en;
 type Tab="tasks"|"payment"|"evidence"|"journal";
-const C={bg:"#F5F7FB",panel:"#FFFFFF",card:"#EFF1FD",line:"#E5EAF3",ink:"#18243C",sub:"#77849B",purple:"#5955D9",mint:"#138D78",amber:"#A86327",red:"#CA475B",night:"#1F264A",lavender:"#EDEBFF"};
+const C={bg:"#F5F8FC",panel:"#FFFFFF",card:"#EFF1FD",line:"#E5EAF3",ink:"#18243C",sub:"#667A91",purple:"#315FC6",mint:"#138D78",amber:"#A86327",red:"#CA475B",night:"#15375F",lavender:"#EDEBFF"};
 const labels:Record<Tab,string>={tasks:t("Tasks","任务"),payment:t("Payment","支付"),evidence:t("Evidence","证据"),journal:t("Journal","记录")};
 const tabs:Tab[]=["tasks","payment","evidence","journal"];
 const steps:{key:Stage;label:string;note:string}[]=[
@@ -61,6 +61,7 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
 }){
  const [tab,setTab]=useState<Tab>("tasks"),[verified,setVerified]=useState(false);
  const [presenting,setPresenting]=useState(false);
+ const scrollerRef=useRef<ScrollView|null>(null);
  const [contract,setContract]=useState(""),[taskId,setTaskId]=useState("");
  const [lookupState,setLookupState]=useState(""),[lookupBusy,setLookupBusy]=useState(false);
  const [evidenceJson,setEvidenceJson]=useState("");
@@ -158,6 +159,7 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
  const hash=observed?.evidenceHash??fact.evidenceHash;
  async function lookup(){
   const epoch=++lookupEpoch.current;
+  setPresenting(false); // A public query cannot keep a simulated guide.
   setLookupBusy(true);setLookupState("Reading task only; payment remains unknown");
   onObserve(null);clearLocalEvidence();
   try{
@@ -202,6 +204,7 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
  function gotoPresenter(next:Stage){
   choose(next);
   setTab(next==="created"?"tasks":next==="evidence"?"evidence":"payment");
+  scrollerRef.current?.scrollTo({y:0,animated:false});
  }
  function startPresenter(){
   setPresenting(true);
@@ -213,25 +216,26 @@ function Phone({stage,setStage,observed,onObserve,onVerified,onExport,exportNoti
   {presenting&&<View style={s.presenterStrip} accessibilityLabel="Local simulated guided demonstration">
    <View style={s.presenterTop}>
     <Text style={s.presenterEyebrow}>GUIDED DEMO · LOCAL SIMULATION ONLY</Text>
-    <Pressable accessibilityRole="button" onPress={()=>setPresenting(false)}><Text style={s.presenterClose}>×</Text></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel="Exit guided demo" onPress={()=>setPresenting(false)} style={s.presenterCloseHit}><Text style={s.presenterClose}>×</Text></Pressable>
    </View>
+   <View style={s.presenterStepRow}><Text style={s.presenterStepCount}>{t("STEP","步骤")} {presenterIndex(stage)+1} / {PRESENTER_STAGES.length}</Text><Text style={s.presenterCurrent}>{ZH?PRESENTER_LABELS[stage].zh:PRESENTER_LABELS[stage].en}</Text></View>
    <View style={s.presenterProgress}>{PRESENTER_STAGES.map((item,i)=>
     <View key={item} style={[s.presenterSegment,i<=presenterIndex(stage)&&s.presenterSegmentOn]}/>)}</View>
+   <Text style={s.presenterHint}>{stage==="created"?t("Inspect task identity, not a payment.","先看任务身份，创建不代表付款。"):stage==="paid"?t("Recorder Paid is a claim; USDC is not verified.","Recorder Paid 只是声明，USDC 未核验。"):stage==="evidence"?t("Tap Verify SHA-256 below to check the bytes.","在下方点击 Verify SHA-256 验证字节。"):t("Lost ACK ≠ unpaid. Never recharge.","丢失 ACK ≠ 未付款，禁止自动重扣。")}</Text>
    <View style={s.presenterActions}>
-    <Pressable accessibilityRole="button" accessibilityLabel="Guide back" disabled={presenterIndex(stage)===0}
-      onPress={()=>gotoPresenter(presenterPrevious(stage))}>
+    <Pressable accessibilityRole="button" accessibilityLabel="Guide back" disabled={presenterIndex(stage)===0} accessibilityState={{disabled:presenterIndex(stage)===0}} onPress={()=>gotoPresenter(presenterPrevious(stage))} style={s.presenterBackHit}>
       <Text style={[s.presenterAction,presenterIndex(stage)===0&&{opacity:.35}]}>← {t("Back","上一步")}</Text>
     </Pressable>
     <Text style={s.presenterCurrent}>{ZH?PRESENTER_LABELS[stage].zh:PRESENTER_LABELS[stage].en}</Text>
-    <Pressable accessibilityRole="button" accessibilityLabel="Guide next"
-      disabled={presenterIndex(stage)===PRESENTER_STAGES.length-1}
-      onPress={()=>gotoPresenter(presenterNext(stage))}>
-      <Text style={[s.presenterAction,presenterIndex(stage)===PRESENTER_STAGES.length-1&&{opacity:.35}]}>{t("Next","下一步")} →</Text>
-    </Pressable>
+    {stage==="unknown"?<Pressable accessibilityRole="button" accessibilityLabel="Export guided summary.json" onPress={onExport} style={s.presenterExportHit}>
+      <Text style={s.presenterExportText}>{t("Export summary.json","导出 summary.json")} ↓</Text>
+    </Pressable>:<Pressable accessibilityRole="button" accessibilityLabel="Guide next" onPress={()=>gotoPresenter(presenterNext(stage))} style={s.presenterNextHit}>
+      <Text style={s.presenterExportText}>{t("Next","下一步")} →</Text>
+    </Pressable>}
    </View>
    <Text style={s.presenterCaution}>PaymentUnknown · NO RECHARGE · NOT TESTNET PAYMENT ACCEPTANCE</Text>
   </View>}
-  <ScrollView style={s.scroller} contentContainerStyle={{padding:20,paddingBottom:42}}>
+  <ScrollView ref={scrollerRef} style={s.scroller} contentContainerStyle={{padding:20,paddingBottom:42}}>
    <View style={s.headline}><Text style={s.eyebrow}>WORKSPACE / {tab.toUpperCase()} <Text style={{color:C.mint}}> · READ ONLY</Text></Text><Text style={s.h1}>{tab==="tasks"?"Your agent tasks":tab==="payment"?"Payment clarity":tab==="evidence"?"Proof, not promises":"Your activity"}</Text>
     <Text style={s.lede}>{live?t("Read-only chain task. USDC, signed intent and deployment review remain unverified.","链上任务状态来自只读查询；USDC 转账、付款授权及部署审查尚未独立核验。"):t("Offline demo. Recorder status is not independent payment proof.","模拟场景无需网络。链上 Recorder 状态不代表独立支付事实。")}</Text></View>
    {tab==="tasks"&&<>
@@ -375,17 +379,25 @@ export default function App(){
  return <View style={[s.root,desktop&&s.wide]}>{desktop?<><View style={s.phoneFrame}><Phone stage={stage} setStage={setStage} observed={observed} onObserve={setObserved} onVerified={setVerification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice}/></View><View style={s.inspectorFrame}><Inspector fact={FACTS[stage]} observed={observed} verification={verification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice}/></View></>:<Phone stage={stage} setStage={setStage} observed={observed} onObserve={setObserved} onVerified={setVerification} onExport={()=>{void exportCurrent();}} exportNotice={exportNotice}/>}</View>;
 }
 const s=StyleSheet.create({
- presenterStrip:{paddingHorizontal:18,paddingTop:11,paddingBottom:10,backgroundColor:"#EDF0FE",borderBottomColor:C.line,borderBottomWidth:1},
+ presenterStrip:{paddingHorizontal:18,paddingTop:12,paddingBottom:12,backgroundColor:"#EDF4FF",borderBottomColor:"#C7D9F4",borderBottomWidth:1},
  presenterTop:{flexDirection:"row",alignItems:"center",justifyContent:"space-between"},
- presenterEyebrow:{fontSize:9,fontWeight:"800",letterSpacing:1.0,color:C.purple},
- presenterClose:{color:C.sub,fontSize:21,fontWeight:"700",paddingHorizontal:10},
- presenterProgress:{flexDirection:"row",gap:5,marginTop:6,marginBottom:6},
- presenterSegment:{flex:1,height:4,borderRadius:4,backgroundColor:"#CFD6EC"},
+ presenterEyebrow:{fontSize:10,fontWeight:"800",letterSpacing:.65,color:C.purple,flexShrink:1},
+  presenterStepRow:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:7},
+  presenterStepCount:{fontSize:10,fontWeight:"900",color:C.purple},
+  presenterHint:{fontSize:11,lineHeight:16,color:"#506985",marginBottom:5},
+  presenterCloseHit:{minWidth:40,minHeight:40,alignItems:"center",justifyContent:"center",backgroundColor:"#E0EAF9",borderRadius:10},
+  presenterBackHit:{flex:1,minHeight:44,alignItems:"center",justifyContent:"center",borderRadius:10,borderWidth:1,borderColor:"#CBDAEE",backgroundColor:"#fff"},
+  presenterNextHit:{flex:1.45,minHeight:44,alignItems:"center",justifyContent:"center",borderRadius:10,backgroundColor:C.purple},
+  presenterExportHit:{flex:1.45,minHeight:44,alignItems:"center",justifyContent:"center",borderRadius:10,backgroundColor:C.mint},
+  presenterExportText:{fontSize:11.5,fontWeight:"800",color:"#fff"},
+ presenterClose:{color:"#486685",fontSize:23,fontWeight:"700",lineHeight:27},
+ presenterProgress:{flexDirection:"row",gap:5,marginTop:8,marginBottom:8},
+ presenterSegment:{flex:1,height:5,borderRadius:5,backgroundColor:"#CDDCEE"},
  presenterSegmentOn:{backgroundColor:C.purple},
- presenterActions:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:6},
+ presenterActions:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:9,marginTop:7},
  presenterAction:{fontSize:12,fontWeight:"800",color:C.purple},
- presenterCurrent:{fontSize:10,fontWeight:"800",color:C.ink,flexShrink:1,textAlign:"center"},
- presenterCaution:{fontSize:9,color:C.amber,fontWeight:"700",marginTop:6,textAlign:"center"},
+ presenterCurrent:{fontSize:11,fontWeight:"800",color:C.ink,flexShrink:1,textAlign:"right"},
+ presenterCaution:{fontSize:9,color:C.amber,fontWeight:"800",marginTop:9,textAlign:"center"},
  root:{flex:1,backgroundColor:"#EBEEF5"},
  wide:{flexDirection:"row",justifyContent:"center",alignItems:"center",gap:34,padding:28,backgroundColor:"#ECF0F7"},
  phoneFrame:{height:"100%",maxHeight:880,width:400,borderWidth:8,borderRadius:42,borderColor:"#1D2742",overflow:"hidden",backgroundColor:C.bg,shadowColor:"#10214B",shadowOpacity:.18,shadowRadius:36,shadowOffset:{width:0,height:18}},
@@ -425,7 +437,7 @@ const s=StyleSheet.create({
  row:{flexDirection:"row",justifyContent:"space-between",gap:12,marginVertical:9},
  muted:{color:C.sub,fontSize:11,fontWeight:"500"},value:{color:C.ink,fontSize:11,fontWeight:"700",maxWidth:"63%",textAlign:"right"},
  step:{flexDirection:"row",alignItems:"center",gap:12,borderWidth:1,borderColor:"#E6E9F2",backgroundColor:"#fff",padding:14,borderRadius:16,marginBottom:9},
- stepActive:{borderColor:"#B9B1FF",backgroundColor:"#F0EEFF"},
+ stepActive:{borderColor:"#A9C3EF",backgroundColor:"#EAF2FF"},
  stepMarker:{height:38,width:38,borderRadius:12,backgroundColor:"#EDEFF6",justifyContent:"center",alignItems:"center"},
  stepMarkerActive:{backgroundColor:C.purple},stepNumber:{color:"#8390A8",fontWeight:"900",fontSize:12},
  stepTitle:{color:C.ink,fontWeight:"800",fontSize:12.5},small:{color:C.sub,fontSize:11,lineHeight:17,marginTop:4},
@@ -449,7 +461,7 @@ const s=StyleSheet.create({
  hash:{color:C.ink,fontSize:11.5,lineHeight:19,fontFamily:Platform.OS==="web"?"monospace":"Courier"},
  tabbar:{flexDirection:"row",borderTopWidth:1,borderTopColor:C.line,backgroundColor:"#fff",paddingTop:9,paddingBottom:Platform.OS==="web"?13:7,paddingHorizontal:10},
  tab:{flex:1,paddingVertical:7,alignItems:"center",borderRadius:11},
- tabSelected:{backgroundColor:"#F2F0FF"},
+ tabSelected:{backgroundColor:"#E8F0FF"},
  tabIcon:{color:"#A1ABC0",fontSize:20,fontWeight:"600",marginBottom:4},
  tabText:{color:"#94A1B6",fontSize:10,fontWeight:"800"},tabOn:{color:C.purple},
  inspector:{flex:1},inspectorBrand:{flexDirection:"row",gap:12,alignItems:"center",paddingBottom:24,marginBottom:24,borderBottomWidth:1,borderBottomColor:C.line},
