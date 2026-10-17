@@ -95,6 +95,10 @@ try {
     viewport:document.documentElement.clientWidth,
   }));
   assert(widths.scroll<=widths.viewport+2,"mobile layout overflows horizontally");
+  assert(await page.locator('.nav-items').isVisible(), 'Mobile site navigation must not be hidden');
+  await page.locator('a.nav-item[href="#evidence-panel"]').click();
+  assert(new URL(page.url()).hash==='#evidence-panel','Mobile Evidence Lab section navigation unavailable');
+  assert((await page.locator('#guide-source').innerText()).includes('LOCAL SIMULATION'),'Source label absent before guide');
   assert(await page.evaluate(()=>getComputedStyle(document.querySelector('.director-actions')).position!=='fixed'),
     "inactive mobile guide must not cover page content");
   await page.locator('#guide-reset').click();
@@ -133,12 +137,15 @@ try {
   assert(await page.locator('#payment-fact').innerText()==='PaymentUnknown','tamper demonstration changed payment fact');
   await page.locator('#guide-next').click();
   await page.waitForFunction(()=>document.querySelector('#scenario-heading').textContent==='Payment response missing');
+  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('本地六步演示已完成'));
+  assert((await page.locator('#guide-next').innerText()).includes('可选'),'Public Testnet optional step not distinguished');
   const reference=JSON.parse(readFileSync(new URL('../../../phase0/demo-showcase.json',import.meta.url),'utf8'));
   const fixture={...sample.task,status:'Created',taskId:reference.taskId,contract:reference.contract};
   await page.route(/\/api\/task\?/,route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(fixture)}));
   await page.route(/\/api\/task-creation\?/,route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({state:'CONFIRMED',chainId:10143,contract:reference.contract,taskId:reference.taskId,transactionHash:reference.creationTransaction,from:fixture.creator,task:fixture,blockNumber:'100'})}));
   await page.locator('#guide-next').click();
   await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('完整导览完成'));
+  assert((await page.locator('#guide-source').innerText()).includes('OPTIONAL TESTNET'),'Live-source guide label absent');
   assert(await page.locator('#chain-state').innerText()==='Created','mocked live guide result missing');
   assert(await page.locator('#creation-transaction').isVisible(),'creation provenance link missing');
   assert((await page.locator('#share-url').inputValue()).includes(reference.taskId),'live share link missing task identity');
@@ -167,6 +174,16 @@ try {
   await page.locator('#query-button').click();
   await page.waitForFunction(()=>document.querySelector('#query-message').textContent.includes('identity mismatch'));
   assert(await page.locator('#chain-state').innerText()==='Not loaded','wrong identity presented as loaded');
+
+  // A failed optional Testnet read never reverses the completed offline proof journey.
+  await page.route(/\\/api\\/showcase/,route=>route.fulfill({status:503,contentType:'application/json',body:'{}'}));
+  await page.locator('#guide-reset').click();
+  for(let index=1;index<6;index++) await page.locator('#guide-next').click();
+  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('本地六步演示已完成'));
+  await page.locator('#guide-next').click();
+  await page.waitForFunction(()=>document.querySelector('#guide-result').textContent.includes('可选 Testnet 只读查询未成功'));
+  assert(await page.locator('#payment-fact').innerText()==='PaymentUnknown','Unavailable public RPC changed payment status');
+  assert(await page.locator('#save-summary').isDisabled(),'Unavailable live task can export a fake receipt');
   assert(errors.length===0,"browser page errors: "+errors.join("; "));
   console.log("CHROMIUM STUDIO PASS: seven-step guide (live lookup mocked), real local text calculation/WebCrypto, downloaded/reuploaded Evidence, tamper rejection, stale-read isolation, identity mismatch, PaymentUnknown, responsive mobile. No public RPC or signing.");
 }finally{
