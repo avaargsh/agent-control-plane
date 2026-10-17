@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentledger-journal"
+version = "0.1.0-sdk.0"
+description = "SQLite admission and pre-charge journals for AgentLedger (Monad Testnet experiment)"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = []
+
+[project.scripts]
+agentledger-admission = "agentledger_journal.admission:main"
+agentledger-charge = "agentledger_journal.charge_attempt:main"
+
+[tool.hatch.build]
+packages = ["src/agentledger_journal"]

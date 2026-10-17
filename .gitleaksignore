@@ -1,0 +1,12 @@
+# Exact historical false positives retained by GitHub PR/CI refs after
+# the feature branch was squashed. These are PUBLIC Monad Testnet USDC
+# contract address or EIP-3009 event topic bytes, not wallet credentials.
+# We deliberately do NOT exclude whole files, rules, branches or commits.
+# Once GitHub retires old objects/refs, these fingerprints can be deleted.
+9d594c71c29511245e4f2104d48f5192a967dd5b:experiments/agentledger/tools/settlement.mjs:generic-api-key:10
+a9eceb902311e3a9855a37edfa044ef9d2b95f5c:experiments/agentledger/examples/verifier/lib/payment-approval.mjs:generic-api-key:20
+31072daabe6a424e4ea27c7c2ed4f321868e0a9b:experiments/agentledger/examples/verifier/test/approval.test.mjs:generic-api-key:12
+06dcc2c701392386a56ac81ae76508125db80680:experiments/agentledger/docs/payment-approval.md:generic-api-key:43
+e15cfce98e0e73a1bbd52285acaf897c142d77aa:experiments/agentledger/examples/verifier/test/prepare-record.test.mjs:generic-api-key:17
+197bb8365a79128d6ea903d5d5f31decf46e0248:experiments/agentledger/tools/settlement.mjs:generic-api-key:14
+f355d712073c5b5aab4edb01a697be9c738853a0:experiments/agentledger/sdk/test/sdk.test.mjs:generic-api-key:152

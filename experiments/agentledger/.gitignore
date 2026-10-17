@@ -1,0 +1,36 @@
+# Local build and execution artifacts
+out/
+cache/
+broadcast/
+receipts/
+node_modules/
+dist/
+.expo/
+
+# Local secrets and private task material — never commit these
+.env
+.env.*
+.envrc
+*.secret
+*.pem
+*.p12
+*.pfx
+*.key
+*.mnemonic
+*.seed
+*.private.json
+*.personal.json
+credentials.json
+service-account.json
+wallet.json
+wallets/
+keystores/
+secrets/
+id_rsa
+id_ed25519
+
+# Real payer approvals / Evidence can contain private user data
+approval.json
+evidence.json
+readiness.json
+summary.json

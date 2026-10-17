@@ -1,0 +1,525 @@
+# AgentLedger — Pay → Execute → Prove (Monad testnet experiment)
+
+**Status: experimental prototype; NOT production-ready; no public Testnet payment acceptance.**
+
+AgentLedger is a standalone product experiment for task settlement observations and cryptographic Evidence verification.
+It combines a task ledger, an experimental Monad Testnet x402 paid endpoint,
+and a content-addressed evidence CLI. It is deliberately outside src/, release/,
+and any existing platform release contract.
+
+## Phase 0: stable external observation contract
+
+**Read [Phase 0 contract](docs/phase0-contract.md) before using this
+prototype as a read-only settlement and evidence verification interface.** Public statuses are
+`Created / PaymentUnknown / PaymentObserved / PaymentRecorded /
+EvidenceAnchored / Conflict`. They are a **read-only projection of
+independent payment and evidence facts**. They do not change the existing
+Solidity `Created/Paid/Proven` storage status.
+
+`PaymentUnknown` is NOT payment failure or proof of no charge: never
+automatically re-charge, re-use the authorization nonce, or release a
+reservation. Chain `Paid` alone is only recorder attestation and
+`Proven` alone only shows a digest anchor, not independent execution
+correctness.
+
+Read-only inspection (requires live Testnet RPC and optional signed
+payment/Evidence files):
+
+```bash
+cd experiments/agentledger/examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+node tools/phase0-inspect.mjs ./phase0-request.json
+```
+
+AgentLedger does not schedule Agent execution, own retries or leases, or attest business outcomes.
+It only reports independently verifiable settlement observations and Evidence digests.
+Do not extract a generalized signing/payment SDK before a true
+Monad Testnet payment→execution→anchor acceptance is independently verified.
+
+## Onsite demonstration handoff
+
+For a reproducible onsite run with official Monad / Expo references, use the
+[Onsite field guide](docs/onsite-handoff.md). It starts from **Pocket as
+the only user-facing App**, while Studio and SDK remain verification tools.
+The included offline-first field preflight never uses a wallet or signs a
+transaction:
+
+```bash
+cd experiments/agentledger/apps/pocket
+npm run onsite:check         # OFFLINE, no RPC
+npm run onsite:network       # optional eth_chainId + GET /supported only
+```
+
+The CI artifact `agentledger-onsite-preflight-local` provides a
+shareable, source-labeled `readiness.json`. A successful health preflight
+**does not imply a real public Testnet settlement** or allow automatically
+retrying `PaymentUnknown`.
+
+## Product and acceptance entrypoints
+
+**One user-facing application:** [AgentLedger Pocket](apps/pocket/README.md)
+(Expo Mobile/Web; tasks, read-only settlement observations, on-device Evidence
+hash verification, and a local JSON summary).
+
+**One engineering verification workbench:**
+[Verification Studio](docs/verification-studio-demo-acceptance.md),
+running from `examples/verifier/`. It owns the detailed Phase 0 proof
+journey, real local Anvil tests, Lost ACK / wrong-identity checks, and
+independent acceptance evidence. It is **not** a second end-user product.
+
+**One canonical read-only SDK alpha:**
+[`@agentledger/verify@0.2.0-alpha.3`](sdk/README.md) exposes only
+`observe / verify / reconcile`. It is private and Node-oriented; Pocket
+uses the verifier's GET-only API instead of embedding a Node transport.
+The older extracted packages in `../agentledger-sdk/` are compatibility
+experiments, not a replacement for this SDK. The old static Demo Web and
+duplicate verifier frontend have been removed.
+
+See the [application ownership and cleanup map](docs/application-map.md)
+for the exact roles, CLI compatibility and retired-path migration rules.
+
+```bash
+# User app:
+cd experiments/agentledger/apps/pocket && npm install --ignore-scripts && npm run web
+
+# Technical verification / read-only task service:
+cd experiments/agentledger/examples/verifier && npm install --ignore-scripts && npm start
+
+# Canonical private read-only SDK validation:
+cd experiments/agentledger/sdk && npm install --ignore-scripts && npm test && npm run packcheck
+```
+
+All simulated successful journeys are explicitly **local simulation only**.
+No reviewed Monad Testnet deployment exists in the checked-in registry.
+`PaymentUnknown` forbids automatic recharge and Ledger never assumes
+execution ownership or proves execution correctness.
+
+## Real Monad Testnet observation gate (read-only)
+
+A new acceptance command is available **only after** a genuine dedicated
+Testnet wallet payment and separate authorized `recordPayment` /
+`submitEvidence` transactions. It does **not** create any transaction.
+
+```bash
+cd experiments/agentledger/examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+export MONAD_RPC_URL=https://testnet-rpc.monad.xyz
+export AGENTLEDGER_CHARGE_DB="$(pwd)/../../receipts/charge-attempts.db"
+node tools/live-acceptance.mjs ./live-request.json ./live-observation.json
+```
+
+The command refuses localhost Anvil even with chain ID 10143; validates
+the signed payer quote, on-chain USDC Transfer + EIP-3009 nonce,
+pre-charge reservation, and payment block against the current canonical
+block; verifies a real `PaymentAttested` Recorder event and a distinct
+`EvidenceAnchored` event; checks current on-chain task state and the
+SHA-256 of original Evidence, input and output bytes.
+
+Any missing/contradictory observation leaves **no success artifact** and
+must not initiate another charge. Success is strictly
+`PASS_OBSERVED_NOT_FINALITY`: observed chain events, not irreversible
+settlement, execution ownership or business result correctness.
+**No real Monad Testnet paid acceptance has yet been claimed.**
+
+See [live Testnet observation-only runbook](docs/live-testnet-observation.md).
+SDK extraction remains deferred until actual reviewed live acceptance.
+
+## What exists now
+
+| Component | Implementation | Important limit |
+| --- | --- | --- |
+| Solidity task ledger | src/AgentLedger.sol | Stores a trusted recorder's PAYMENT ATTESTATION, not independently verified USDC |
+| Lifecycle | Created → Paid → Proven | No durable offchain Executing / Failed / Expired orchestration yet |
+| Evidence | tools/evidence.mjs | SHA-256 of canonical metadata; NOT proof of truthful execution |
+| Tests | test/AgentLedger.t.sol + Node evidence/settlement tests | Foundry and Node tests, plus CI |
+| x402 HTTP gate | examples/x402-gate/server.mjs | Pre-settlement signature/quote gate and one-time charge reservation; no ledger mutation |
+| Facilitator check | tools/facilitator-preflight.mjs | Read-only /supported; fails closed for missing network/scheme |
+| On-chain receipt verifier | tools/settlement.mjs | Read-only chain/USDC/log verification, NOT payment intent authorization |
+| Task payment intent | examples/verifier/lib/payment-approval.mjs | EIP-712 payer signature verification; no automatic payment admission |
+| Durable admission journal | tools/admission-journal.py | Post-settlement SQLite PREPARED/UNKNOWN, replay/nonce conflict fences; no payment broadcast |
+| Pre-charge attempt journal | tools/charge-attempt-journal.py | Before x402 settlement, atomically allows one signed payer authorization per task; fail-closed on retries |
+| Off-chain execution demo | examples/verifier/tools/run-demo-task.mjs | Paid-only deterministic tool with input binding and Evidence output |
+| Browser verifier UI | examples/verifier/ | Read-only task query, browser-local Evidence SHA-256; no signing or payments |
+| Lost-ACK reconciliation | examples/verifier/tools/reconcile-task.mjs | No-signing review of paid Transfer + consumed nonce + precharge + chain Created/Paid/Proven |
+| Local EVM lifecycle acceptance | examples/verifier/tools/anvil-acceptance.mjs | Real Anvil deployment/transactions → deterministic tool → Evidence → UI readback; payment attestation is SIMULATED |
+
+**Critical distinction:** the HTTP gate now checks payer-signed task intent
+against an EIP-3009 payment signature **before settlement**, and reserves
+one local payment attempt. However, a reservation is **not a settled payment**;
+the journaled settlement response is unverified until independent RPC review,
+and finality/recorder admission remain separate. This demo still does NOT
+auto-call recordPayment or submitEvidence. See
+[precharge gate](docs/precharge-x402-gate.md) and
+[receipt reconciliation](docs/receipt-reconciliation.md).
+
+## Threat model and invariants
+
+- Users cannot self-assert Paid: only immutable paymentRecorder can record it.
+- Recorder MUST externally verify chain ID (10143), expected USDC contract,
+  recipient, amount, task binding and transaction finality before recording.
+- A nonzero unique settlementRef can only be consumed once across all tasks.
+  Suggested reference: hash(chainId, token, txHash, transfer log index).
+- The on-chain maxBudget only rejects recorded amounts exceeding it; it is
+  NOT an on-chain wallet spending cap or a spending approval mechanism.
+- Evidence can only be submitted by the task creator or payment recorder,
+  once, and only after Paid. It is immutable thereafter.
+- The creator being authorized to anchor evidence does not mean the execution
+  is independently verified. independent execution proof is a
+  separate, stronger verification contract and is not yet mapped here.
+- No task descriptions, prompts, personal data, secrets or model outputs
+  are stored on-chain. Only digests are stored.
+- The contract holds no payment assets. There is no escrow, refund path,
+  dispute protocol, payout release, or reorg handler. Testnet only.
+
+## Network parameters
+
+- Network: Monad Testnet (chain ID 10143; CAIP-2 eip155:10143)
+- RPC: https://testnet-rpc.monad.xyz
+- Explorer: https://testnet.monadscan.com
+- Test MON: https://faucet.monad.xyz
+- Test USDC: Circle faucet https://faucet.circle.com
+- Official Monad x402 facilitator (confirm at runtime):
+  https://x402-facilitator.molandak.org
+- Testnet USDC per Monad docs: 0x534b2f3A21130d7a60830c2Df862319e593943A3
+
+Official documentation: https://docs.monad.xyz/guides/x402
+x402 SDK: https://github.com/x402-foundation/x402
+
+Never use mainnet funds or a wallet containing valuable assets for a hackathon.
+Never commit mnemonic phrases or private keys.
+
+## Local test commands (Node 22+, Foundry)
+
+~~~bash
+cd experiments/agentledger
+node --test test/*.test.mjs
+forge test -vvv
+node tools/facilitator-preflight.mjs
+cd examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+npm test
+npm start
+# Browser: http://127.0.0.1:4321
+~~~
+
+GitHub Actions has previously passed the Foundry and Node experiment jobs.
+Recheck the latest commit's CI before merging; no public-chain deployment is claimed.
+
+## Evidence walkthrough (fully local, no tokens)
+
+~~~bash
+cd experiments/agentledger
+printf 'Summarize this tiny input' > /tmp/agentledger-input.txt
+printf 'Short summary' > /tmp/agentledger-output.txt
+# This taskId is only a fixed example, not a private key.
+TASK_ID=0x$(printf '01%.0s' {1..32})
+node tools/evidence.mjs create "$TASK_ID" \
+  /tmp/agentledger-input.txt /tmp/agentledger-output.txt evidence.json
+node tools/evidence.mjs hash evidence.json
+# Paste the onchain evidenceHash into the following:
+node tools/evidence.mjs verify evidence.json 0xYOUR_64_CHAR_EVIDENCE_HASH \
+  /tmp/agentledger-input.txt /tmp/agentledger-output.txt
+~~~
+
+For the proof hash, we hash UTF-8 JSON encoded with exact keys, fixed
+lexicographic ASCII key order, no extra whitespace, no extra keys, ISO-8601
+millisecond UTC timestamps, and lowercase 0x bytes32 digests. Raw input and
+output files are separately SHA-256 hashed by byte, not stored onchain.
+
+A matching digest proves equality with the anchored bytes under these
+rules, not that an Agent actually executed or that its output was correct.
+
+## Contract deployment (testnet, manually approved wallet)
+
+Create a **dedicated test-only account** using Foundry keystore. No secrets
+should be pasted into source, scripts, GitHub, or the README.
+
+~~~bash
+cd experiments/agentledger
+export MONAD_RPC_URL=https://testnet-rpc.monad.xyz
+export PAYMENT_RECORDER=0xYOUR_TRUSTED_RECORDER_ADDRESS
+# Install Foundry first (forge/cast) and configure its named wallet locally.
+forge create src/AgentLedger.sol:AgentLedger \
+  --rpc-url "$MONAD_RPC_URL" --account agentledger-demo \
+  --constructor-args "$PAYMENT_RECORDER" --broadcast
+# Save the returned deployed contract address:
+export LEDGER=0xYOUR_DEPLOYED_CONTRACT
+export TASK_ID=0xYOUR_64_CHAR_TASK_ID
+export DESCRIPTION_HASH=0xYOUR_64_CHAR_DESCRIPTION_HASH
+# 10,000 units = 0.01 USDC if the recorder verifies USDC has 6 decimals.
+cast send "$LEDGER" 'createTask(bytes32,bytes32,uint256)' \
+  "$TASK_ID" "$DESCRIPTION_HASH" 10000 \
+  --rpc-url "$MONAD_RPC_URL" --account agentledger-demo
+~~~
+
+**Do not call recordPayment until you have a verified, task-bound x402
+settlement receipt**. For a demo using simulated payment, use local Foundry
+tests only; never label a simulated payment as a real Monad settlement.
+
+When settlement integration is implemented, a trusted recorder calls:
+
+~~~text
+recordPayment(taskId, payer, amountAtomic, uniqueSettlementRef)
+~~~
+
+The authorized creator or recorder then anchors the verified local digest:
+
+~~~bash
+export EVIDENCE_HASH=0xYOUR_64_CHAR_EVIDENCE_SHA256
+cast send "$LEDGER" 'submitEvidence(bytes32,bytes32)' \
+  "$TASK_ID" "$EVIDENCE_HASH" \
+  --rpc-url "$MONAD_RPC_URL" --account agentledger-demo
+cast call "$LEDGER" 'getTask(bytes32)' "$TASK_ID" --rpc-url "$MONAD_RPC_URL"
+~~~
+
+## Live x402 payment-gated API (standalone milestone)
+
+~~~bash
+cd experiments/agentledger
+node tools/facilitator-preflight.mjs
+cd examples/x402-gate
+npm install
+export TASK_ID=0xYOUR_EXISTING_BYTES32_TASK_ID
+export LEDGER_ADDRESS=0xYOUR_DEPLOYED_LEDGER_CONTRACT
+export PAY_TO_ADDRESS=0xYOUR_TESTNET_USDC_RECEIVER
+export PUBLIC_ORIGIN=http://127.0.0.1:4021
+npm start
+# A fresh request should return HTTP 402 (not 200):
+curl -i "http://127.0.0.1:4021/tasks/$TASK_ID/run"
+~~~
+
+An x402 v2-compatible client needs testnet USDC and a valid
+PAYMENT-SIGNATURE to purchase a response. This server uses the Monad
+facilitator, an explicit testnet USDC address and fail-closed /supported
+checks. Its task-scoped route requires a verified EIP-712 task quote and EIP-3009
+x402 transfer authorization before settlement. It journals **unverified**
+payment responses, but does not autonomously call recordPayment, run a
+general Agent, or anchor Evidence. It does not bind the exact serialized 402
+challenge bytes to the EIP-712 quote.
+
+The read-only verification path is documented in
+[docs/receipt-reconciliation.md](docs/receipt-reconciliation.md).
+
+## Next milestones (not yet done)
+
+1. P1: Demonstrate signed quote + x402 paid retry **live on Monad Testnet**,
+   reconcile settlement to the pre-charge reservation, and prove finality
+   without replaying a charge after lost ACK.
+2. P1: Provide authorized test-only recordPayment and submitEvidence flow
+   with transaction receipts and independent readback.
+3. P1: Replace the deterministic tool demo with an actual small Agent
+   runtime execution linked to independently verifiable execution evidence.
+4. P2: Distributed budgets, refunds/disputes, multi-recorder security,
+   payment recovery across instances, and production-grade audit.
+
+Do not promote this experimental implementation into a production platform without separate
+security review, repeatable mainnet-disabled testnet acceptance evidence,
+and checks for lost responses, reorgs and duplicate payments.
+
+## Read-only browser verifier (implemented)
+
+```bash
+cd experiments/agentledger/examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+npm test
+npm start
+# Navigate to http://127.0.0.1:4321
+```
+
+The UI accepts a Monad Testnet **deployed contract address** and a bytes32
+**task ID**. The local Node service uses `viem` to check chain ID 10143,
+confirm nonempty contract bytecode, and invoke the read-only
+`getTask(bytes32)` function. It returns the status Created/Paid/Proven,
+amount, budget cap, settlement reference and immutable evidence hash.
+
+Choose the local `agentledger.evidence.v1` JSON file to reproduce the
+canonical SHA-256 digest using browser WebCrypto. Optionally select
+the **original input and output** files to verify both individual digests.
+The UI deliberately disables MATCH until the chain task is Proven.
+No file data leaves the browser. No wallet, private key, signer, or
+`recordPayment` endpoint is exposed by this component.
+
+**Trust limitations:** status Paid is a trusted recorder attestation,
+not a trustless proof of USDC settlement. Evidence hash matching proves
+byte equality only, not executor provenance or correct Agent execution.
+No public deployment or live x402 paid run is claimed by the UI.
+
+Static content is served from an explicit allowlist on local loopback,
+with a restrictive CSP and no general-purpose RPC relay. You can change
+the upstream Monad RPC through `MONAD_RPC_URL` (HTTPS or loopback only),
+but cannot change the expected chain ID in the API request.
+
+See `docs/receipt-reconciliation.md` for the remaining payment-intent
+binding and idempotency gaps. Testnet only.
+
+## Payer-signed payment intent preflight (implemented, no broadcasting)
+
+To avoid accepting an unrelated USDC Transfer for a different task, an
+EIP-712 `TaskPaymentApproval` must bind the payer's signature to the Monad
+Testnet chain ID, deployed ledger contract, task ID, description hash,
+recipient, official USDC, exact amount, nonce and short expiry.
+
+`examples/verifier/tools/prepare-record.mjs` checks a payer-signed
+approval against the **on-chain Created task** and independently checked
+USDC receipt. It prints candidate `recordPayment` args tagged
+`ELIGIBLE_FOR_RECORDER_REVIEW_NOT_SUBMITTED`. It NEVER signs or submits
+a transaction and does not yet implement durable nonce reservations.
+
+See [docs/payment-approval.md](docs/payment-approval.md) for the precise
+EIP-712 struct, CLI invocation and known replay/reconciliation gaps.
+
+## Current local acceptance slice
+
+A local, non-custodial experiment now follows these **separate** stages:
+
+```text
+EIP-712 payer approval + Created task + verified on-chain USDC Transfer
+    → SQLite PREPARED admission candidate (no automatic contract write)
+    → authorized manual recorder review / recordPayment
+    → independently query Paid + verify exact input SHA-256
+    → deterministic off-chain text statistics tool
+    → local Evidence JSON + SHA-256 (not yet anchored)
+    → authorized manual submitEvidence
+    → browser read-only task query + local Evidence comparison
+```
+
+**Only the local individual pieces are automated.** There is still no
+truthful end-to-end public Monad Testnet payment→execution→proof acceptance.
+`recordPayment` and `submitEvidence` require independently approved
+wallet actions. The demo executor is deterministic and is not an LLM Agent
+or independently verified execution attestation.
+
+- [Admission + local execution runbook](docs/admission-and-local-execution.md)
+- [EIP-712 payer approval](docs/payment-approval.md)
+- [Receipt verification](docs/receipt-reconciliation.md)
+
+Repeatable tests:
+```bash
+cd experiments/agentledger
+python3 -m unittest discover -s test -p 'test_admission_journal.py' -v
+node --test test/*.test.mjs
+forge test -vvv
+cd examples/verifier && npm install --no-audit --no-fund --ignore-scripts && npm test
+```
+
+A persistent SQLite journal prevents conflicting **recording candidates**
+within one local DB; it does **not** guarantee exactly-once x402 charges,
+a distributed budget lock or replay protection across separate workstations.
+The UNKNOWN status requires manual chain reconciliation, never blind retry.
+
+## Pre-settlement x402 authorization boundary (implemented)
+
+The task-scoped x402 demo now requires a payer-signed EIP-712
+`TaskPaymentApproval` as a Base64 `X-AgentLedger-Approval` header on
+**both** the challenge request and its paid retry. The server reads the
+live on-chain Created task and independently verifies its description,
+budget, network, payee, exact amount and payer signature. The paid retry
+also checks x402 v2 `PAYMENT-SIGNATURE`, exact public resource URL, asset
+and EIP-3009 USDC `TransferWithAuthorization` signature **before**
+passing control to the x402 payment middleware.
+
+A separate SQLite pre-charge journal atomically reserves **one attempt**
+per task/quote nonce/payment nonce. Any retry, including an identical
+paid retry after a lost ACK, is blocked and must be reconciled before
+a new purchase can be safely arranged.
+
+This is deliberately a single-workstation / single-database safety
+boundary. It is **not** globally exactly-once charging or a guarantee
+that a facilitator settled the payment. A reserved attempt is not a paid
+task; the after-settlement receipt notice is not independently verified.
+The recorder-review path and manual ledger writes remain separate.
+
+See [signed x402 precharge runbook](docs/precharge-x402-gate.md)
+and [local admission/execution runbook](docs/admission-and-local-execution.md).
+Run both hermetic journal suites and the x402 gate tests:
+
+```bash
+cd experiments/agentledger
+python3 -m unittest discover -s test -p 'test_*journal.py' -v
+cd examples/x402-gate
+npm install --no-audit --no-fund --ignore-scripts
+npm test
+```
+
+**Still required for real acceptance:** a live Monad Testnet x402 402
+challenge and paid retry, externally verified finality and transaction
+receipts, authorized recorder contract write, real runtime completion,
+Evidence anchoring and independent readback/reconciliation.
+
+## Crash/lost-ACK read-only reconciliation
+
+A payment may settle successfully even if the HTTP response is lost,
+and a trusted recorder may record it on-chain later. **Never replay a
+paid request to find out.** The verifier has a read-only recovery command:
+
+```bash
+cd experiments/agentledger/examples/verifier
+npm install --no-audit --no-fund --ignore-scripts
+export AGENTLEDGER_CHARGE_DB="$(pwd)/../../receipts/charge-attempts.db"
+node tools/reconcile-task.mjs ./approval.json \
+  ../../receipts/0xORIGINAL_PAID_TRANSACTION.json \
+  0xEXPECTED_USDC_RECEIVER
+```
+
+It verifies the payer signature, consumed EIP-3009 nonce in a matching
+USDC receipt, the local pre-charge reservation and the deployed ledger
+task state, then returns one of:
+
+- `SETTLEMENT_OBSERVED_LEDGER_CREATED` — receipt matches but on-chain
+  task still Created: **manual recorder review**, no second charge;
+- `PAID_PAYMENT_MATCH` — already recorded payment matches;
+- `PROVEN_PAYMENT_MATCH` — payment record matches; Evidence still needs
+  its independent bytes verification;
+- **Error/UNKNOWN** — mismatch or missing input. Fail closed, investigate
+  without resubmitting payment or ledger writes.
+
+This does not assert chain finality or independently correct Agent execution.
+See [lost-ACK recovery runbook](docs/lost-ack-reconciliation.md).
+
+## Repeatable local Anvil lifecycle verification
+
+The `anvil-acceptance` CI job compiles the actual Solidity contract,
+generates ephemeral local-only accounts, deploys to an Anvil EVM configured
+with chain ID 10143, creates a task and verifies it cannot execute before
+payment attestation. A **simulated recorder** changes task state to Paid,
+then the existing deterministic off-chain tool generates canonical Evidence.
+An authorized creator submits its digest to the local contract. Viem,
+browser WebCrypto and the actual read-only HTTP endpoint independently
+confirm status Proven and hash equality.
+
+The acceptance manifest is uploaded by GitHub Actions with an explicit
+`ANVIL_LOCAL_SIMULATION_NOT_MONAD_TESTNET` network field and
+`SIMULATED_RECORDER_ATTESTATION_NO_USDC_TRANSFER` payment mode.
+
+**This is not a live x402 transaction.** It uses no USDC and proves
+no Monad Testnet Facilitator settlement, transaction finality, true task
+ownership or independent Agent runtime attestation.
+
+See [Anvil acceptance instructions](docs/anvil-local-acceptance.md)
+and the `anvil-acceptance` CI job before attempting the separate
+wallet-authorized live Testnet milestone.
+
+
+## Public Testnet provenance gate (default DENY)
+
+**No contract is currently approved for a live settlement acceptance claim.**
+The tracked `phase0/reviewed-testnet-deployments.json` contains an
+empty `deployments` list. Phase 0 now requires a maintainer-reviewed
+deployment entry **before even inspecting payments**.
+
+For a candidate deployment, the signerless verifier independently
+checks the direct creation transaction, its successful canonical
+receipt, the contract address, trusted `paymentRecorder()`, and
+`keccak256` of the on-chain runtime code against the checked-in
+reviewed manifest. An ABI-compatible unreviewed contract cannot pass.
+These tests run in the pinned `examples/verifier` dependency scope;
+the pure `phase0/status.mjs` projection remains dependency-free.
+
+This is not a claim of a completed external source audit or finality.
+A URL in a manifest is not itself proof of PR approval; the recorded
+deployment must actually undergo a separate code/build/deployment
+review before it is allowed. The full procedure is in
+[Live Testnet observation](docs/live-testnet-observation.md).
+
+**SDK extraction remains deferred.** In particular, a valid local
+Anvil simulation cannot register itself as public Monad Testnet.

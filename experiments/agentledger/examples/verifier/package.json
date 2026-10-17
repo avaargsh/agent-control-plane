@@ -1,0 +1,20 @@
+{
+  "name": "agentledger-readonly-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "node browser/studio-browser-smoke.mjs"
+  },
+  "dependencies": {
+    "viem": "2.57.4"
+  },
+  "devDependencies": {
+    "playwright-core": "1.56.1"
+  }
+}

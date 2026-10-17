@@ -1,0 +1,22 @@
+out/
+cache/
+broadcast/
+.env
+.env.*
+*.secret
+evidence.json
+receipts/
+node_modules/
+dist/
+dist-*/esm/
+dist-*/types/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+.vercel
+.idea/
+.vscode/
+.DS_Store
+
+# Defensive cleanup of historical cwd-based generated test fixtures
+agentledger-evidence-test-*/

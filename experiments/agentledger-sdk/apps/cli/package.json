@@ -1,0 +1,27 @@
+{
+  "name": "@agentledger/cli",
+  "version": "0.1.0-sdk.0",
+  "description": "AgentLedger thin CLI entrypoint over the SDK packages",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "agentledger": "dist/index.js"
+  },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@agentledger/core": "0.1.0-sdk.0",
+    "@agentledger/evidence": "0.1.0-sdk.0",
+    "@agentledger/settlement": "0.1.0-sdk.0",
+    "@agentledger/x402": "0.1.0-sdk.0",
+    "@agentledger/verifier": "0.1.0-sdk.0",
+    "@agentledger/phase0": "0.1.0-sdk.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^20"
+  }
+}

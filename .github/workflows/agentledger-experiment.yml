@@ -1,0 +1,295 @@
+name: agentledger-experiment
+
+on:
+  push:
+    branches:
+      - "feat/agentledger-*"
+    paths:
+      - "experiments/agentledger/**"
+      - "experiments/agentledger-sdk/**"
+      - ".github/workflows/agentledger-experiment.yml"
+  pull_request:
+    paths:
+      - "experiments/agentledger/**"
+      - "experiments/agentledger-sdk/**"
+      - ".github/workflows/agentledger-experiment.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  extracted-sdk-compat:
+    name: Extracted SDK compatibility (API-only, no duplicate UI)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Ensure retired duplicate applications and temporary test outputs are untracked
+        run: |
+          set -euo pipefail
+          if git ls-files 'experiments/agentledger-sdk/apps/demo-web/**' 'experiments/agentledger-sdk/packages/agentledger-verifier/src/public/**' 'experiments/agentledger-sdk/agentledger-evidence-test-*/**' | grep .; then
+            echo 'Redundant UI or generated Evidence fixture reintroduced'
+            exit 1
+          fi
+          cmp experiments/agentledger/src/AgentLedger.sol experiments/agentledger-sdk/contracts/src/AgentLedger.sol
+      - name: Install pinned extraction dependencies
+        working-directory: experiments/agentledger-sdk
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build and test retained SDK packages and GET-only legacy API
+        working-directory: experiments/agentledger-sdk
+        run: |
+          npm run build
+          npm test
+      - name: Python journal compatibility tests (src layout)
+        working-directory: experiments/agentledger-sdk/packages/agentledger-journal-py
+        env:
+          PYTHONPATH: src
+        run: python3 -m unittest discover -s tests -v
+
+  evidence:
+    name: Evidence CLI unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Node evidence contract
+        working-directory: experiments/agentledger
+        run: |
+          node --check tools/evidence.mjs
+          node --check tools/facilitator-preflight.mjs
+          node --check tools/onsite-preflight.mjs
+          node --check tools/settlement.mjs
+          node --check phase0/status.mjs
+          node --check examples/x402-gate/server.mjs
+          node --test test/*.test.mjs
+          python3 -m unittest discover -s test -p 'test_*journal.py' -v
+      - name: Generate LOCAL-ONLY field readiness artifact (no network or wallets)
+        working-directory: experiments/agentledger
+        run: |
+          mkdir -p out/onsite
+          node tools/onsite-preflight.mjs --output out/onsite/readiness.json
+          node --input-type=module -e "import('node:fs').then(fs => { const r=JSON.parse(fs.readFileSync('out/onsite/readiness.json','utf8')); if (r.mode!=='LOCAL_ONLY_NO_NETWORK' || r.safeToClaimPublicTestnetAcceptance !== false || r.payment.chargeAgain !== false) process.exit(1); })"
+      - name: Upload source-labeled LOCAL onsite readiness summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentledger-onsite-preflight-local
+          path: experiments/agentledger/out/onsite/readiness.json
+          if-no-files-found: error
+          retention-days: 7
+
+  solidity:
+    name: Foundry task-ledger tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Forge tests
+        working-directory: experiments/agentledger
+        run: forge test -vvv
+
+  x402-sdk:
+    name: x402 SDK import smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned SDK without lifecycle scripts
+        working-directory: experiments/agentledger/examples/x402-gate
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Verify SDK exports without contacting Facilitator
+        working-directory: experiments/agentledger/examples/x402-gate
+        run: |
+          node --input-type=module -e "import('@x402/express').then(m => { if(typeof m.paymentMiddleware !== 'function') process.exit(1) })"
+          node --input-type=module -e "import('@x402/core/server').then(m => { if(typeof m.x402ResourceServer !== 'function') process.exit(1) })"
+          node --input-type=module -e "import('@x402/evm/exact/server').then(m => { if(typeof m.ExactEvmScheme !== 'function') process.exit(1) })"
+          node --check lib/challenge-guard.mjs
+          node --test test/*.test.mjs
+
+  verifier:
+    name: Read-only UI and contract query smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned viem dependency
+        working-directory: experiments/agentledger/examples/verifier
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Python SQLite journal runtime
+        run: python3 --version
+      - name: Syntax and hermetic verifier tests
+        working-directory: experiments/agentledger/examples/verifier
+        run: |
+          node --check server.mjs
+          node --check lib/task-reader.mjs
+          node --check lib/payment-approval.mjs
+          node --check tools/prepare-record.mjs
+          node --check lib/reconcile-task.mjs
+          node --check lib/phase0-inspect.mjs
+          node --check tools/phase0-inspect.mjs
+          node --check lib/live-acceptance.mjs
+          node --check tools/live-acceptance.mjs
+          node --check tools/reconcile-task.mjs
+          node --check public/evidence-browser.mjs
+          node --check public/demo-scenarios.mjs
+          node --check public/summary.mjs
+          node --check tools/demo-journey.mjs
+          node --check public/app.mjs
+          npm test
+      - name: Execute simulated Created-Paid-Evidence-Verify plus Unknown and identity rejections
+        working-directory: experiments/agentledger/examples/verifier
+        run: node tools/demo-journey.mjs
+      - name: Real Chromium Verification Studio interactive acceptance
+        working-directory: experiments/agentledger/examples/verifier
+        run: |
+          node --check browser/studio-browser-smoke.mjs
+          node browser/studio-browser-smoke.mjs
+      - name: Publish local-only Verification Studio summary.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentledger-studio-simulated-summary
+          path: |
+            experiments/agentledger/out/demo-journey/summary.json
+            experiments/agentledger/out/demo-journey/studio-desktop.png
+            experiments/agentledger/out/demo-journey/studio-mobile.png
+          if-no-files-found: error
+          retention-days: 7
+
+
+  pocket-mobile-preview:
+    name: AgentLedger Pocket Expo mobile/web typecheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install isolated Expo preview dependencies
+        working-directory: experiments/agentledger/apps/pocket
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Typecheck mobile and web UI
+        working-directory: experiments/agentledger/apps/pocket
+        run: npm run typecheck
+      - name: Run native/Web cryptographic Evidence and read-only task tests
+        working-directory: experiments/agentledger/apps/pocket
+        run: npm test
+      - name: Build exportable Expo Web application
+        working-directory: experiments/agentledger/apps/pocket
+        env:
+          EXPO_OFFLINE: "1"
+        run: npm run export:web
+      - name: Package deployable read-only Pocket Web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentledger-pocket-static-web-preview
+          path: experiments/agentledger/apps/pocket/dist/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Run real Chromium Desktop / Mobile Pocket walkthrough
+        working-directory: experiments/agentledger/apps/pocket
+        run: |
+          node --check browser/pocket-browser-smoke.mjs
+          npm run test:browser
+      - name: Upload Pocket visual regression screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentledger-pocket-web-chromium
+          path: experiments/agentledger/out/pocket-browser/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Inspect built static Web application
+        working-directory: experiments/agentledger/apps/pocket
+        run: |
+          test -f dist/index.html
+          if grep -E 'eth_sendTransaction|personal_sign|wallet_requestPermissions' App.tsx src/evidence.ts src/facts.ts src/observe.ts; then
+            echo 'Forbidden wallet/chain-write helper in Pocket source'
+            exit 1
+          fi
+      - name: Verify no wallet or RPC transport in the simulation fixture
+        run: |
+          node --input-type=module -e "import('node:fs').then(fs=>{let s=fs.readFileSync('experiments/agentledger/apps/pocket/src/facts.ts','utf8');if(!s.includes('BLOCKED_NO_REVIEWED_DEPLOYMENT')||!s.includes('LOCAL_SIMULATION')||!s.includes('contacted:false'))process.exit(1)})"
+
+  sdk-alpha:
+    name: Read-only SDK alpha contract (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install preview package dependencies
+        working-directory: experiments/agentledger/sdk
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Build, test error contracts, typecheck consumer and inspect npm tarball
+        working-directory: experiments/agentledger/sdk
+        run: |
+          node --check src/index.mjs
+          node --check scripts/build.mjs
+          node --check scripts/packcheck.mjs
+          npm test
+          npm run typecheck
+          npm run packcheck
+          node --input-type=module -e "import('./dist/index.mjs').then(m => { if(m.SDK_VERSION !== '0.2.0-alpha.3' || m.SDK_CAPABILITIES.charge !== false || m.SDK_CAPABILITIES.controlExecution !== false || Object.keys(m).length !== 3) process.exit(1) })"
+
+  anvil-acceptance:
+    name: Anvil local EVM lifecycle acceptance (SIMULATED payment)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install viem verifier dependencies
+        working-directory: experiments/agentledger/examples/verifier
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Compile real Solidity and exercise local Anvil transaction lifecycle
+        working-directory: experiments/agentledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          forge build
+          anvil --host 127.0.0.1 --port 18545 --chain-id 10143 --silent > "$RUNNER_TEMP/agentledger-anvil.log" 2>&1 &
+          ANVIL_PID=$!
+          trap 'kill "$ANVIL_PID" 2>/dev/null || true' EXIT
+          export AGENTLEDGER_ANVIL_RPC=http://127.0.0.1:18545
+          ready=0
+          for i in $(seq 1 50); do
+            if curl --silent --max-time 1 \
+              --header 'content-type: application/json' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+              "$AGENTLEDGER_ANVIL_RPC" | grep -q '0x279f'; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          if [ "$ready" != 1 ]; then echo 'Anvil did not start with the expected chain ID'; exit 1; fi
+          node examples/verifier/tools/anvil-acceptance.mjs
+      - name: Upload LOCAL-ONLY acceptance manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentledger-anvil-local-acceptance
+          path: experiments/agentledger/out/agentledger-anvil-acceptance.json
+          if-no-files-found: ignore
+          retention-days: 7

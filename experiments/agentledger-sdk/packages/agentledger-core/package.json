@@ -1,0 +1,18 @@
+{
+  "name": "@agentledger/core",
+  "version": "0.1.0-sdk.0",
+  "description": "AgentLedger core types, constants and EIP-712 encoding (Monad Testnet 10143)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test test/*.test.mjs",
+    "lint": "echo \"skip\""
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "agentledger-sdk",
+  "private": true,
+  "description": "AgentLedger Monad Testnet payment → execution → proof SDK monorepo. Experimental; not ACP v0.1.",
+  "version": "0.1.0-sdk.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm run test:workspaces",
+    "test:workspaces": "npm run test --if-present -w packages/agentledger-core -w packages/agentledger-evidence -w packages/agentledger-settlement -w packages/agentledger-journal-py -w packages/agentledger-x402 -w packages/agentledger-verifier -w packages/agentledger-phase0",
+    "build": "npm run build --if-present -w packages/agentledger-core -w packages/agentledger-evidence -w packages/agentledger-settlement -w packages/agentledger-x402 -w packages/agentledger-phase0 -w packages/agentledger-verifier",
+    "lint": "npm run lint --if-present -w packages/agentledger-core -w packages/agentledger-evidence -w packages/agentledger-settlement -w packages/agentledger-x402 -w packages/agentledger-verifier -w packages/agentledger-phase0"
+  },
+  "devDependencies": {}
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@agentledger/verifier",
+  "version": "0.1.0-sdk.0",
+  "description": "Legacy SDK extraction compatibility: GET-only chain reader, no browser UI",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "node --test test/*.test.mjs",
+    "lint": "echo \"skip\""
+  },
+  "dependencies": {
+    "viem": "2.57.4",
+    "@agentledger/phase0": "0.1.0-sdk.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^20"
+  }
+}
