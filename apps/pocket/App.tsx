@@ -348,14 +348,14 @@ function Inspector({fact,observed,verification,onExport,exportNotice}:{fact:Demo
  const report=observed?taskReadSummary(observed,verification):exportSummary(fact,verification.startsWith("HASH_MATCHED"));
  return <ScrollView style={s.inspector} contentContainerStyle={{padding:28}}>
   <View style={s.inspectorBrand}><Mark size={38}/><View><Text style={s.inspectorEyebrow}>AGENTLEDGER / REVIEW DESK</Text><Text style={s.inspectorBrandSub}>READ-ONLY OBSERVATION CONSOLE</Text></View></View>
-  <Text style={s.eyebrow}>JUDGE / EVIDENCE VIEW</Text><Text style={s.h2}>Every claim has a boundary.</Text><Text style={s.inspectorIntro}>A beautiful interface can show evidence. It should never claim more than the evidence proves.</Text>
+  <Text style={s.eyebrow}>JUDGE / EVIDENCE VIEW</Text><Text style={s.h2}>Every claim has a boundary.</Text><Text style={s.inspectorIntro}>Inspect the observed facts, their sources and what still needs independent verification.</Text>
   <View style={[s.notice,{marginTop:18}]}><Text style={{color:C.amber,fontWeight:"700"}}>{isLive?"TESTNET TASK ONLY · PAYMENT UNKNOWN":"LOCAL SIMULATION · NOT TESTNET ACCEPTED"}</Text><Text style={s.small}>{isLive?"Task fetched read-only via verifier. Payment not independently accepted.":"No RPC contacted. No funds spent. No real payment verified."}</Text></View>
   <InfoHeader index="01" title="Chain context"/><Row label="Chain ID" value={isLive?"10143 (task read)":"10143 (simulated)"}/><Row label="Contract" value={shorten(observed?.contract??fact.ledger)}/><Row label="RPC identity" value={isLive?"local GET verifier → Monad RPC":"testnet-rpc.monad.xyz (label only)"}/><Row label="Task ID" value={shorten(observed?.taskId??fact.taskId)}/><Row label="Description" value={shorten(observed?.descriptionHash??fact.descriptionHash)}/>
   <InfoHeader index="02" title="Read-only assertions"/>{assertions.map(([title,detail,ok])=><View key={title} style={s.assertion}><Text style={{color:ok?C.mint:C.amber,fontWeight:"800"}}>{ok?"✓":"○"}</Text><View style={{flex:1}}><Text style={s.stepTitle}>{title}</Text><Text style={s.small}>{detail}</Text></View></View>)}
   <InfoHeader index="03" title="summary.json preview"/><View style={s.jsonBox}><Text style={s.json} selectable>{JSON.stringify(report,null,2)}</Text></View>
   <Button title="Export summary.json" secondary onPress={onExport}/>
   {!!exportNotice&&<Text style={[s.small,{color:exportNotice.startsWith("EXPORT_FAILED")?C.red:C.mint}]}>{exportNotice}</Text>}
-  <Text style={[s.small,{marginTop:20}]}>ACP owns execution, leases, retry and business outcome. This app cannot sign, charge, broadcast or record payment.</Text>
+  <Text style={[s.small,{marginTop:20}]}>Read-only evidence viewer · No signing, payment, execution or automatic recharge.</Text>
  </ScrollView>;
 }
 export default function App(){
