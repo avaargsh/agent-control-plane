@@ -74,3 +74,9 @@ main{max-width:1530px;padding-top:30px}.hero{display:grid;grid-template-columns:
  .guided-demo-active .director-actions{bottom:max(10px,env(safe-area-inset-bottom))}
  .director-actions .button{min-height:44px}
 }
+
+/* Locale selection affects copy only, never transactions or source facts. */
+.language-switch{display:inline-flex;align-items:center;justify-content:center;min-width:62px;min-height:36px;padding:7px 11px;border:1px solid #AFC6E2;background:#F3F7FF;color:#2659A1;font-size:11px;font-weight:850;border-radius:9px;line-height:1.2;white-space:nowrap;cursor:pointer}
+.language-switch:hover{background:#E5EEFF;border-color:#7BA3E2}
+.language-switch:focus-visible{outline:3px solid #306CC2;outline-offset:2px}
+@media(max-width:650px){.language-switch{min-height:40px;min-width:64px}.top-actions{gap:5px}.top-actions .preview-tag{display:none}}
