@@ -37,8 +37,10 @@ try {
     "Verification Studio heading absent");
   assert(await page.locator('.bound-card').count()===0,
     "Unrelated ACP sidebar promo card should not appear");
-  assert(await page.locator('a.side-link').isVisible(),
-    "Source link should remain after removing sidebar copy");
+  assert(await page.locator('a.side-link').count()===0,
+    "Development repository link must not appear on judge-facing Studio");
+  assert(!(await page.locator('body').innerText()).includes('agent-control-plane'),
+    "Development repository name leaked into Studio");
   assert((await page.locator("#source-note").innerText()).includes("LOCAL SIMULATION"),
     "Simulation source label absent");
 
