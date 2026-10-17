@@ -495,7 +495,7 @@ layout: default
 | **真实 Monad Testnet 付款验收** | ⛔ **NOT COMPLETE — 刻意未完成** |
 | 原生 iOS 构建 / 实机测试 | ⏳ Pending |
 
-<div class="al-bar amber">链上 Paid / Proven 不会被自动当作独立 USDC 支付证明 · PR #157 保持 Draft，不合并 main</div>
+<div class="al-bar amber">链上 Paid / Proven 不会被自动当作独立 USDC 支付证明 · 本项目在 dev 独立迭代；公网付费验收仍被阻断</div>
 
 ---
 layout: default
@@ -551,7 +551,7 @@ layout: default
 <div class="al-grid2 mt6">
 
 <div><div class="al-num">产物</div><div>Pocket · Studio · Read-only SDK · readiness/summary 工具</div></div>
-<div><div class="al-num">仓库</div><div>github.com/avaargsh/agentledger-hackathon · PR <b>#157</b>（Draft）</div></div>
+<div><div class="al-num">仓库</div><div>github.com/avaargsh/agent-control-plane · <b>dev</b></div></div>
 
 </div>
 
@@ -569,7 +569,7 @@ class: text-center
 <div class="mt6">
 
 ```bash
-git clone https://github.com/avaargsh/agentledger-hackathon
+git clone https://github.com/avaargsh/agent-control-plane
 npm ci --ignore-scripts --no-audit --no-fund
 npm run dev      # Studio 4321 · Testnet 工作台 4322 · Pocket 8081
 ```
