@@ -52,6 +52,7 @@ class PRWatchWorkflow:
         if not isinstance(interval, int) or not 30 <= interval <= 86400:
             raise ValueError("poll interval must be between 30s and 1 day")
         for _ in range(100):
+            wake_at_activity_start = self._wakeup
             try:
                 status = await workflow.execute_activity(
                     read_and_persist_pr, spec,
@@ -66,12 +67,16 @@ class PRWatchWorkflow:
             except ActivityError:
                 # Read failures do not falsely complete a persistent goal.
                 pass
-            # A durable Signal can shorten poll latency across Worker restarts.
-            # Timer timeout remains the normal fallback for unattended goals.
-            observed_wake = self._wakeup
+            # Do not lose an operator wake signal received during the
+            # Activity: immediately observe current durable Goal state.
+            if self._wakeup != wake_at_activity_start:
+                continue
+            # Timer timeout remains the unattended fallback. Freeze the
+            # comparison value for the lambda on this particular iteration.
             try:
                 await workflow.wait_condition(
-                    lambda: self._wakeup != observed_wake, timeout=interval,
+                    lambda observed=wake_at_activity_start: self._wakeup != observed,
+                    timeout=interval,
                 )
             except asyncio.TimeoutError:
                 pass
