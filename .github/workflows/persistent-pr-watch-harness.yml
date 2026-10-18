@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'examples/pr_watch_*.py'
+      - 'examples/pr_watch_panel.*'
+      - 'tests/test_pr_watch_service.py'
+      - 'docs/PR_WATCH_LOCAL_API_PILOT.md'
       - 'tests/test_pr_watch_harness.py'
       - 'docs/PR_WATCH_HARNESS_VERTICAL_SLICE.md'
       - '.github/workflows/persistent-pr-watch-harness.yml'
@@ -28,6 +31,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e '.[dev]' 'temporalio>=1.8,<2'
-      - run: python -m ruff check examples/pr_watch_harness.py examples/pr_watch_github.py examples/pr_watch_temporal.py
-      - run: pytest -q tests/test_pr_watch_harness.py tests/test_attention_plane_reference.py
+      - run: python -m ruff check examples/pr_watch_harness.py examples/pr_watch_github.py examples/pr_watch_temporal.py examples/pr_watch_service.py
+      - run: pytest -q tests/test_pr_watch_harness.py tests/test_attention_plane_reference.py tests/test_pr_watch_service.py
+      - run: node --check examples/pr_watch_panel.js
       - run: PYTHONPATH=examples python -c 'import pr_watch_temporal; print(pr_watch_temporal.TASK_QUEUE)'
