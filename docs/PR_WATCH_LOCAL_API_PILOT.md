@@ -22,10 +22,13 @@ secret setup and paste it into the input; it is held only in tab memory.
 For easier manual setup, use your local secret manager to generate the JSON
 string mapping user ID to a >=32-character random token. Do not share tokens.
 
-**Important:** the pilot API itself does **not** schedule GitHub polling.
-The separately configured read-only worker / Temporal service reads the same
-stable database and advances goals. The browser only reads, registers,
-pauses/resumes/cancels; it does not trigger GitHub provider effects.
+**Important:** the HTTP process never fetches GitHub PR status itself.
+When `PR_WATCH_TEMPORAL_ADDRESS` is configured, registering a Goal now
+**automatically submits its persisted launch intent to Temporal**, while a
+separate read-only Worker polls GitHub using the same stable database. When
+Temporal is not configured, the API remains explicitly LOCAL_ONLY and
+does not submit a Workflow. See `docs/PR_WATCH_AUTO_ENROLLMENT.md`.
+The browser never triggers GitHub provider writes.
 
 ## API contract
 
@@ -37,7 +40,9 @@ body, URL, or browser-provided headers.
 |---|---|---|
 | GET | `/api/goals` | Current user's goals (bounded 100) |
 | GET | `/api/goals/{id}` | Scoped goal or 404 |
-| POST | `/api/goals` | Register goal by `goal_id`, `repo`, `number` |
+| POST | `/api/goals` | Register goal and, if configured, enroll Temporal Workflow |
+| GET | `/api/goals/{id}/launch` | Scoped launch journal status |
+| POST | `/api/goals/{id}/launch/reconcile` | Read-only Temporal existence check; never resends ambiguous start |
 | POST | `/api/goals/{id}/pause` | CAS RUNNING -> PAUSED |
 | POST | `/api/goals/{id}/resume` | CAS PAUSED -> RUNNING |
 | POST | `/api/goals/{id}/cancel` | CAS RUNNING/PAUSED -> CANCELLED |

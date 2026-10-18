@@ -122,11 +122,18 @@
   el("create").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      await api("/api/goals", { method: "POST", body: {
+      const outcome = await api("/api/goals", { method: "POST", body: {
         goal_id: el("goal-id").value, repo: el("repo").value,
         number: Number(el("number").value),
       }});
-      msg("Goal registered. An authorized worker will perform observations.");
+      const launch = outcome.launch;
+      const detail = launch && launch.mode === "LOCAL_ONLY"
+        ? "Local-only: configure the trusted Temporal bridge to auto-enroll."
+        : launch && (launch.state === "ACKED" || launch.state === "OBSERVED")
+          ? "Temporal accepted enrollment; Worker execution is not yet proven."
+          : "Enrollment " + (launch ? launch.state : "UNCONFIRMED") +
+            ": inspect status before attempting any recovery.";
+      msg("Goal registered. " + detail);
       el("create").reset();
       await refresh();
     } catch (error) { msg(error.message); }

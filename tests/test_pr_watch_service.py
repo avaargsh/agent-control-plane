@@ -280,3 +280,58 @@ def test_lost_signal_ack_does_not_erase_durable_goal_transition(tmp_path):
             api, "POST", "/api/goals/pr-1/controls/1/reconcile", who="alice", body={},
         )
         assert status == 200 and json.loads(body)["control"]["signal_state"] == "PENDING"
+
+
+
+def test_launch_read_api_is_scoped_and_local_mode_is_explicit(tmp_path):
+    with server(tmp_path) as api:
+        goal = create(api)
+        assert goal["goal_id"] == "pr-1"
+        status, data, _ = request(api, "GET", "/api/goals/pr-1/launch", who="alice")
+        assert status == 200
+        assert json.loads(data)["launch"]["state"] == "PENDING"
+        assert request(api, "GET", "/api/goals/pr-1/launch", who="bob")[0] == 404
+        assert request(
+            api, "POST", "/api/goals/pr-1/launch/reconcile", who="bob", body={},
+        )[0] == 404
+        status, body, _ = request(
+            api, "POST", "/api/goals/pr-1/launch/reconcile", who="alice", body={},
+        )
+        assert status == 200 and json.loads(body)["launch"]["mode"] == "LOCAL_ONLY"
+        assert api.service.goals.launch(user_id="alice", goal_id="pr-1")["state"] == "PENDING"
+
+
+def test_registration_triggers_temporal_enrollment_only_once(tmp_path):
+    with server(tmp_path) as api:
+        class Launcher:
+            def __init__(self):
+                self.calls = 0
+
+            def start_committed(self, store, *, user_id, goal_id):
+                self.calls += 1
+                claimed = store.claim_launch(user_id=user_id, goal_id=goal_id)
+                if claimed["state"] == "IN_FLIGHT":
+                    return store.record_launch(
+                        user_id=user_id, goal_id=goal_id,
+                        state="ACKED", evidence="START_ACK",
+                    )
+                return claimed
+
+            def reconcile(self, store, *, user_id, goal_id):
+                return store.launch(user_id=user_id, goal_id=goal_id)
+
+        launcher = Launcher()
+        api.service.launch_bridge = launcher
+        status, response, _ = request(api, "POST", "/api/goals", who="alice", body={
+            "goal_id": "task", "repo": "o/r", "number": 1,
+        })
+        assert status == 200
+        assert json.loads(response)["launch"]["state"] == "ACKED"
+        status, response, _ = request(api, "POST", "/api/goals", who="alice", body={
+            "goal_id": "task", "repo": "o/r", "number": 1,
+        })
+        assert status == 200
+        assert json.loads(response)["launch"]["state"] == "ACKED"
+        assert launcher.calls == 2  # No new provider start from repeated call.
+        assert api.service.goals.launch(user_id="alice", goal_id="task")["state"] == "ACKED"
+        assert request(api, "GET", "/api/goals/task/launch", who="bob")[0] == 404

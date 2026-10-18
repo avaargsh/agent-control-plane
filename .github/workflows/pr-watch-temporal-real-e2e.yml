@@ -5,6 +5,9 @@ on:
     paths:
       - 'examples/pr_watch_temporal.py'
       - 'examples/pr_watch_control_bridge.py'
+      - 'examples/pr_watch_launcher.py'
+      - 'tests/test_pr_watch_launcher.py'
+      - 'docs/PR_WATCH_AUTO_ENROLLMENT.md'
       - 'examples/pr_watch_service.py'
       - 'tests/test_pr_watch_control_bridge.py'
       - 'tests/test_pr_watch_service.py'
@@ -36,6 +39,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -e '.[dev]' 'temporalio>=1.8,<2'
-      - run: python -m ruff check examples/pr_watch_temporal.py examples/pr_watch_control_bridge.py examples/pr_watch_service.py tests/test_pr_watch_temporal_e2e.py tests/test_pr_watch_control_bridge.py
+      - run: python -m ruff check examples/pr_watch_temporal.py examples/pr_watch_control_bridge.py examples/pr_watch_service.py examples/pr_watch_launcher.py tests/test_pr_watch_launcher.py tests/test_pr_watch_temporal_e2e.py tests/test_pr_watch_control_bridge.py
       - name: Test against Temporal time-skipping server
-        run: python -m pytest -q tests/test_pr_watch_temporal_e2e.py tests/test_pr_watch_control_bridge.py tests/test_pr_watch_service.py -x
+        run: python -m pytest -q tests/test_pr_watch_temporal_e2e.py tests/test_pr_watch_control_bridge.py tests/test_pr_watch_service.py tests/test_pr_watch_launcher.py -x

@@ -154,6 +154,15 @@ class GoalStore:
                     checked_at TEXT, evidence TEXT,
                     PRIMARY KEY (user_id, goal_id, version)
                 );
+                CREATE TABLE IF NOT EXISTS pr_watch_launches (
+                    user_id TEXT NOT NULL, goal_id TEXT NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'PENDING',
+                    evidence TEXT, workflow_status TEXT,
+                    updated_at TEXT,
+                    PRIMARY KEY (user_id, goal_id),
+                    FOREIGN KEY (user_id,goal_id)
+                        REFERENCES pr_watch_goals(user_id,goal_id)
+                );
             """)
 
     def _connection(self) -> sqlite3.Connection:
@@ -179,7 +188,134 @@ class GoalStore:
                     "INSERT INTO pr_watch_goals (user_id,goal_id,repo,number,state) VALUES (?,?,?,?,?)",
                     (user_id, goal_id, repo, number, "RUNNING"),
                 )
+            # The first start intent commits together with Goal creation.
+            # Existing RUNNING goals from older installations enroll once.
+            current = db.execute(
+                "SELECT state FROM pr_watch_goals WHERE user_id=? AND goal_id=?",
+                (user_id, goal_id),
+            ).fetchone()
+            if current["state"] == "RUNNING":
+                db.execute(
+                    """INSERT OR IGNORE INTO pr_watch_launches (user_id,goal_id)
+                       VALUES (?,?)""",
+                    (user_id, goal_id),
+                )
         return self.get(user_id=user_id, goal_id=goal_id)
+
+    def launch(self, *, user_id: str, goal_id: str) -> dict:
+        """User-scoped enrollment status; separate from Goal execution state."""
+        self.get(user_id=user_id, goal_id=goal_id)
+        with self._connection() as db:
+            row = db.execute(
+                """SELECT user_id,goal_id,state,evidence,workflow_status,updated_at
+                   FROM pr_watch_launches WHERE user_id=? AND goal_id=?""",
+                (user_id, goal_id),
+            ).fetchone()
+        if row is None:
+            raise WatchError("launch not found within user scope")
+        return dict(row)
+
+    def pending_launches(self, *, limit: int = 100) -> list[dict]:
+        """Trusted single-node service sweep ONLY; never route to a user API."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise WatchError("invalid launch sweep limit")
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT user_id,goal_id,state FROM pr_watch_launches
+                   WHERE state IN ('PENDING','UNKNOWN')
+                   ORDER BY user_id,goal_id LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def claim_launch(self, *, user_id: str, goal_id: str) -> dict:
+        """Exactly one caller leaves PENDING; never resend an ambiguous start."""
+        claimed_now = False
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            goal = db.execute(
+                "SELECT state FROM pr_watch_goals WHERE user_id=? AND goal_id=?",
+                (user_id, goal_id),
+            ).fetchone()
+            row = db.execute(
+                "SELECT state FROM pr_watch_launches WHERE user_id=? AND goal_id=?",
+                (user_id, goal_id),
+            ).fetchone()
+            if goal is None or row is None:
+                raise WatchError("launch not found within user scope")
+            if row["state"] == "PENDING":
+                state = (
+                    "IN_FLIGHT"
+                    if goal["state"] in ("RUNNING", "PAUSED")
+                    else "SKIPPED"
+                )
+                updated = db.execute(
+                    """UPDATE pr_watch_launches SET state=?,evidence=?,
+                          updated_at=datetime('now')
+                       WHERE user_id=? AND goal_id=? AND state='PENDING'""",
+                    (
+                        state, None if state == "IN_FLIGHT" else "GOAL_INACTIVE",
+                        user_id, goal_id,
+                    ),
+                )
+                claimed_now = updated.rowcount == 1 and state == "IN_FLIGHT"
+        return {
+            **self.launch(user_id=user_id, goal_id=goal_id),
+            "claimed_now": claimed_now,
+        }
+
+    def record_launch(
+        self, *, user_id: str, goal_id: str, state: str,
+        evidence: str, workflow_status: str | None = None,
+    ) -> dict:
+        """CAS progression. Never downgrade a server ACK or invent absence."""
+        allowed = {
+            "IN_FLIGHT": {"ACKED", "OBSERVED", "UNKNOWN"},
+            "UNKNOWN": {"OBSERVED"},
+            "ACKED": {"OBSERVED"},
+        }
+        proofs = {
+            "ACKED": {"START_ACK"},
+            "OBSERVED": {"DESCRIBE_EXISTS"},
+            "UNKNOWN": {"START_UNCERTAIN", "CRASH_RECOVERY"},
+        }
+        if (
+            state not in proofs or evidence not in proofs[state]
+            or (
+                workflow_status is not None
+                and workflow_status not in (
+                    "RUNNING", "COMPLETED", "FAILED", "CANCELED", "TERMINATED", "TIMED_OUT"
+                )
+            )
+        ):
+            raise WatchError("invalid launch evidence")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT state FROM pr_watch_launches WHERE user_id=? AND goal_id=?",
+                (user_id, goal_id),
+            ).fetchone()
+            if row is None:
+                raise WatchError("launch not found within user scope")
+            if row["state"] in allowed and state in allowed[row["state"]]:
+                db.execute(
+                    """UPDATE pr_watch_launches SET state=?,evidence=?,
+                          workflow_status=?,updated_at=datetime('now')
+                       WHERE user_id=? AND goal_id=?""",
+                    (state, evidence, workflow_status, user_id, goal_id),
+                )
+        return self.launch(user_id=user_id, goal_id=goal_id)
+
+    def recover_unacknowledged_launches(self) -> int:
+        """Trusted exclusive startup ONLY: crash-in-flight becomes UNKNOWN."""
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            result = db.execute(
+                """UPDATE pr_watch_launches SET state='UNKNOWN',
+                      evidence='CRASH_RECOVERY',updated_at=datetime('now')
+                   WHERE state='IN_FLIGHT'"""
+            )
+            return result.rowcount
 
     def get(self, *, user_id: str, goal_id: str) -> Goal:
         with self._connection() as db:
