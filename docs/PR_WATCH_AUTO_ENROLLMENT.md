@@ -65,6 +65,7 @@ Configure the local pilot API and the **separate Temporal Worker** against a
 single-node stable SQLite database:
 
 ```bash
+mkdir -p .artifacts/pr-watch
 export PR_WATCH_DB=.artifacts/pr-watch/watch.db
 export PR_WATCH_TEMPORAL_ADDRESS=127.0.0.1:7233
 export PR_WATCH_TEMPORAL_NAMESPACE=default
