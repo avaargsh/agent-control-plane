@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>PR Watch · Local Harness Pilot</title>
+  <link rel="stylesheet" href="/pr-watch-panel.css">
+  <script defer src="/pr-watch-panel.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div class="brand">PR Watch <span>Harness pilot</span></div>
+      <span class="local">Local only</span>
+    </header>
+    <section class="intro">
+      <h1>Long-running tasks, quieter notifications.</h1>
+      <p>Inspect persistent GitHub PR watch goals. This pilot never changes or merges a PR.</p>
+    </section>
+    <section class="auth" aria-label="Local pilot authentication">
+      <label for="token">Local bearer token</label>
+      <div class="inline">
+        <input type="password" id="token" autocomplete="off" spellcheck="false" placeholder="Enter your local pilot token" aria-label="Local bearer token">
+        <button id="connect" type="button">Connect</button>
+      </div>
+      <p class="muted">Token stays in this tab's memory; it is not saved to browser storage.</p>
+    </section>
+    <div id="message" role="status" aria-live="polite"></div>
+    <div class="columns">
+      <section class="section">
+        <div class="section-head"><h2>Goals</h2><button id="refresh" type="button" class="secondary">Refresh</button></div>
+        <form id="create" class="create">
+          <label for="goal-id">Goal identifier</label>
+          <input id="goal-id" required maxlength="96" placeholder="monitor-my-pr">
+          <label for="repo">GitHub repository</label>
+          <input id="repo" required placeholder="owner/repo">
+          <label for="number">Pull request number</label>
+          <input id="number" type="number" required min="1" step="1" placeholder="168">
+          <button type="submit">Create goal</button>
+        </form>
+        <div id="goals" class="goal-list"><p class="muted">Connect to see your goals.</p></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><h2>Activity</h2><span class="muted">Read-only audit view</span></div>
+        <p class="muted">Events reflect durable observations; a queued notification is not a confirmed delivery.</p>
+        <div id="events" class="events"><p class="muted">No events loaded.</p></div>
+      </section>
+    </div>
+    <footer>Authentication and loopback controls are for local development only. Production requires OIDC, audited server policy and a durable database.</footer>
+  </main>
+</body>
+</html>

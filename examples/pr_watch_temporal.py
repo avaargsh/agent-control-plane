@@ -50,7 +50,7 @@ class PRWatchWorkflow:
                         maximum_attempts=3,
                     ),
                 )
-                if status["state"] == "FINISHED":
+                if status["state"] in ("FINISHED", "CANCELLED"):
                     return status
             except ActivityError:
                 # Read failures do not falsely complete a persistent goal.

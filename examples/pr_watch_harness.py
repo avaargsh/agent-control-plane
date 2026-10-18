@@ -25,6 +25,11 @@ class WatchError(ValueError):
     pass
 
 
+class WatchConflict(WatchError):
+    """Optimistic-version conflict or disallowed state transition."""
+    pass
+
+
 def utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise WatchError("datetime must be timezone-aware")
@@ -179,6 +184,63 @@ class GoalStore:
             raise WatchError("goal not found within user scope")
         return Goal(**dict(row))
 
+    def list_goals(self, *, user_id: str, limit: int = 100) -> list[Goal]:
+        if not user_id or not 1 <= limit <= 100:
+            raise WatchError("invalid user scope or list limit")
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT * FROM pr_watch_goals WHERE user_id=?
+                   ORDER BY goal_id LIMIT ?""", (user_id, limit),
+            ).fetchall()
+        return [Goal(**dict(row)) for row in rows]
+
+    def transition(
+        self, *, user_id: str, goal_id: str, action: str, expected_version: int
+    ) -> Goal:
+        """CAS control action; no background provider mutations."""
+        allowed = {
+            "pause": ("RUNNING", "PAUSED"),
+            "resume": ("PAUSED", "RUNNING"),
+            "cancel": (("RUNNING", "PAUSED"), "CANCELLED"),
+        }
+        if action not in allowed or type(expected_version) is not int or expected_version < 0:
+            raise WatchError("invalid action or expected version")
+        valid_states, target = allowed[action]
+        if isinstance(valid_states, str):
+            valid_states = (valid_states,)
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM pr_watch_goals WHERE user_id=? AND goal_id=?",
+                (user_id, goal_id),
+            ).fetchone()
+            if row is None:
+                raise WatchError("goal not found within user scope")
+            if row["version"] != expected_version or row["state"] not in valid_states:
+                raise WatchConflict("stale goal version or illegal lifecycle transition")
+            db.execute(
+                """UPDATE pr_watch_goals SET state=?,version=version+1
+                   WHERE user_id=? AND goal_id=? AND version=?""",
+                (target, user_id, goal_id, expected_version),
+            )
+        return self.get(user_id=user_id, goal_id=goal_id)
+
+    def list_events(
+        self, *, user_id: str, after: int = 0, limit: int = 100
+    ) -> list[dict]:
+        """Read-only durable per-user event cursor. emitted != delivered."""
+        if not user_id or type(after) is not int or after < 0 or not 1 <= limit <= 100:
+            raise WatchError("invalid event cursor or scope")
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT rowid AS cursor,goal_id,event_id,kind,summary,
+                          occurred_at,emitted
+                   FROM pr_watch_events WHERE user_id=? AND rowid>?
+                   ORDER BY rowid LIMIT ?""",
+                (user_id, after, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def observe(self, goal: Goal, snapshot: PullSnapshot, *, now: datetime) -> str:
         """Atomically persist new provider state and a pending Attention intent."""
         now = utc(now)
@@ -194,7 +256,7 @@ class GoalStore:
             if (row["repo"], row["number"]) != (goal.repo, goal.number):
                 raise WatchError("goal reference drift")
             if row["state"] != "RUNNING":
-                return "FINISHED"
+                return "INACTIVE"
             if row["version"] != goal.version:
                 # Concurrent read completed after another worker updated the goal.
                 return "STALE"
@@ -254,7 +316,7 @@ class GoalStore:
         now = utc(now)
         self.drain(user_id=user_id, goal_id=goal_id, now=now, preferences=preferences)
         goal = self.get(user_id=user_id, goal_id=goal_id)
-        if goal.state == "FINISHED":
+        if goal.state != "RUNNING":
             return {"state": goal.state, "phase": goal.phase, "new": False}
         # A failed GitHub read never changes durable state.
         snapshot = reader.fetch(goal.repo, goal.number)
@@ -262,7 +324,7 @@ class GoalStore:
         self.drain(user_id=user_id, goal_id=goal_id, now=now, preferences=preferences)
         current = self.get(user_id=user_id, goal_id=goal_id)
         return {"state": current.state, "phase": current.phase,
-                "new": outcome not in ("UNCHANGED", "STALE", "FINISHED")}
+                "new": outcome not in ("UNCHANGED", "STALE", "INACTIVE")}
 
 
 def main() -> None:
