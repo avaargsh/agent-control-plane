@@ -11,6 +11,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
+# The normal fast suite has no Temporal SDK dependency; dedicated CI installs it.
+pytest.importorskip("temporalio")
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 
 from temporalio import activity
