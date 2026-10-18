@@ -20,7 +20,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from pr_watch_harness import GoalStore, WatchConflict, WatchError
-from pr_watch_pg_admission import AdmissionError
 from pr_watch_control_bridge import TemporalControlBridge
 from pr_watch_launcher import TemporalLaunchBridge
 
@@ -330,7 +329,7 @@ class Handler(BaseHTTPRequestHandler):
                 ))})
                 return
             self._json(404, {"error": "not found"})
-        except (WatchError, AdmissionError) as exc:
+        except ValueError as exc:
             status = 404 if "not found within user scope" in str(exc) else 400
             self._json(status, {"error": str(exc)})
 
@@ -415,7 +414,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
         except WatchConflict as exc:
             self._json(409, {"error": str(exc)})
-        except (WatchError, AdmissionError) as exc:
+        except ValueError as exc:
             reason = str(exc)
             if "stale version" in reason or "invalid lifecycle transition" in reason:
                 status = 409
