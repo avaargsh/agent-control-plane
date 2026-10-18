@@ -1,0 +1,36 @@
+name: attention-telegram-adapter
+
+on:
+  pull_request:
+    paths:
+      - 'examples/attention_plane.py'
+      - 'examples/attention_telegram_adapter.py'
+      - 'tests/test_attention_plane_reference.py'
+      - 'tests/test_attention_telegram_adapter.py'
+      - 'docs/ATTENTION_TELEGRAM_PROVIDER_ADAPTER.md'
+      - '.github/workflows/attention-telegram-adapter.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m ruff check examples/attention_plane.py examples/attention_telegram_adapter.py
+      - run: python -m pytest -q tests/test_attention_plane_reference.py tests/test_attention_telegram_adapter.py
