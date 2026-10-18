@@ -14,7 +14,7 @@ from uuid import uuid4
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
-from psycopg import conninfo, sql
+from psycopg import conninfo, sql  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 
