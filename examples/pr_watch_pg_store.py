@@ -7,12 +7,12 @@ Install explicitly with install_v2(); no request-time DDL or silent mixed mode.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import uuid4
 
 from attention_plane import (
     AttentionEvent, AttentionPreferences, DeliveryState, Disposition,
-    EventKind, decide,
+    decide,
 )
 from pr_watch_harness import Goal, PullSnapshot, _notice, _phase, fingerprint, utc
 from pr_watch_pg_admission import AdmissionError, PostgresAdmission, _id
