@@ -75,7 +75,11 @@ def _api_child(dsn):
         assert proc.is_alive()
         yield proc, port
     finally:
-        stop.set()
+        # A child killed while waiting on multiprocessing.Event can leave
+        # its shared condition semaphore locked. Never signal a dead child:
+        # setting the Event after SIGTERM can itself deadlock the test parent.
+        if proc.is_alive():
+            stop.set()
         proc.join(timeout=8)
         if proc.is_alive():
             proc.terminate()
