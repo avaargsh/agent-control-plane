@@ -83,7 +83,7 @@ class TemporalControlBridge:
 
     async def _history_proves(self, *, user_id: str, goal_id: str,
                               signal_id: str) -> bool:
-        from temporalio.exceptions import WorkflowNotFoundError
+        from temporalio.service import RPCError, RPCStatusCode
         client = await self._client()
         handle = client.get_workflow_handle(workflow_id(user_id=user_id, goal_id=goal_id))
         try:
