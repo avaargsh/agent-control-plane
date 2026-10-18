@@ -84,18 +84,31 @@ class PilotService:
                 user_id=user_id, goal_id=goal_id, version=version,
                 state="LOCAL_ONLY", evidence="BRIDGE_DISABLED",
             )
-        return self.bridge.signal_committed(
-            self.goals, user_id=user_id, goal_id=goal_id, version=version,
-        )
+        try:
+            return self.bridge.signal_committed(
+                self.goals, user_id=user_id, goal_id=goal_id, version=version,
+            )
+        except Exception:
+            # The CAS commit already succeeded. An ACK/DB failure after
+            # Temporal accepted the Signal must not become an HTTP retry
+            # which issues a second state transition or a phantom failure.
+            return self.goals.control(
+                user_id=user_id, goal_id=goal_id, version=version,
+            )
 
     def reconcile(self, *, user_id: str, goal_id: str, version: int) -> dict:
         if self.bridge is None:
             return self.goals.control(
                 user_id=user_id, goal_id=goal_id, version=version,
             )
-        return self.bridge.reconcile(
-            self.goals, user_id=user_id, goal_id=goal_id, version=version,
-        )
+        try:
+            return self.bridge.reconcile(
+                self.goals, user_id=user_id, goal_id=goal_id, version=version,
+            )
+        except Exception:
+            return self.goals.control(
+                user_id=user_id, goal_id=goal_id, version=version,
+            )
 
 
 class Handler(BaseHTTPRequestHandler):
