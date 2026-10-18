@@ -42,8 +42,12 @@ class PRWatchWorkflow:
         self._wakeup = 0
 
     @workflow.signal
-    def wake(self) -> None:
-        """Request a prompt recheck; never authorize a provider side effect."""
+    def wake(self, control_id: str = "") -> None:
+        """Persisted hint only; activity re-reads CAS state from GoalStore."""
+        # control_id is a non-secret deterministic journal identity which can
+        # be reconciled via Temporal History when the Signal ACK gets lost.
+        if not isinstance(control_id, str) or len(control_id) > 128:
+            return
         self._wakeup += 1
 
     @workflow.run
