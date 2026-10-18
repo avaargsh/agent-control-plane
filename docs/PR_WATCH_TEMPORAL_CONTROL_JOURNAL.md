@@ -51,11 +51,14 @@ python examples/pr_watch_service.py --db .artifacts/pr-watch/watch.db --port 879
 Without `PR_WATCH_TEMPORAL_ADDRESS`, the API continues in explicit
 `LOCAL_ONLY` mode. It does not silently claim to have notified Temporal.
 
-Goals are **not automatically started** by the API; register a goal
-and start its `pr-watch/<sha256(user_id,goal_id)>` Workflow using the trusted
-operator CLI. For operational correctness, the Worker must share the same
-stable SQLite DB (local single-node test only). If a Goal is not attached to
-a Temporal Workflow, the control remains durable and status is `NO_WORKFLOW`.
+When `PR_WATCH_TEMPORAL_ADDRESS` is configured, registering a Goal now
+**automatically submits a durably recorded startup request** to Temporal,
+under the deterministic `pr-watch/<sha256(user_id,goal_id)>` Workflow ID.
+The Worker must still run separately and share the same stable SQLite DB
+(single-node pilot only). See `docs/PR_WATCH_AUTO_ENROLLMENT.md` for
+ACK/UNKNOWN and crash recovery semantics. If no active Workflow is attached,
+a control Signal can still return `NO_WORKFLOW`; the durable Goal CAS remains
+authoritative.
 
 ## HTTP contract
 
