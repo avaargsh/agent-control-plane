@@ -132,7 +132,9 @@ class PostgresMigrations:
     def _check_shape(self, conn, version: int) -> None:
         expected = dict(V1)
         if version >= 2:
-            expected["pr_watch_pg_goals"] |= V2["pr_watch_pg_goals"]
+            expected["pr_watch_pg_goals"] = (
+                expected["pr_watch_pg_goals"] | V2["pr_watch_pg_goals"]
+            )
             expected.update({
                 name: columns for name, columns in V2.items()
                 if name != "pr_watch_pg_goals"
