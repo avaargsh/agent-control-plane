@@ -19,6 +19,7 @@ pytest.importorskip("temporalio")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 
 from temporalio import activity
+from temporalio.api.enums.v1 import EventType
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -129,11 +130,27 @@ def test_real_temporal_restarts_worker_with_durable_state(tmp_path):
                 workflows=[PRWatchWorkflow], activities=[observe],
             ):
                 await asyncio.wait_for(first_finished.wait(), timeout=15)
+                # The Activity can persist the DB before Temporal confirms
+                # completion. Wait for a durable Workflow History TIMER_STARTED
+                # rather than shutting down the old worker at a racey instant.
+                async def wait_for_timer() -> None:
+                    for _ in range(120):
+                        history = await handle.fetch_history()
+                        if any(
+                            item.event_type == EventType.EVENT_TYPE_TIMER_STARTED
+                            for item in history.events
+                        ):
+                            return
+                        await asyncio.sleep(0.05)
+                    raise AssertionError("workflow did not persist its timer")
+
+                await asyncio.wait_for(wait_for_timer(), timeout=15)
             assert store.get(user_id="user-1", goal_id="restart").phase == "CI_BLOCKED"
             async with Worker(
                 env.client, task_queue=QUEUE,
                 workflows=[PRWatchWorkflow], activities=[observe],
             ):
+                await env.sleep(31)
                 result = await asyncio.wait_for(handle.result(), timeout=25)
 
         assert result["state"] == "FINISHED"
