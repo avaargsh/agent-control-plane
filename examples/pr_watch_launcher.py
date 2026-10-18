@@ -81,7 +81,9 @@ class TemporalLaunchBridge:
     def start_committed(self, store: GoalStore, *, user_id: str, goal_id: str) -> dict:
         """One start attempt, never resend IN_FLIGHT/UNKNOWN/ACKED."""
         claimed = store.claim_launch(user_id=user_id, goal_id=goal_id)
-        if claimed["state"] != "IN_FLIGHT":
+        if not claimed["claimed_now"]:
+            # An IN_FLIGHT record owned by another request is NOT permission
+            # to issue a second start_workflow RPC.
             return claimed
         try:
             outcome = asyncio.run(self._start(user_id=user_id, goal_id=goal_id))
