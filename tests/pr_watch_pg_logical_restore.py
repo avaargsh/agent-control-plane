@@ -8,6 +8,7 @@ from __future__ import annotations
 import sys
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 
 from psycopg.conninfo import make_conninfo
 
