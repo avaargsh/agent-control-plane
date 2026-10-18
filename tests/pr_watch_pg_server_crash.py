@@ -105,10 +105,15 @@ def main():
     dsn, container = _guard_environment()
     store = PostgresWatchStore(dsn)
     store.validate_v2()
-    # Dedicated job owns this database; its fresh service does not contain
-    # other users. Never truncate or DROP any data in this test.
+    # Earlier acceptance steps in the same disposable job legitimately
+    # have records. Isolate this test by identity rather than TRUNCATE:
+    # never destroy previous tests' persistence evidence.
     with psycopg.connect(dsn) as conn:
-        assert conn.execute("SELECT count(*) FROM pr_watch_pg_goals").fetchone()[0] == 0
+        assert conn.execute(
+            """SELECT count(*) FROM pr_watch_pg_goals
+               WHERE user_id IN (%s,%s)""",
+            (USER, RECEIPT_USER),
+        ).fetchone()[0] == 0
     old_epoch = _started_at(dsn)
 
     _register(store, USER, "acknowledged")
