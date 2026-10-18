@@ -150,7 +150,9 @@ def test_real_temporal_restarts_worker_with_durable_state(tmp_path):
                 env.client, task_queue=QUEUE,
                 workflows=[PRWatchWorkflow], activities=[observe],
             ):
-                await env.sleep(31)
+                # Signal is recorded by Temporal, so the new Worker can
+                # resume immediately without a timing-sensitive fake sleep.
+                await handle.signal(PRWatchWorkflow.wake)
                 result = await asyncio.wait_for(handle.result(), timeout=25)
 
         assert result["state"] == "FINISHED"
