@@ -105,6 +105,13 @@ class Handler(BaseHTTPRequestHandler):
         self._data(status, data, "application/json; charset=utf-8")
 
     def _identity(self) -> str | None:
+        allowed_hosts = {
+            "127.0.0.1:" + str(self.server.server_port),
+            "localhost:" + str(self.server.server_port),
+        }
+        if self.headers.get("Host") not in allowed_hosts:
+            self._json(403, {"error": "untrusted Host"})
+            return None
         user = self.server.service.tokens.resolve(self.headers.get_all("Authorization", []))
         if user is None:
             self._json(401, {"error": "authentication required"})
@@ -207,7 +214,12 @@ class Handler(BaseHTTPRequestHandler):
             if query:
                 raise WatchError("unexpected query")
             # Loopback-only and no CORS. Block cross-origin browser writes.
-            if self.headers.get("Origin") is not None:
+            origin = self.headers.get("Origin")
+            trusted_origins = {
+                "http://127.0.0.1:" + str(self.server.server_port),
+                "http://localhost:" + str(self.server.server_port),
+            }
+            if origin is not None and origin not in trusted_origins:
                 raise WatchError("cross-origin writes are not allowed")
             data = self._body()
             store = self.server.service.goals
@@ -216,8 +228,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise WatchError("goal_id, repo and number are required")
                 if not isinstance(data["goal_id"], str) or not _ID.fullmatch(data["goal_id"]):
                     raise WatchError("invalid goal ID")
-                if type(data["number"]) is not int:
-                    raise WatchError("invalid PR number")
+                if type(data["number"]) is not int or not isinstance(data["repo"], str):
+                    raise WatchError("invalid PR selector")
                 goal = store.register(user_id=user, goal_id=data["goal_id"],
                                       repo=data["repo"], number=data["number"])
                 self._json(200, {"goal": asdict(goal)})
