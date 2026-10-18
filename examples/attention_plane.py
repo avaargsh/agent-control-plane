@@ -307,7 +307,7 @@ class AttentionOutbox:
                 """SELECT * FROM deliveries
                    WHERE user_id=? AND state=? AND due_at<=?
                    ORDER BY due_at, outbox_id LIMIT ?""",
-                (user_id, DeliveryState.PENDING.value, now.isoformat(), limit),
+                (user_id, DeliveryState.PENDING.value, now.astimezone(timezone.utc).isoformat(), limit),
             ).fetchall()
             for row in rows:
                 generation = row["generation"] + 1
@@ -342,7 +342,7 @@ class AttentionOutbox:
                     state.value,
                     now.isoformat() if state is DeliveryState.DELIVERED else None,
                     lease.outbox_id, lease.user_id, DeliveryState.CLAIMED.value,
-                    lease.owner, lease.generation, now.isoformat(),
+                    lease.owner, lease.generation, now.astimezone(timezone.utc).isoformat(),
                 ),
             )
             if updated.rowcount != 1:
@@ -364,7 +364,7 @@ class AttentionOutbox:
                    WHERE state=? AND expires_at<=?""",
                 (
                     DeliveryState.UNKNOWN.value,
-                    DeliveryState.CLAIMED.value, now.isoformat(),
+                    DeliveryState.CLAIMED.value, now.astimezone(timezone.utc).isoformat(),
                 ),
             )
             return result.rowcount
