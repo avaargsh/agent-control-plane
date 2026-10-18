@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from pr_watch_harness import GoalStore, WatchConflict, WatchError
 from pr_watch_control_bridge import TemporalControlBridge
+from pr_watch_launcher import TemporalLaunchBridge
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
 _BEARER = re.compile(r"^Bearer ([A-Za-z0-9._~+/-]{32,256})$")
@@ -73,10 +74,37 @@ class PilotService:
     def __init__(
         self, db_path: str | Path, tokens: LocalTokens,
         bridge: TemporalControlBridge | None = None,
+        launch_bridge: TemporalLaunchBridge | None = None,
     ) -> None:
         self.goals = GoalStore(db_path)
         self.tokens = tokens
         self.bridge = bridge
+        self.launch_bridge = launch_bridge
+
+    def start_committed(self, *, user_id: str, goal_id: str) -> dict:
+        if self.launch_bridge is None:
+            return {
+                **self.goals.launch(user_id=user_id, goal_id=goal_id),
+                "mode": "LOCAL_ONLY",
+            }
+        try:
+            return self.launch_bridge.start_committed(
+                self.goals, user_id=user_id, goal_id=goal_id,
+            )
+        except Exception:
+            # Goal and launch record already committed: never tell the client
+            # it needs to re-register to repair an uncertain provider start.
+            return self.goals.launch(user_id=user_id, goal_id=goal_id)
+
+    def reconcile_launch(self, *, user_id: str, goal_id: str) -> dict:
+        if self.launch_bridge is None:
+            return self.start_committed(user_id=user_id, goal_id=goal_id)
+        try:
+            return self.launch_bridge.reconcile(
+                self.goals, user_id=user_id, goal_id=goal_id,
+            )
+        except Exception:
+            return self.goals.launch(user_id=user_id, goal_id=goal_id)
 
     def signal_committed(self, *, user_id: str, goal_id: str, version: int) -> dict:
         if self.bridge is None:
@@ -231,6 +259,17 @@ class Handler(BaseHTTPRequestHandler):
                 lines.append(": snapshot-complete\n\n")
                 self._data(200, "".join(lines).encode("utf-8"), "text/event-stream; charset=utf-8")
                 return
+            launch_match = re.fullmatch(
+                r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/launch", path
+            )
+            if launch_match:
+                if query:
+                    raise WatchError("unexpected query")
+                record = service.goals.launch(
+                    user_id=user, goal_id=launch_match.group(1),
+                )
+                self._json(200, {"launch": record})
+                return
             control_list = re.fullmatch(
                 r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/controls", path
             )
@@ -279,7 +318,24 @@ class Handler(BaseHTTPRequestHandler):
                     raise WatchError("invalid PR selector")
                 goal = store.register(user_id=user, goal_id=data["goal_id"],
                                       repo=data["repo"], number=data["number"])
-                self._json(200, {"goal": asdict(goal)})
+                launch = self.server.service.start_committed(
+                    user_id=user, goal_id=goal.goal_id,
+                )
+                code = 200 if launch["state"] in (
+                    "ACKED", "OBSERVED",
+                ) or launch.get("mode") == "LOCAL_ONLY" else 202
+                self._json(code, {"goal": asdict(goal), "launch": launch})
+                return
+            launch_reconcile = re.fullmatch(
+                r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/launch/reconcile", path
+            )
+            if launch_reconcile:
+                if data:
+                    raise WatchError("launch reconcile requires an empty JSON object")
+                launch = self.server.service.reconcile_launch(
+                    user_id=user, goal_id=launch_reconcile.group(1),
+                )
+                self._json(200, {"launch": launch})
                 return
             reconcile_match = re.fullmatch(
                 r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/controls/"
@@ -342,14 +398,21 @@ def main() -> None:
     except json.JSONDecodeError as exc:
         raise SystemExit("Configure PR_WATCH_LOCAL_TOKENS_JSON with local user/token map") from exc
     address = os.environ.get("PR_WATCH_TEMPORAL_ADDRESS")
-    bridge = (
-        TemporalControlBridge(
-            address=address, namespace=os.getenv("PR_WATCH_TEMPORAL_NAMESPACE", "default"),
+    namespace = os.getenv("PR_WATCH_TEMPORAL_NAMESPACE", "default")
+    bridge = TemporalControlBridge(address=address, namespace=namespace) if address else None
+    launcher = (
+        TemporalLaunchBridge(
+            address=address, namespace=namespace,
+            interval_seconds=int(os.getenv("PR_WATCH_INTERVAL_SECONDS", "300")),
         ) if address else None
     )
-    server = PilotHTTPServer(
-        (args.host, args.port), PilotService(args.db, LocalTokens(tokens), bridge),
-    )
+    service = PilotService(args.db, LocalTokens(tokens), bridge, launcher)
+    server = PilotHTTPServer((args.host, args.port), service)
+    if launcher is not None:
+        # Only on the exclusive single-node service startup, never on GET.
+        # This is a bounded sweep; UNKNOWN is read-only reconciled, not resent.
+        summary = launcher.recover_on_exclusive_startup(service.goals)
+        print("Temporal enrollment sweep: " + json.dumps(summary, sort_keys=True))
     print(f"Local PR-watch pilot listening at http://{args.host}:{args.port}")
     try:
         server.serve_forever()
