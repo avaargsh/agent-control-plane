@@ -284,6 +284,7 @@ class AttentionOutbox:
                         uuid4().hex,
                         event.user_id,
                         event.goal_id,
+                        event.event_id,
                         f"{event.kind.value}:{event.dedupe_key}",
                         event.summary,
                         decision.notify_after.isoformat(),
