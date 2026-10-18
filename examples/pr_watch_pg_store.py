@@ -93,13 +93,16 @@ class PostgresWatchStore(PostgresAdmission):
     """Scoped reference store sharing one PostgreSQL transaction model."""
 
     def install_v2(self) -> None:
-        """Explicit v1 -> v2 additive DDL; no automatic install in __init__."""
-        self.install_v1()
-        with self._connection() as conn:
-            conn.execute(SCHEMA_V2)
+        """Explicit versioned V1->V2 migration; no implicit request-time DDL."""
+        from pr_watch_pg_migrations import PostgresMigrations
+
+        PostgresMigrations(self._dsn).upgrade(2)
 
     def validate_v2(self) -> None:
-        """Fail fast on misconfigured/unmigrated DB; no runtime DDL."""
+        """Fail closed on old, unversioned or drifted schemas, without DDL."""
+        from pr_watch_pg_migrations import PostgresMigrations
+
+        PostgresMigrations(self._dsn).require_version(2)
         with self._connection() as conn:
             for table in (
                 "pr_watch_pg_goals", "pr_watch_pg_launches",
