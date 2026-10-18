@@ -83,6 +83,8 @@ def test_unauthenticated_and_wrong_token_access_denied(tmp_path):
         assert request(api, "POST", "/api/goals", body={})[0] == 401
         assert request(api, "GET", "/api/events", headers={"Authorization":"Bearer " + "x" * 40})[0] == 401
         assert request(api, "GET", "/healthz")[0] == 200
+        assert request(api, "GET", "/api/goals", who="alice",
+                       headers={"Host":"attacker.example"})[0] == 403
 
 
 def test_create_list_and_cross_user_get_denied(tmp_path):
@@ -179,6 +181,10 @@ def test_request_validation_rejects_origin_malformed_json_and_path_encoding(tmp_
         assert request(api, "POST", "/api/goals", who="alice", body={
             "goal_id": "good", "repo": "o/r", "number": 1,
         }, headers={"Origin": "https://evil.example"})[0] == 400
+        trusted = "http://127.0.0.1:" + str(api.server_port)
+        assert request(api, "POST", "/api/goals", who="alice", body={
+            "goal_id": "good", "repo": "o/r", "number": 1,
+        }, headers={"Origin": trusted})[0] == 200
         assert request(api, "GET", "/api/goals/%2e%2e", who="alice")[0] == 400
         assert request(api, "POST", "/api/goals", who="alice", body={
             "goal_id": "bad/path", "repo": "o/r", "number": 1,
