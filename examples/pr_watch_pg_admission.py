@@ -84,9 +84,10 @@ class PostgresAdmission:
         return connect(self._dsn, row_factory=dict_row, connect_timeout=5)
 
     def install_v1(self) -> None:
-        """Operator-only DDL. No implicit schema changes on request handling."""
-        with self._connection() as conn:
-            conn.execute(SCHEMA_V1)
+        """Explicit operator migration, audited by schema version and checksum."""
+        from pr_watch_pg_migrations import PostgresMigrations
+
+        PostgresMigrations(self._dsn).upgrade(1)
 
     def register(
         self, *, user_id: str, goal_id: str, repo: str, number: int

@@ -23,8 +23,9 @@ export PR_WATCH_LOCAL_TOKENS_JSON='{"demo":"replace-this-with-a-secure-random-40
 unset PR_WATCH_DB
 
 # One-time reviewed pilot schema installation, never implicit on HTTP startup:
-PYTHONPATH=examples python -c \
-  'import os; from pr_watch_pg_store import PostgresWatchStore; PostgresWatchStore(os.environ["PR_WATCH_PG_DSN"]).install_v2()'
+python examples/pr_watch_pg_migrations.py upgrade --to 2
+python examples/pr_watch_pg_migrations.py status
+# For complete pre-ledger V1/V2 schemas only: add --adopt-legacy to upgrade
 
 # Terminal A: Workflow Worker, same PR_WATCH_STORAGE and PR_WATCH_PG_DSN
 python examples/pr_watch_temporal.py worker
@@ -61,7 +62,7 @@ not fallback to SQLite.
   automatically retried. Provider ACCEPTED does not mean human read.
 - Control Signal ACK and its read-only Temporal history reconciliation keep
   the existing semantics. A Signal is a wake hint, never workflow authority.
-- PostgreSQL startup checks its V2 tables and Goal columns without creating
+- PostgreSQL startup checks ledger version 2, SQL checksums, required\n  keys/indexes and V2 tables and Goal columns without creating
   any schema on reads. The startup sweep has a **bounded** set of launch
   candidates: truly PENDING starts can be attempted once, expired claims
   become UNKNOWN, and UNKNOWN records are only described, not resent.
