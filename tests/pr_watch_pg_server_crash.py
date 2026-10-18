@@ -234,12 +234,24 @@ def main():
 
         # Expiration is conservative even after a physical server crash:
         # no retry of possibly accepted remote start or notification.
-        assert store.recover_expired() >= 1
+        # The database can restart faster than the one-second leases.
+        # Wait for PostgreSQL server clock, not assumptions about Docker time.
+        for _ in range(30):
+            store.recover_expired()
+            if store.launch(
+                user_id=USER, goal_id="inflight-start",
+            )["state"] == "UNKNOWN":
+                break
+            time.sleep(0.1)
         assert store.launch(user_id=USER, goal_id="inflight-start")["state"] == "UNKNOWN"
         assert not store.claim(
             user_id=USER, goal_id="inflight-start", owner="new-worker",
         ).claimed_now
-        assert store.recover_expired_deliveries(user_id=USER) == 1
+        for _ in range(30):
+            store.recover_expired_deliveries(user_id=USER)
+            if store.delivery_counts(user_id=USER) == {"UNKNOWN": 1}:
+                break
+            time.sleep(0.1)
         assert store.delivery_counts(user_id=USER) == {"UNKNOWN": 1}
         assert store.claim_due(user_id=USER, owner="new-sender") == []
         assert store.delivery_counts(user_id=RECEIPT_USER) == {"DELIVERED": 1}
