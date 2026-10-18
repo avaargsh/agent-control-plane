@@ -20,13 +20,13 @@ psycopg = pytest.importorskip("psycopg")
 temporalio = pytest.importorskip("temporalio")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
-from temporalio.testing import WorkflowEnvironment
+from temporalio.testing import WorkflowEnvironment  # noqa: E402
 
-from pr_watch_control_bridge import workflow_id
-from pr_watch_launcher import TemporalLaunchBridge
-from pr_watch_pg_admission import AdmissionError, PostgresAdmission
-from pr_watch_pg_dispatcher import PostgresLaunchDispatcher
-from pr_watch_temporal import TASK_QUEUE
+from pr_watch_control_bridge import workflow_id  # noqa: E402
+from pr_watch_launcher import TemporalLaunchBridge  # noqa: E402
+from pr_watch_pg_admission import AdmissionError, PostgresAdmission  # noqa: E402
+from pr_watch_pg_dispatcher import PostgresLaunchDispatcher  # noqa: E402
+from pr_watch_temporal import TASK_QUEUE  # noqa: E402
 
 DSN = os.getenv("PR_WATCH_PG_TEST_DSN")
 
