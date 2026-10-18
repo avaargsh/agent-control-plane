@@ -1,9 +1,13 @@
 from datetime import datetime, time, timedelta, timezone
+from pathlib import Path
+import sys
 
 import pytest
 
 from agent_control_plane.state_transition_protocol import ProtocolViolation
-from examples.attention_plane import (
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
+
+from attention_plane import (
     AttentionEvent,
     AttentionOutbox,
     AttentionPreferences,
