@@ -146,7 +146,7 @@ class PostgresMigrations:
                 raise MigrationError("missing required columns: " + table)
             found = self._constraints(conn, table)
             required = KEYS[table]
-            if any(f < r for f, r in zip(found, required)):
+            if any(f < r for f, r in zip(found, required, strict=True)):
                 raise MigrationError("missing required keys: " + table)
         for ver in range(1, version + 1):
             for index in INDEXES[ver]:
