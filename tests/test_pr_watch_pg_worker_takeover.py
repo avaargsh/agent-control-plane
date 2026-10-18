@@ -138,10 +138,11 @@ def test_os_worker_sigkill_and_temporal_activity_redelivery(tmp_path):
                     workflows=[PRWatchWorkflow], activities=[recovered],
                     max_cached_workflows=0,
                 ):
-                    # The original Activity timed out at 45s; Temporal must
-                    # redeliver to Worker B without a second Workflow start.
-                    # time-skipping test server advances only while result is
-                    # awaited, not while the old Activity is running.
+                    # The initial Activity has a 45s start-to-close timeout.
+                    # The time-skipping server does NOT infer that the killed
+                    # subprocess went away; explicitly advance virtual time
+                    # beyond that timeout + its 5s retry backoff.
+                    await env.sleep(56)
                     result = await asyncio.wait_for(handle.result(), timeout=25)
                 assert result["state"] == "FINISHED"
                 assert result["phase"] == "MERGED"
