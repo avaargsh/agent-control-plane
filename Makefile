@@ -30,6 +30,9 @@ quality-context:
 		scripts/verify_v01_public_contract.py \
 		scripts/verify_v01_acceptance_artifacts.py \
 		scripts/live_cross_agent_context_handoff.py \
+		integration/durability/dbos_recovery_probe.py \
+		integration/durability/dbos_worker.py \
+		tests/test_dbos_recovery_probe.py \
 		tests/kubernetes_testkit.py \
 		tests/test_authority_reservation.py \
 		tests/context_testkit.py \

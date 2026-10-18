@@ -62,3 +62,11 @@ make smoke
 
 This profile is separate from the v0.1.0 release Golden Slice. Preflight
 success does not claim end-to-end provider acceptance.
+
+## Optional durable-backend upgrade experiment
+
+The [DBOS continuation recovery probe](integration/durability/README.md) uses
+isolated Pydantic AI 2.56.0/2.57.0 environments and real DBOS SQLite histories.
+It checks process-crash recovery and explicitly reproduces the incompatible
+cross-version takeover. It is an opt-in integration experiment, not a new ACP
+runtime dependency or a live-provider acceptance gate.
