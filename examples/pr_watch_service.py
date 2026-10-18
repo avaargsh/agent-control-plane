@@ -277,6 +277,23 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/healthz":
                 self._json(200, {"status": "ok"})
                 return
+            if path == "/readyz":
+                if query:
+                    raise WatchError("unexpected query")
+                # Liveness is not database readiness. In opt-in PG mode,
+                # query the authoritative schema ledger rather than
+                # incorrectly claiming healthy service on a dead backend.
+                service = self.server.service
+                if service.storage_backend == "postgres":
+                    try:
+                        service.goals.validate_v2()
+                    except Exception:
+                        # Deliberately no DSN, driver error or credentials in
+                        # an unauthenticated readiness response.
+                        self._json(503, {"status": "unavailable"})
+                        return
+                self._json(200, {"status": "ready"})
+                return
             user = self._identity()
             if user is None:
                 return
