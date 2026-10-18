@@ -201,3 +201,82 @@ def test_assets_load_and_do_not_embed_credentials(tmp_path):
         assert status == 200
         assert "localStorage" not in script
         assert "textContent" in script
+
+
+def test_local_control_journal_is_atomic_and_explicitly_unattached(tmp_path):
+    with server(tmp_path) as api:
+        create(api)
+        status, body, _ = request(api, "POST", "/api/goals/pr-1/pause", who="alice",
+                                  body={"expected_version": 0})
+        response = json.loads(body)
+        assert status == 202
+        assert response["goal"]["state"] == "PAUSED"
+        assert response["control"]["signal_state"] == "LOCAL_ONLY"
+        assert response["control"]["version"] == 1
+        assert response["control"]["action"] == "pause"
+        rows = json.loads(request(api, "GET", "/api/goals/pr-1/controls",
+                                  who="alice")[1])["controls"]
+        assert len(rows) == 1 and rows[0]["signal_state"] == "LOCAL_ONLY"
+        assert request(api, "GET", "/api/goals/pr-1/controls", who="bob")[0] == 404
+        assert request(api, "POST", "/api/goals/pr-1/controls/1/reconcile",
+                       who="bob", body={})[0] == 404
+        status, body, _ = request(api, "POST", "/api/goals/pr-1/controls/1/reconcile",
+                                  who="alice", body={})
+        assert status == 200 and json.loads(body)["control"]["signal_state"] == "LOCAL_ONLY"
+        assert request(api, "POST", "/api/goals/pr-1/pause", who="alice",
+                       body={"expected_version": 0})[0] == 409
+        assert len(api.service.goals.controls(user_id="alice", goal_id="pr-1")) == 1
+
+
+def test_control_signal_bridge_ack_and_history_reconciliation(tmp_path):
+    with server(tmp_path) as api:
+        create(api)
+        class Bridge:
+            def signal_committed(self, store, *, user_id, goal_id, version):
+                return store.record_control_signal(
+                    user_id=user_id, goal_id=goal_id, version=version,
+                    state="UNKNOWN", evidence="ACK_UNCERTAIN",
+                )
+            def reconcile(self, store, *, user_id, goal_id, version):
+                return store.record_control_signal(
+                    user_id=user_id, goal_id=goal_id, version=version,
+                    state="ACKED", evidence="HISTORY_PROOF",
+                )
+        api.service.bridge = Bridge()
+        status, body, _ = request(api, "POST", "/api/goals/pr-1/pause",
+                                  who="alice", body={"expected_version": 0})
+        assert status == 202 and json.loads(body)["control"]["signal_state"] == "UNKNOWN"
+        status, body, _ = request(
+            api, "POST", "/api/goals/pr-1/controls/1/reconcile", who="alice", body={},
+        )
+        assert status == 200 and json.loads(body)["control"]["signal_state"] == "ACKED"
+        assert api.service.goals.control(
+            user_id="alice", goal_id="pr-1", version=1,
+        )["evidence"] == "HISTORY_PROOF"
+        assert api.service.goals.record_control_signal(
+            user_id="alice", goal_id="pr-1", version=1,
+            state="UNKNOWN", evidence="ACK_UNCERTAIN",
+        )["signal_state"] == "ACKED"
+
+
+def test_lost_signal_ack_does_not_erase_durable_goal_transition(tmp_path):
+    with server(tmp_path) as api:
+        create(api)
+        class BrokenBridge:
+            def signal_committed(self, *args, **kwargs):
+                raise ConnectionResetError("Temporal ACK dropped after accepted")
+            def reconcile(self, *args, **kwargs):
+                raise ConnectionResetError("Temporal still unavailable")
+        api.service.bridge = BrokenBridge()
+        status, body, _ = request(api, "POST", "/api/goals/pr-1/cancel",
+                                  who="alice", body={"expected_version": 0})
+        assert status == 202
+        assert json.loads(body)["goal"]["state"] == "CANCELLED"
+        assert json.loads(body)["control"]["signal_state"] == "PENDING"
+        assert request(api, "POST", "/api/goals/pr-1/cancel", who="alice",
+                       body={"expected_version": 0})[0] == 409
+        assert api.service.goals.get(user_id="alice", goal_id="pr-1").state == "CANCELLED"
+        status, body, _ = request(
+            api, "POST", "/api/goals/pr-1/controls/1/reconcile", who="alice", body={},
+        )
+        assert status == 200 and json.loads(body)["control"]["signal_state"] == "PENDING"
