@@ -1,0 +1,2 @@
+pydantic-ai-slim[dbos]==2.56.0
+dbos==3.3.0

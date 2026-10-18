@@ -1,0 +1,46 @@
+name: durability-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Repetitions per case (1 to 100)
+        default: "1"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  dbos-continuation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install uv
+      - name: Isolated pinned upstream environments
+        run: |
+          uv venv .venv-durability-old
+          uv pip install --python .venv-durability-old/bin/python -r integration/durability/requirements-old.txt
+          uv venv .venv-durability-new
+          uv pip install --python .venv-durability-new/bin/python -r integration/durability/requirements-new.txt
+      - name: Crash and recover real DBOS workflows
+        env:
+          ITERATIONS: ${{ inputs.iterations }}
+        run: |
+          python -c 'import os; n=int(os.environ["ITERATIONS"]); assert 1 <= n <= 100'
+          python integration/durability/dbos_recovery_probe.py \
+            --old-python .venv-durability-old/bin/python \
+            --new-python .venv-durability-new/bin/python \
+            --output .artifacts/durability --iterations "$ITERATIONS" --jobs 4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dbos-continuation-evidence
+          path: .artifacts/durability
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: warn
