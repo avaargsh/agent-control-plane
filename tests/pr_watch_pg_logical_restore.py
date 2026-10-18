@@ -5,13 +5,10 @@ service; never overwrites the source database, never suggests PITR coverage.
 """
 from __future__ import annotations
 
-import os
 import sys
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
 
-import psycopg
 from psycopg.conninfo import make_conninfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
