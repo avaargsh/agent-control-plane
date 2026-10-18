@@ -153,7 +153,16 @@ def test_real_temporal_restarts_worker_with_durable_state(tmp_path):
                 # Signal is recorded by Temporal, so the new Worker can
                 # resume immediately without a timing-sensitive fake sleep.
                 await handle.signal(PRWatchWorkflow.wake)
-                result = await asyncio.wait_for(handle.result(), timeout=25)
+                try:
+                    result = await asyncio.wait_for(handle.result(), timeout=10)
+                except TimeoutError:
+                    history = await handle.fetch_history()
+                    print("TEMPORAL_DEBUG_ATTEMPTS", len(calls), calls)
+                    print("TEMPORAL_DEBUG_EVENTS", [
+                        (e.event_id, EventType.Name(e.event_type))
+                        for e in history.events[-30:]
+                    ])
+                    raise
 
         assert result["state"] == "FINISHED"
         assert calls == ["restart", "restart"]
