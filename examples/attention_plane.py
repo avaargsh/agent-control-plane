@@ -210,6 +210,17 @@ class AttentionOutbox:
                 );
                 CREATE INDEX IF NOT EXISTS deliveries_claim_idx
                   ON deliveries (state, due_at);
+                CREATE TABLE IF NOT EXISTS delivery_receipts (
+                    outbox_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    recipient_digest TEXT NOT NULL,
+                    remote_message_id TEXT NOT NULL,
+                    accepted_at TEXT NOT NULL,
+                    owner TEXT NOT NULL,
+                    generation INTEGER NOT NULL,
+                    UNIQUE(provider, recipient_digest, remote_message_id)
+                );
                 """
             )
 
@@ -353,21 +364,87 @@ class AttentionOutbox:
         """Call only after a confirmed provider receipt, not after a timeout."""
         self._complete_claim(lease, now=now, state=DeliveryState.DELIVERED)
 
+    def mark_delivered_with_receipt(
+        self, lease: DeliveryLease, *, now: datetime,
+        provider: str, remote_message_id: str, recipient_digest: str,
+    ) -> None:
+        """Atomically finalize a valid lease and persist provider ACCEPTED proof.
+
+        This is not proof that a human read the notification. A DB failure
+        after provider acceptance leaves a CLAIMED/UNKNOWN result, never an
+        automatically retried one.
+        """
+        _aware(now)
+        if not (
+            provider == "telegram"
+            and remote_message_id.isdecimal()
+            and 1 <= len(remote_message_id) <= 32
+            and len(recipient_digest) == 64
+            and all(c in "0123456789abcdef" for c in recipient_digest)
+        ):
+            raise ProtocolViolation("invalid provider acknowledgement identity")
+        at = now.astimezone(timezone.utc).isoformat()
+        with self._transaction() as db:
+            updated = db.execute(
+                """UPDATE deliveries SET state=?, delivered_at=?
+                   WHERE outbox_id=? AND user_id=? AND state=? AND owner=?
+                     AND generation=? AND expires_at>?""",
+                (
+                    DeliveryState.DELIVERED.value, at, lease.outbox_id,
+                    lease.user_id, DeliveryState.CLAIMED.value, lease.owner,
+                    lease.generation, at,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ProtocolViolation("delivery lease lost or already finalized")
+            db.execute(
+                """INSERT INTO delivery_receipts
+                   (outbox_id,user_id,provider,recipient_digest,
+                    remote_message_id,accepted_at,owner,generation)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    lease.outbox_id, lease.user_id, provider,
+                    recipient_digest, remote_message_id, at,
+                    lease.owner, lease.generation,
+                ),
+            )
+
+    def receipt(self, *, user_id: str, outbox_id: str) -> dict | None:
+        """Scoped non-secret evidence of provider acceptance."""
+        if not user_id or not outbox_id:
+            raise ProtocolViolation("receipt lookup requires a user scope")
+        with self._transaction() as db:
+            row = db.execute(
+                """SELECT provider,recipient_digest,remote_message_id,
+                          accepted_at,generation FROM delivery_receipts
+                   WHERE user_id=? AND outbox_id=?""",
+                (user_id, outbox_id),
+            ).fetchone()
+        return dict(row) if row else None
+
     def mark_unknown(self, lease: DeliveryLease, *, now: datetime) -> None:
         """Record uncertain send outcome; no automatic retry."""
         self._complete_claim(lease, now=now, state=DeliveryState.UNKNOWN)
 
-    def recover_expired(self, *, now: datetime) -> int:
+    def recover_expired(
+        self, *, now: datetime, user_id: str | None = None
+    ) -> int:
+        """Expire CLAIMED to UNKNOWN; optionally restrict to one user scope."""
         _aware(now)
+        if user_id is not None and not user_id:
+            raise ProtocolViolation("recovery requires nonempty user scope")
         with self._transaction() as db:
-            result = db.execute(
-                """UPDATE deliveries SET state=?
-                   WHERE state=? AND expires_at<=?""",
-                (
-                    DeliveryState.UNKNOWN.value,
-                    DeliveryState.CLAIMED.value, now.astimezone(timezone.utc).isoformat(),
-                ),
+            statement = """UPDATE deliveries SET state=?
+                           WHERE state=? AND expires_at<=?"""
+            params: tuple = (
+                DeliveryState.UNKNOWN.value,
+                DeliveryState.CLAIMED.value,
+                now.astimezone(timezone.utc).isoformat(),
             )
+            if user_id is not None:
+                statement += " AND user_id=?"
+                params += (user_id,)
+            result = db.execute(statement, params)
             return result.rowcount
 
     def requeue_verified_absent(
