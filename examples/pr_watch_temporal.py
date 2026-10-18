@@ -25,9 +25,20 @@ async def read_and_persist_pr(spec: dict) -> dict:
     # Import provider code only in the Activity; Workflows must replay cleanly.
     def read() -> dict:
         from pr_watch_github import GitHubReadOnlyReader
-        from pr_watch_harness import GoalStore
-
-        store = GoalStore(os.environ["PR_WATCH_DB"])
+        backend = os.getenv("PR_WATCH_STORAGE", "sqlite")
+        if backend == "postgres":
+            if os.getenv("PR_WATCH_DB") or not os.getenv("PR_WATCH_PG_DSN"):
+                raise ValueError("PostgreSQL worker requires PG DSN without SQLite DB")
+            from pr_watch_pg_store import PostgresWatchStore
+            store = PostgresWatchStore(os.environ["PR_WATCH_PG_DSN"])
+            store.validate_v2()
+        elif backend == "sqlite":
+            if os.getenv("PR_WATCH_PG_DSN") or not os.getenv("PR_WATCH_DB"):
+                raise ValueError("SQLite worker requires only PR_WATCH_DB")
+            from pr_watch_harness import GoalStore
+            store = GoalStore(os.environ["PR_WATCH_DB"])
+        else:
+            raise ValueError("PR_WATCH_STORAGE must be sqlite or postgres")
         return store.tick(
             user_id=spec["user_id"], goal_id=spec["goal_id"],
             reader=GitHubReadOnlyReader.from_environment(),
@@ -90,6 +101,17 @@ class PRWatchWorkflow:
 
 async def _run(action: str, user_id: str | None, goal_id: str | None,
                interval: int, address: str, namespace: str) -> None:
+    backend = os.getenv("PR_WATCH_STORAGE", "sqlite")
+    if backend == "postgres":
+        if os.getenv("PR_WATCH_DB") or not os.getenv("PR_WATCH_PG_DSN"):
+            raise ValueError("PostgreSQL worker requires PG DSN without SQLite DB")
+        from pr_watch_pg_store import PostgresWatchStore
+        PostgresWatchStore(os.environ["PR_WATCH_PG_DSN"]).validate_v2()
+        if action == "start":
+            # Manual start bypasses the PostgreSQL launch CAS/fencing journal.
+            raise ValueError("PostgreSQL start must use authenticated Goal API")
+    elif backend != "sqlite" or os.getenv("PR_WATCH_PG_DSN") or not os.getenv("PR_WATCH_DB"):
+        raise ValueError("SQLite worker requires only PR_WATCH_DB")
     client = await Client.connect(address, namespace=namespace)
     if action == "worker":
         async with Worker(
