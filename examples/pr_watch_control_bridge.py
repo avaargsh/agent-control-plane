@@ -40,7 +40,7 @@ class TemporalControlBridge:
 
     async def _signal(self, *, user_id: str, goal_id: str, version: int,
                       action: str) -> str:
-        from temporalio.exceptions import WorkflowNotFoundError
+        from temporalio.service import RPCError, RPCStatusCode
 
         client = await self._client()
         handle = client.get_workflow_handle(workflow_id(user_id=user_id, goal_id=goal_id))
@@ -49,8 +49,10 @@ class TemporalControlBridge:
         )
         try:
             await handle.signal("wake", signal_id)
-        except WorkflowNotFoundError:
-            return "NO_WORKFLOW"
+        except RPCError as exc:
+            if exc.status == RPCStatusCode.NOT_FOUND:
+                return "NO_WORKFLOW"
+            raise
         return "ACKED"
 
     def signal_committed(
@@ -86,8 +88,10 @@ class TemporalControlBridge:
         handle = client.get_workflow_handle(workflow_id(user_id=user_id, goal_id=goal_id))
         try:
             history = await handle.fetch_history()
-        except WorkflowNotFoundError:
-            return False
+        except RPCError as exc:
+            if exc.status == RPCStatusCode.NOT_FOUND:
+                return False
+            raise
         for event in history.events:
             attrs = event.workflow_execution_signaled_event_attributes
             if attrs.signal_name != "wake" or not attrs.input.payloads:
