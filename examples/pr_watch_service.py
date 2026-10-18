@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from pr_watch_harness import GoalStore, WatchConflict, WatchError
+from pr_watch_control_bridge import TemporalControlBridge
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
 _BEARER = re.compile(r"^Bearer ([A-Za-z0-9._~+/-]{32,256})$")
@@ -69,9 +70,32 @@ def _cursor(value: str) -> int:
 
 
 class PilotService:
-    def __init__(self, db_path: str | Path, tokens: LocalTokens) -> None:
+    def __init__(
+        self, db_path: str | Path, tokens: LocalTokens,
+        bridge: TemporalControlBridge | None = None,
+    ) -> None:
         self.goals = GoalStore(db_path)
         self.tokens = tokens
+        self.bridge = bridge
+
+    def signal_committed(self, *, user_id: str, goal_id: str, version: int) -> dict:
+        if self.bridge is None:
+            return self.goals.record_control_signal(
+                user_id=user_id, goal_id=goal_id, version=version,
+                state="LOCAL_ONLY", evidence="BRIDGE_DISABLED",
+            )
+        return self.bridge.signal_committed(
+            self.goals, user_id=user_id, goal_id=goal_id, version=version,
+        )
+
+    def reconcile(self, *, user_id: str, goal_id: str, version: int) -> dict:
+        if self.bridge is None:
+            return self.goals.control(
+                user_id=user_id, goal_id=goal_id, version=version,
+            )
+        return self.bridge.reconcile(
+            self.goals, user_id=user_id, goal_id=goal_id, version=version,
+        )
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -194,6 +218,16 @@ class Handler(BaseHTTPRequestHandler):
                 lines.append(": snapshot-complete\n\n")
                 self._data(200, "".join(lines).encode("utf-8"), "text/event-stream; charset=utf-8")
                 return
+            control_list = re.fullmatch(
+                r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/controls", path
+            )
+            if control_list:
+                if query:
+                    raise WatchError("unexpected query")
+                self._json(200, {"controls": service.goals.controls(
+                    user_id=user, goal_id=control_list.group(1),
+                )})
+                return
             match = re.fullmatch(r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})", path)
             if match:
                 self._json(200, {"goal": asdict(service.goals.get(
@@ -234,6 +268,19 @@ class Handler(BaseHTTPRequestHandler):
                                       repo=data["repo"], number=data["number"])
                 self._json(200, {"goal": asdict(goal)})
                 return
+            reconcile_match = re.fullmatch(
+                r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/controls/"
+                r"([0-9]{1,12})/reconcile", path
+            )
+            if reconcile_match:
+                if data:
+                    raise WatchError("reconcile requires an empty JSON object")
+                record = self.server.service.reconcile(
+                    user_id=user, goal_id=reconcile_match.group(1),
+                    version=int(reconcile_match.group(2)),
+                )
+                self._json(200, {"control": record})
+                return
             match = re.fullmatch(
                 r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/(pause|resume|cancel)", path
             )
@@ -244,7 +291,13 @@ class Handler(BaseHTTPRequestHandler):
                     user_id=user, goal_id=match.group(1), action=match.group(2),
                     expected_version=data["expected_version"],
                 )
-                self._json(200, {"goal": asdict(goal)})
+                control = self.server.service.signal_committed(
+                    user_id=user, goal_id=goal.goal_id, version=goal.version,
+                )
+                self._json(
+                    200 if control["signal_state"] == "ACKED" else 202,
+                    {"goal": asdict(goal), "control": control},
+                )
                 return
             self._json(404, {"error": "not found"})
         except WatchConflict as exc:
@@ -275,7 +328,15 @@ def main() -> None:
         tokens = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise SystemExit("Configure PR_WATCH_LOCAL_TOKENS_JSON with local user/token map") from exc
-    server = PilotHTTPServer((args.host, args.port), PilotService(args.db, LocalTokens(tokens)))
+    address = os.environ.get("PR_WATCH_TEMPORAL_ADDRESS")
+    bridge = (
+        TemporalControlBridge(
+            address=address, namespace=os.getenv("PR_WATCH_TEMPORAL_NAMESPACE", "default"),
+        ) if address else None
+    )
+    server = PilotHTTPServer(
+        (args.host, args.port), PilotService(args.db, LocalTokens(tokens), bridge),
+    )
     print(f"Local PR-watch pilot listening at http://{args.host}:{args.port}")
     try:
         server.serve_forever()
