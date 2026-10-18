@@ -38,6 +38,14 @@ async def read_and_persist_pr(spec: dict) -> dict:
 
 @workflow.defn
 class PRWatchWorkflow:
+    def __init__(self) -> None:
+        self._wakeup = 0
+
+    @workflow.signal
+    def wake(self) -> None:
+        """Request a prompt recheck; never authorize a provider side effect."""
+        self._wakeup += 1
+
     @workflow.run
     async def run(self, spec: dict) -> dict:
         interval = spec["interval_seconds"]
@@ -58,7 +66,15 @@ class PRWatchWorkflow:
             except ActivityError:
                 # Read failures do not falsely complete a persistent goal.
                 pass
-            await workflow.sleep(interval)
+            # A durable Signal can shorten poll latency across Worker restarts.
+            # Timer timeout remains the normal fallback for unattended goals.
+            observed_wake = self._wakeup
+            try:
+                await workflow.wait_condition(
+                    lambda: self._wakeup != observed_wake, timeout=interval,
+                )
+            except asyncio.TimeoutError:
+                pass
         workflow.continue_as_new(spec)
         raise RuntimeError("unreachable")
 
