@@ -160,7 +160,22 @@ def test_os_worker_sigkill_and_temporal_activity_redelivery(tmp_path):
                     # This tests OS-process handoff after a committed
                     # Activity, not Activity-timeout redelivery in mid-RPC.
                     await handle.signal(PRWatchWorkflow.wake)
-                    result = await asyncio.wait_for(handle.result(), timeout=25)
+                    # A killed worker does not release its sticky task queue
+                    # gracefully. Give Temporal its real schedule-to-start
+                    # timeout before requiring Worker B to poll the normal
+                    # queue; this is not an Activity execution retry.
+                    await asyncio.sleep(12)
+                    try:
+                        result = await asyncio.wait_for(handle.result(), timeout=35)
+                    except TimeoutError:
+                        history = await handle.fetch_history()
+                        print(
+                            "TAKEOVER_HISTORY:",
+                            [item.event_type.name for item in history.events][-18:],
+                            "PG_STATE:", store.goal(user_id=USER, goal_id=GOAL),
+                            flush=True,
+                        )
+                        raise
                 assert result["state"] == "FINISHED"
                 assert result["phase"] == "MERGED"
                 history = await handle.fetch_history()
