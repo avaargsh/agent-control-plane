@@ -98,6 +98,32 @@ class PostgresWatchStore(PostgresAdmission):
         with self._connection() as conn:
             conn.execute(SCHEMA_V2)
 
+    def validate_v2(self) -> None:
+        """Fail fast on misconfigured/unmigrated DB; no runtime DDL."""
+        with self._connection() as conn:
+            for table in (
+                "pr_watch_pg_goals", "pr_watch_pg_launches",
+                "pr_watch_pg_controls", "pr_watch_pg_events",
+                "pr_watch_pg_attention_decisions", "pr_watch_pg_deliveries",
+                "pr_watch_pg_delivery_receipts",
+            ):
+                # Literal allowlisted identifiers; never use user input for SQL.
+                conn.execute("SELECT 1 FROM " + table + " LIMIT 0")
+            conn.execute("SELECT phase,signature FROM pr_watch_pg_goals LIMIT 0")
+
+    def get(self, *, user_id: str, goal_id: str) -> dict:
+        return self.goal(user_id=user_id, goal_id=goal_id)
+
+    def list_goals(self, *, user_id: str, limit: int = 100) -> list[dict]:
+        if not _id(user_id) or type(limit) is not int or not 1 <= limit <= 100:
+            raise AdmissionError("invalid scoped goal listing")
+        with self._connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM pr_watch_pg_goals WHERE user_id=%s
+                   ORDER BY goal_id LIMIT %s""", (user_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def transition(
         self, *, user_id: str, goal_id: str, action: str, expected_version: int
     ) -> dict:
