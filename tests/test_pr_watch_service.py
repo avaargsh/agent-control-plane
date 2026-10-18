@@ -105,7 +105,7 @@ def test_cas_pause_resume_cancel_prevents_stale_writes_and_provider_read(tmp_pat
         create(api)
         status, data, _ = request(api, "POST", "/api/goals/pr-1/pause", who="alice",
                                    body={"expected_version": 0})
-        assert status == 200 and json.loads(data)["goal"]["state"] == "PAUSED"
+        assert status == 202 and json.loads(data)["goal"]["state"] == "PAUSED"
         assert request(api, "POST", "/api/goals/pr-1/resume", who="alice",
                        body={"expected_version": 0})[0] == 409
         store = api.service.goals
@@ -118,10 +118,10 @@ def test_cas_pause_resume_cancel_prevents_stale_writes_and_provider_read(tmp_pat
                           now=NOW)["state"] == "PAUSED"
         status, data, _ = request(api, "POST", "/api/goals/pr-1/resume", who="alice",
                                    body={"expected_version": 1})
-        assert status == 200 and json.loads(data)["goal"]["state"] == "RUNNING"
+        assert status == 202 and json.loads(data)["goal"]["state"] == "RUNNING"
         status, data, _ = request(api, "POST", "/api/goals/pr-1/cancel", who="alice",
                                    body={"expected_version": 2})
-        assert status == 200 and json.loads(data)["goal"]["state"] == "CANCELLED"
+        assert status == 202 and json.loads(data)["goal"]["state"] == "CANCELLED"
         assert store.tick(user_id="alice", goal_id="pr-1",
                           reader=ExplodingReader(), now=NOW)["state"] == "CANCELLED"
         assert request(api, "POST", "/api/goals/pr-1/resume", who="alice",
