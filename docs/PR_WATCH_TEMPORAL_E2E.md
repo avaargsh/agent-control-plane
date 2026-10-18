@@ -32,6 +32,13 @@ server is not guaranteed; use an x86_64 CI runner.
 | External read throws ApplicationError | Failed Activity must not mark goal complete; Workflow waits and later succeeds after an independent observation |
 | Goal cancel during running Activity | Later tick observes durable CANCELLED and stops without reactivating a Goal or claiming provider success |
 
+The Worker takeover test deliberately uses `max_cached_workflows=0`
+to disable sticky Workflow caches: new Workers then rehydrate history from the
+ordinary Task Queue instead of awaiting the obsolete sticky Worker queue.
+The test waits for the first durable TIMER_STARTED event, shuts down Worker 1,
+starts Worker 2 and sends an authenticated-test Temporal `wake` Signal to
+resume without depending on time-skipping delays.
+
 The fixture Activity exercises the existing `GoalStore.tick`, durable
 PR-state transition and the `AttentionOutbox` with SQLite. It does not
 use a GitHub token or make real network provider requests. This preserves
@@ -58,8 +65,9 @@ Cancellation does not retract a notification already observed or sent.
 - Trusted production identity and goal/task enrollment at the API boundary.
 - Stable pinned Temporal SDK/test-server versions and Workflow code
   versioning for compatibility during rolling upgrades.
-- Authenticated control-to-Workflow Signals/Updates for bounded pause
-  and cancel latency, with fail-closed reconciliation of lost Signal ACK.
+- Authenticated control-to-Workflow Signals/Updates from the HTTP API;
+  the Workflow now implements `wake`, but the API does not send it.
+  Lost Signal ACK requires reconciliation before asserting fast resumption.
 - A real provider-backed notification delivery receipt and UNKNOWN
   reconciliation, with user-scoped recipient authorization.
 
