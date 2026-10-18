@@ -33,28 +33,40 @@ DSN = os.environ.get("PR_WATCH_PG_TEST_DSN")
 USER = "temporal-takeover"
 GOAL = "worker-killed"
 
-# Worker process intentionally never gets GitHub or Telegram credentials.
-# Activity is a fixture: signals it started, then stays blocked until SIGKILL.
-# Temporal server/Workflow History is in the parent test and remains alive.
+# Worker has only a fixture-backed read-only GitHub observation; it persists
+# one result before the Workflow enters its Temporal History timer. The Worker
+# process is hard-killed then; no production GitHub/Telegram request occurs.
 CHILD = r"""
 import asyncio
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 from temporalio import activity
 from temporalio.client import Client
 from temporalio.worker import Worker
 from pr_watch_temporal import PRWatchWorkflow, TASK_QUEUE
+from pr_watch_pg_store import PostgresWatchStore
+from pr_watch_harness import PullSnapshot
+
+class Reader:
+    def fetch(self, repo, number):
+        assert (repo, number) == ("o/repo", 181)
+        return PullSnapshot(head_sha="b" * 40, state="OPEN", ci="FAILURE")
 
 @activity.defn(name="read_and_persist_pr")
-async def blocked(spec: dict) -> dict:
-    Path(os.environ["PR_WATCH_TAKEOVER_MARKER"]).write_text("activity-started")
-    await asyncio.Event().wait()
-    raise AssertionError("unreachable")
+async def first_observation(spec: dict) -> dict:
+    store = PostgresWatchStore(os.environ["PR_WATCH_PG_TEST_DSN"])
+    result = await asyncio.to_thread(
+        store.tick, user_id=spec["user_id"], goal_id=spec["goal_id"],
+        reader=Reader(), now=datetime.now(timezone.utc),
+    )
+    Path(os.environ["PR_WATCH_TAKEOVER_MARKER"]).write_text("committed")
+    return result
 
 async def main():
     client = await Client.connect(os.environ["PR_WATCH_TEMPORAL_TEST_ADDRESS"])
     async with Worker(client, task_queue=TASK_QUEUE,
-                      workflows=[PRWatchWorkflow], activities=[blocked]):
+                      workflows=[PRWatchWorkflow], activities=[first_observation]):
         await asyncio.Event().wait()
 
 asyncio.run(main())
@@ -120,9 +132,14 @@ def test_os_worker_sigkill_and_temporal_activity_redelivery(tmp_path):
                     raise AssertionError("first Worker did not begin Activity")
                 await asyncio.wait_for(wait_for_marker(), timeout=20)
 
-                assert store.goal(user_id=USER, goal_id=GOAL)["version"] == 0
-                assert store.list_events(user_id=USER) == []
-                child.kill()  # Real SIGKILL; no SDK graceful Worker shutdown.
+                # The Activity committed its observation, but the
+                # Workflow History must also durably record TIMER_STARTED
+                # before Worker A disappears. This pins the crash to a
+                # deterministic lifecycle point, not a scheduling race.
+                await _check_history(handle, EventType.EVENT_TYPE_TIMER_STARTED)
+                assert store.goal(user_id=USER, goal_id=GOAL)["version"] == 1
+                assert len(store.list_events(user_id=USER)) == 1
+                child.kill()  # Real SIGKILL; no graceful Worker shutdown.
                 await asyncio.to_thread(child.wait, timeout=5)
 
                 @activity.defn(name="read_and_persist_pr")
@@ -138,11 +155,11 @@ def test_os_worker_sigkill_and_temporal_activity_redelivery(tmp_path):
                     workflows=[PRWatchWorkflow], activities=[recovered],
                     max_cached_workflows=0,
                 ):
-                    # The initial Activity has a 45s start-to-close timeout.
-                    # The time-skipping server does NOT infer that the killed
-                    # subprocess went away; explicitly advance virtual time
-                    # beyond that timeout + its 5s retry backoff.
-                    await env.sleep(56)
+                    # A durable wake signal causes the replacement Worker
+                    # to replay History and run the next observation.
+                    # This tests OS-process handoff after a committed
+                    # Activity, not Activity-timeout redelivery in mid-RPC.
+                    await handle.signal(PRWatchWorkflow.wake)
                     result = await asyncio.wait_for(handle.result(), timeout=25)
                 assert result["state"] == "FINISHED"
                 assert result["phase"] == "MERGED"
@@ -160,12 +177,14 @@ def test_os_worker_sigkill_and_temporal_activity_redelivery(tmp_path):
     asyncio.run(scenario())
     goal = store.goal(user_id=USER, goal_id=GOAL)
     assert goal["state"] == "FINISHED"
-    assert goal["version"] == 1
+    assert goal["version"] == 2
     events = store.list_events(user_id=USER)
-    assert len(events) == 1
+    assert len(events) == 2
+    assert [e["kind"] for e in events] == ["ACTION_REQUIRED", "TASK_SUCCEEDED"]
+    assert store.delivery_counts(user_id=USER) == {"PENDING": 1}
     # Re-observation under an identical selector never emits another incident.
     assert store.tick(
         user_id=USER, goal_id=GOAL, reader=Reader(),
         now=datetime.now(timezone.utc),
     )["new"] is False
-    assert len(store.list_events(user_id=USER)) == 1
+    assert len(store.list_events(user_id=USER)) == 2
