@@ -230,6 +230,7 @@ class GoalStore:
 
     def claim_launch(self, *, user_id: str, goal_id: str) -> dict:
         """Exactly one caller leaves PENDING; never resend an ambiguous start."""
+        claimed_now = False
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             goal = db.execute(
@@ -248,7 +249,7 @@ class GoalStore:
                     if goal["state"] in ("RUNNING", "PAUSED")
                     else "SKIPPED"
                 )
-                db.execute(
+                updated = db.execute(
                     """UPDATE pr_watch_launches SET state=?,evidence=?,
                           updated_at=datetime('now')
                        WHERE user_id=? AND goal_id=? AND state='PENDING'""",
@@ -257,7 +258,11 @@ class GoalStore:
                         user_id, goal_id,
                     ),
                 )
-        return self.launch(user_id=user_id, goal_id=goal_id)
+                claimed_now = updated.rowcount == 1 and state == "IN_FLIGHT"
+        return {
+            **self.launch(user_id=user_id, goal_id=goal_id),
+            "claimed_now": claimed_now,
+        }
 
     def record_launch(
         self, *, user_id: str, goal_id: str, state: str,
