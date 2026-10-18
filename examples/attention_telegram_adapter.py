@@ -176,11 +176,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Explicit Telegram outbox dispatcher; never automatic unknown retries",
     )
-    parser.add_argument("--db", required=True)
+    parser.add_argument("--db", help="SQLite database path (sqlite mode only)")
     parser.add_argument("--user", required=True)
     parser.add_argument("--owner", default="local-telegram-1")
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
+    backend = os.getenv("PR_WATCH_STORAGE", "sqlite")
+    pg_dsn = os.getenv("PR_WATCH_PG_DSN")
+    if backend == "postgres":
+        if args.db or os.getenv("PR_WATCH_DB") or not pg_dsn:
+            parser.error("PostgreSQL requires PG DSN and forbids SQLite paths")
+        from pr_watch_pg_runtime import PGTelegramOutbox
+        from pr_watch_pg_store import PostgresWatchStore
+        store = PostgresWatchStore(pg_dsn)
+        store.validate_v2()
+        outbox = PGTelegramOutbox(store)
+    elif backend == "sqlite":
+        if not args.db or pg_dsn:
+            parser.error("SQLite requires --db and forbids PR_WATCH_PG_DSN")
+        outbox = AttentionOutbox(Path(args.db))
+    else:
+        parser.error("PR_WATCH_STORAGE must be sqlite or postgres")
 
     token = os.environ.get("PR_WATCH_TELEGRAM_BOT_TOKEN", "")
     try:
@@ -191,7 +207,7 @@ def main() -> None:
         raise SystemExit("Invalid trusted Telegram binding JSON") from exc
     adapter = TelegramAdapter(token=token, recipients=recipients)
     output = dispatch_once(
-        AttentionOutbox(Path(args.db)), adapter,
+        outbox, adapter,
         user_id=args.user, owner=args.owner, now=datetime.now(timezone.utc),
         limit=args.limit,
     )
