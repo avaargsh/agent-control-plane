@@ -243,7 +243,11 @@ class GoalStore:
             if goal is None or row is None:
                 raise WatchError("launch not found within user scope")
             if row["state"] == "PENDING":
-                state = "IN_FLIGHT" if goal["state"] == "RUNNING" else "SKIPPED"
+                state = (
+                    "IN_FLIGHT"
+                    if goal["state"] in ("RUNNING", "PAUSED")
+                    else "SKIPPED"
+                )
                 db.execute(
                     """UPDATE pr_watch_launches SET state=?,evidence=?,
                           updated_at=datetime('now')
