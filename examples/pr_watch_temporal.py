@@ -16,21 +16,24 @@ from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import ActivityError
 from temporalio.worker import Worker
 
-from pr_watch_github import GitHubReadOnlyReader
-from pr_watch_harness import GoalStore, fingerprint
-
 TASK_QUEUE = "acp-pr-watch-reference"
 
 
 @activity.defn(name="read_and_persist_pr")
-def read_and_persist_pr(spec: dict) -> dict:
-    # Durable Workflow never performs provider I/O; Activities do.
-    store = GoalStore(os.environ["PR_WATCH_DB"])
-    return store.tick(
-        user_id=spec["user_id"], goal_id=spec["goal_id"],
-        reader=GitHubReadOnlyReader.from_environment(),
-        now=datetime.now(timezone.utc),
-    )
+async def read_and_persist_pr(spec: dict) -> dict:
+    # Keep blocking HTTP and SQLite I/O off the worker's asyncio loop.
+    # Import provider code only in the Activity; Workflows must replay cleanly.
+    def read() -> dict:
+        from pr_watch_github import GitHubReadOnlyReader
+        from pr_watch_harness import GoalStore
+
+        store = GoalStore(os.environ["PR_WATCH_DB"])
+        return store.tick(
+            user_id=spec["user_id"], goal_id=spec["goal_id"],
+            reader=GitHubReadOnlyReader.from_environment(),
+            now=datetime.now(timezone.utc),
+        )
+    return await asyncio.to_thread(read)
 
 
 @workflow.defn
@@ -72,6 +75,8 @@ async def _run(action: str, user_id: str | None, goal_id: str | None,
         return
     if not user_id or not goal_id:
         raise ValueError("start requires --user and --goal")
+    from pr_watch_harness import GoalStore, fingerprint
+
     goal = GoalStore(os.environ["PR_WATCH_DB"]).get(
         user_id=user_id, goal_id=goal_id,
     )
