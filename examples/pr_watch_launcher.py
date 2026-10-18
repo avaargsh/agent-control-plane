@@ -46,9 +46,11 @@ class TemporalLaunchBridge:
         # An existing execution may be closed. Existence is not RUNNING proof.
         value = details.status
         status = value.name if hasattr(value, "name") else str(value)
-        return status if status in {
+        if status not in {
             "RUNNING", "COMPLETED", "FAILED", "CANCELED", "TERMINATED", "TIMED_OUT",
-        } else "RUNNING"
+        }:
+            raise ValueError("unrecognized Temporal Workflow status")
+        return status
 
     async def _start(self, *, user_id: str, goal_id: str) -> str:
         from temporalio.client import WorkflowAlreadyStartedError
