@@ -11,7 +11,7 @@ Harness could implement without changing the v0.1 execution contract.
 
 ## Logical boundaries
 
-\`\`\`text
+```text
 Client / channel adapters -> authenticated EventEnvelope -> Harness goal/task
                                                           |
 ACP TransitionPlan <--- explicit authorized action -------+
@@ -22,7 +22,7 @@ ACP ExecutionAttempt / IndependentExecutionProof -> verified progress event
                                    authenticated user-scoped delivery adapter
                                                           |
                             SSE / push / email / bot / mobile notification
-\`\`\`
+```
 
 - An Agent proposal is not authorization. Only ACP's exact transition admission
   and provider-side fenced execution may affect protected external resources.
@@ -33,21 +33,21 @@ ACP ExecutionAttempt / IndependentExecutionProof -> verified progress event
 - Channel adapters must authenticate source identity and map it to the canonical
   user/goal scope. NEVER merge Slack/email/chat contexts based on text similarity.
 - Untrusted external content and LLM-generated classifications cannot assert
-  \`verified_critical\`. Trusted provenance verification and user-approved
+  `verified_critical`. Trusted provenance verification and user-approved
   emergency settings are enforced by the hosting service, not by this library.
 - Each transport delivery is protected by an independent recipient entitlement
-  check. The outbox's \`user_id\` is a tenant key, not an authentication credential.
+  check. The outbox's `user_id` is a tenant key, not an authentication credential.
 
 ## Runnable, limited reference
 
-\`\`\`bash
+```bash
 python -m pytest -q tests/test_attention_plane_reference.py
-\`\`\`
+```
 
-\`examples/attention_plane.py\` provides:
+`examples/attention_plane.py` provides:
 
-1. Pure deterministic \`decide(event, preferences, now=...)\` with SILENT,
-   DIGEST, NOTIFY and a separate \`requires_approval\` signal.
+1. Pure deterministic `decide(event, preferences, now=...)` with SILENT,
+   DIGEST, NOTIFY and a separate `requires_approval` signal.
 2. Configurable user-local quiet hours, including overnight windows; verified
    critical alerts bypass quiet hours ONLY when explicitly permitted.
 3. SQLite decision records with per-(user,event) fingerprint checks.
@@ -63,8 +63,8 @@ sender. DIGEST/SILENT decisions are recorded only; batching, delivery scheduling
 notification budget, quota, policy version migrations, notification revocation,
 signatures, provider evidence validation and audit retention require a Harness.
 
-Dedupe keys MUST identify a bounded episode/revision (e.g. \`pr42-ci-run-7\`).
-Do not use \`pr42\` for all future CI events, or the durable unique key will
+Dedupe keys MUST identify a bounded episode/revision (e.g. `pr42-ci-run-7`).
+Do not use `pr42` for all future CI events, or the durable unique key will
 suppress valid future alerts. Do not place secrets in event summaries.
 
 ## Important limits and next build steps
@@ -77,10 +77,10 @@ suppress valid future alerts. Do not place secrets in event summaries.
   Without a provider reconciliation API, ask a user/operator instead of retrying.
 - Local wall-clock quiet-hour conversion is a reference; DST gaps/folds, explicit
   vacations and holidays need pinned user-facing policies and tests.
-- An arbitrary string passed as \`evidence_ref\` is not cryptographic proof:
+- An arbitrary string passed as `evidence_ref` is not cryptographic proof:
   the caller must validate a provider-signed or otherwise independently
   verifiable absence statement before invoking the requeue operation.
-- \`requires_approval\` is a presentation hint, never a grant. Human approval
+- `requires_approval` is a presentation hint, never a grant. Human approval
   must be bound to an ACP PlanAuthorizationBinding via trusted server identity.
 - Next vertical slice: GitHub PR status event -> verified ACP run/progress ->
   Temporal timer/signal -> reference Attention decision -> mock channel
