@@ -49,11 +49,37 @@
       button.addEventListener("click", async () => {
         button.disabled = true;
         try {
-          await api("/api/goals/" + encodeURIComponent(goal.goal_id) + "/" + action, {
-            method: "POST", body: { expected_version: goal.version }
-          });
-          msg(goal.goal_id + ": " + action + " recorded");
+          const outcome = await api(
+            "/api/goals/" + encodeURIComponent(goal.goal_id) + "/" + action, {
+              method: "POST", body: { expected_version: goal.version }
+            }
+          );
+          const control = outcome.control;
+          const signalState = control ? control.signal_state : "UNCONFIRMED";
+          msg(goal.goal_id + ": " + action + " committed; Temporal " + signalState +
+            (signalState === "ACKED" ? " (wake accepted, not execution proof)" :
+              " (durable action; poll fallback remains active)"));
           await refresh();
+          if (control && (signalState === "UNKNOWN" || signalState === "PENDING")) {
+            const verify = document.createElement("button");
+            verify.type = "button";
+            verify.className = "secondary";
+            verify.textContent = "Verify signal";
+            verify.addEventListener("click", async () => {
+              verify.disabled = true;
+              try {
+                const status = await api(
+                  "/api/goals/" + encodeURIComponent(goal.goal_id) +
+                    "/controls/" + control.version + "/reconcile",
+                  { method: "POST", body: {} }
+                );
+                msg("Temporal signal history: " + status.control.signal_state +
+                  " (missing proof never permits blind resend)");
+              } catch (error) { msg(error.message); }
+              finally { verify.disabled = false; }
+            });
+            el("message").after(verify);
+          }
         } catch (error) { msg(error.message); button.disabled = false; }
       });
       actions.append(button);

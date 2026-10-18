@@ -147,6 +147,13 @@ class GoalStore:
                     occurred_at TEXT NOT NULL, emitted INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (user_id, goal_id, event_id)
                 );
+                CREATE TABLE IF NOT EXISTS pr_watch_control_intents (
+                    user_id TEXT NOT NULL, goal_id TEXT NOT NULL,
+                    version INTEGER NOT NULL, action TEXT NOT NULL,
+                    signal_state TEXT NOT NULL DEFAULT 'PENDING',
+                    checked_at TEXT, evidence TEXT,
+                    PRIMARY KEY (user_id, goal_id, version)
+                );
             """)
 
     def _connection(self) -> sqlite3.Connection:
@@ -223,7 +230,75 @@ class GoalStore:
                    WHERE user_id=? AND goal_id=? AND version=?""",
                 (target, user_id, goal_id, expected_version),
             )
+            # Durable control intent is committed in the same SQLite transaction
+            # as the goal CAS. Network signals happen AFTER commit.
+            db.execute(
+                """INSERT INTO pr_watch_control_intents
+                   (user_id,goal_id,version,action)
+                   VALUES (?,?,?,?)""",
+                (user_id, goal_id, expected_version + 1, action),
+            )
         return self.get(user_id=user_id, goal_id=goal_id)
+
+    def control(self, *, user_id: str, goal_id: str, version: int) -> dict:
+        if type(version) is not int or version < 0:
+            raise WatchError("invalid control version")
+        with self._connection() as db:
+            row = db.execute(
+                """SELECT user_id,goal_id,version,action,signal_state,
+                          checked_at,evidence FROM pr_watch_control_intents
+                   WHERE user_id=? AND goal_id=? AND version=?""",
+                (user_id, goal_id, version),
+            ).fetchone()
+        if row is None:
+            raise WatchError("control not found within user scope")
+        return dict(row)
+
+    def controls(self, *, user_id: str, goal_id: str) -> list[dict]:
+        self.get(user_id=user_id, goal_id=goal_id)
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT user_id,goal_id,version,action,signal_state,
+                          checked_at,evidence FROM pr_watch_control_intents
+                   WHERE user_id=? AND goal_id=?
+                   ORDER BY version DESC LIMIT 50""",
+                (user_id, goal_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_control_signal(
+        self, *, user_id: str, goal_id: str, version: int,
+        state: str, evidence: str,
+    ) -> dict:
+        valid = ("ACKED", "UNKNOWN", "NO_WORKFLOW", "LOCAL_ONLY")
+        if state not in valid or evidence not in (
+            "SIGNAL_ACK", "HISTORY_PROOF", "ACK_UNCERTAIN",
+            "NOT_FOUND", "BRIDGE_DISABLED",
+        ):
+            raise WatchError("invalid control signal evidence")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """SELECT signal_state FROM pr_watch_control_intents
+                   WHERE user_id=? AND goal_id=? AND version=?""",
+                (user_id, goal_id, version),
+            ).fetchone()
+            if row is None:
+                raise WatchError("control not found within user scope")
+            if row["signal_state"] == "ACKED" and state != "ACKED":
+                # Later network failures cannot demote previously proven ACK.
+                return self.control(user_id=user_id, goal_id=goal_id, version=version)
+            if row["signal_state"] != "PENDING" and (
+                row["signal_state"], state
+            ) not in (("UNKNOWN", "ACKED"), ("NO_WORKFLOW", "ACKED")):
+                return self.control(user_id=user_id, goal_id=goal_id, version=version)
+            db.execute(
+                """UPDATE pr_watch_control_intents SET signal_state=?,
+                      checked_at=datetime('now'),evidence=?
+                   WHERE user_id=? AND goal_id=? AND version=?""",
+                (state, evidence, user_id, goal_id, version),
+            )
+        return self.control(user_id=user_id, goal_id=goal_id, version=version)
 
     def list_events(
         self, *, user_id: str, after: int = 0, limit: int = 100
