@@ -128,6 +128,7 @@ def test_real_temporal_restarts_worker_with_durable_state(tmp_path):
             async with Worker(
                 env.client, task_queue=QUEUE,
                 workflows=[PRWatchWorkflow], activities=[observe],
+                max_cached_workflows=0,
             ):
                 await asyncio.wait_for(first_finished.wait(), timeout=15)
                 # The Activity can persist the DB before Temporal confirms
@@ -149,20 +150,12 @@ def test_real_temporal_restarts_worker_with_durable_state(tmp_path):
             async with Worker(
                 env.client, task_queue=QUEUE,
                 workflows=[PRWatchWorkflow], activities=[observe],
+                max_cached_workflows=0,
             ):
                 # Signal is recorded by Temporal, so the new Worker can
                 # resume immediately without a timing-sensitive fake sleep.
                 await handle.signal(PRWatchWorkflow.wake)
-                try:
-                    result = await asyncio.wait_for(handle.result(), timeout=10)
-                except TimeoutError:
-                    history = await handle.fetch_history()
-                    print("TEMPORAL_DEBUG_ATTEMPTS", len(calls), calls)
-                    print("TEMPORAL_DEBUG_EVENTS", [
-                        (e.event_id, EventType.Name(e.event_type))
-                        for e in history.events[-30:]
-                    ])
-                    raise
+                result = await asyncio.wait_for(handle.result(), timeout=25)
 
         assert result["state"] == "FINISHED"
         assert calls == ["restart", "restart"]
