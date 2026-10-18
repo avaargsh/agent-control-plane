@@ -53,7 +53,7 @@ class TemporalLaunchBridge:
         return status
 
     async def _start(self, *, user_id: str, goal_id: str) -> str:
-        from temporalio.client import WorkflowAlreadyStartedError
+        from temporalio.exceptions import WorkflowAlreadyStartedError
         from temporalio.common import WorkflowIDReusePolicy
         from temporalio.service import RPCError, RPCStatusCode
         from pr_watch_temporal import PRWatchWorkflow, TASK_QUEUE
