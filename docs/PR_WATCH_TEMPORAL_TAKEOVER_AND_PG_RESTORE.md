@@ -8,30 +8,34 @@ acceptance (#180); it does not test a production Temporal server cluster.
 
 The test spawns an **independent Python interpreter** that connects to
 the Temporal SDK test server and polls the actual PR Watch task queue.
-The test-owned activity records a local marker and remains blocked; the
-parent kills that Worker process using `SIGKILL` without orderly SDK
-shutdown. The Temporal server remains alive with the same Workflow ID
-and durable history.
+The fixture Activity commits an initial PR CI FAILURE observation into
+PostgreSQL, and the parent waits for the Temporal Workflow History
+`TIMER_STARTED` event. Then it kills Worker A with `SIGKILL` without
+orderly SDK shutdown. The Temporal test server retains the original
+Workflow ID and history.
 
-A second Worker polls the original queue. On Temporal Activity
-redelivery after the original 45-second Activity execution timeout,
-Worker B observes a mocked PR MERGED snapshot and commits the result
-through the real PostgreSQL V2 store. Expected acceptance:
+A second Worker polls the same queue. An explicit persisted Temporal wake
+Signal causes Workflow History replay and a **second Activity**, which
+observes a fixture PR MERGED snapshot and commits it to PostgreSQL V2.
+Expected acceptance:
 
 - One Workflow started with the existing deterministic user/Goal ID.
-- No Goal version increment, event or outbox write from Worker A's
-  **uncommitted** Activity.
-- Worker B completes with FINISHED/MERGED, **one** Goal CAS version
-  increment and **one** immutable PR event.
+- Worker A has durably committed the initial CI failure: exactly
+  one Action Required event and one pending delivery before its death.
+- Worker B completes with FINISHED/MERGED, **two total** Goal versions
+  and **two total** immutable PR events, with no duplicate notification.
 - Re-reading finished Goal cannot execute a provider fetch or emit a
   duplicate notification.
 - The separate killed process is always reaped, even after test failure.
 
-The test uses a fixture Activity, **not the live GitHub API**. It proves
-Worker process replacement and Temporal Activity retry/History replay
-with PostgreSQL persistence, not arbitrary exactly-once execution of
-remote side effects. Activities can execute more than once and must use
-CAS/idempotency before persisting effects.
+The test uses fixture Activities, **not the live GitHub API**. It proves
+Worker process replacement and Temporal Workflow History replay **after a
+committed Activity at the timer boundary**. It does **not** prove
+in-flight Activity timeout redelivery after SIGKILL; the SDK time-skipping
+test server cannot faithfully advance an outstanding externally held Activity
+under that fault. That scenario requires a separately persisted Temporal
+server and a real-time integration environment. Activities may execute more
+than once and must use CAS/idempotency before persisting effects.
 
 ## Logical PostgreSQL backup and restore
 
