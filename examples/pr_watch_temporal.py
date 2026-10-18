@@ -16,31 +16,43 @@ from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import ActivityError
 from temporalio.worker import Worker
 
-from pr_watch_github import GitHubReadOnlyReader
-from pr_watch_harness import GoalStore, fingerprint
-
 TASK_QUEUE = "acp-pr-watch-reference"
 
 
 @activity.defn(name="read_and_persist_pr")
-def read_and_persist_pr(spec: dict) -> dict:
-    # Durable Workflow never performs provider I/O; Activities do.
-    store = GoalStore(os.environ["PR_WATCH_DB"])
-    return store.tick(
-        user_id=spec["user_id"], goal_id=spec["goal_id"],
-        reader=GitHubReadOnlyReader.from_environment(),
-        now=datetime.now(timezone.utc),
-    )
+async def read_and_persist_pr(spec: dict) -> dict:
+    # Keep blocking HTTP and SQLite I/O off the worker's asyncio loop.
+    # Import provider code only in the Activity; Workflows must replay cleanly.
+    def read() -> dict:
+        from pr_watch_github import GitHubReadOnlyReader
+        from pr_watch_harness import GoalStore
+
+        store = GoalStore(os.environ["PR_WATCH_DB"])
+        return store.tick(
+            user_id=spec["user_id"], goal_id=spec["goal_id"],
+            reader=GitHubReadOnlyReader.from_environment(),
+            now=datetime.now(timezone.utc),
+        )
+    return await asyncio.to_thread(read)
 
 
 @workflow.defn
 class PRWatchWorkflow:
+    def __init__(self) -> None:
+        self._wakeup = 0
+
+    @workflow.signal
+    def wake(self) -> None:
+        """Request a prompt recheck; never authorize a provider side effect."""
+        self._wakeup += 1
+
     @workflow.run
     async def run(self, spec: dict) -> dict:
         interval = spec["interval_seconds"]
         if not isinstance(interval, int) or not 30 <= interval <= 86400:
             raise ValueError("poll interval must be between 30s and 1 day")
         for _ in range(100):
+            wake_at_activity_start = self._wakeup
             try:
                 status = await workflow.execute_activity(
                     read_and_persist_pr, spec,
@@ -55,7 +67,19 @@ class PRWatchWorkflow:
             except ActivityError:
                 # Read failures do not falsely complete a persistent goal.
                 pass
-            await workflow.sleep(interval)
+            # Do not lose an operator wake signal received during the
+            # Activity: immediately observe current durable Goal state.
+            if self._wakeup != wake_at_activity_start:
+                continue
+            # Timer timeout remains the unattended fallback. Freeze the
+            # comparison value for the lambda on this particular iteration.
+            try:
+                await workflow.wait_condition(
+                    lambda observed=wake_at_activity_start: self._wakeup != observed,
+                    timeout=interval,
+                )
+            except asyncio.TimeoutError:
+                pass
         workflow.continue_as_new(spec)
         raise RuntimeError("unreachable")
 
@@ -72,6 +96,8 @@ async def _run(action: str, user_id: str | None, goal_id: str | None,
         return
     if not user_id or not goal_id:
         raise ValueError("start requires --user and --goal")
+    from pr_watch_harness import GoalStore, fingerprint
+
     goal = GoalStore(os.environ["PR_WATCH_DB"]).get(
         user_id=user_id, goal_id=goal_id,
     )
