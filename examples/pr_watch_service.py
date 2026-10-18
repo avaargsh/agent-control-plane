@@ -12,14 +12,28 @@ import hmac
 import json
 import os
 import re
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
+from datetime import datetime
+from uuid import uuid4
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from pr_watch_harness import GoalStore, WatchConflict, WatchError
+from pr_watch_pg_admission import AdmissionError
 from pr_watch_control_bridge import TemporalControlBridge
 from pr_watch_launcher import TemporalLaunchBridge
+
+
+def _goal_payload(value) -> dict:
+    """Both SQLite dataclass and PostgreSQL dict represent the same API."""
+    return asdict(value) if is_dataclass(value) else dict(value)
+
+
+def _json_default(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError("unsupported JSON response value")
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
 _BEARER = re.compile(r"^Bearer ([A-Za-z0-9._~+/-]{32,256})$")
@@ -75,8 +89,27 @@ class PilotService:
         self, db_path: str | Path, tokens: LocalTokens,
         bridge: TemporalControlBridge | None = None,
         launch_bridge: TemporalLaunchBridge | None = None,
+        *, storage_backend: str = "sqlite", pg_dsn: str | None = None,
     ) -> None:
-        self.goals = GoalStore(db_path)
+        if storage_backend not in ("sqlite", "postgres"):
+            raise PilotConfigError("unsupported PR Watch storage backend")
+        self.storage_backend = storage_backend
+        self._launch_owner = "api-" + uuid4().hex
+        self.pg_launcher = None
+        if storage_backend == "postgres":
+            if db_path is not None or not pg_dsn:
+                raise PilotConfigError("PostgreSQL mode forbids SQLite DB path")
+            # Import opt-in psycopg dependency ONLY in PostgreSQL mode.
+            from pr_watch_pg_store import PostgresWatchStore
+            self.goals = PostgresWatchStore(pg_dsn)
+            self.goals.validate_v2()  # fail closed; never auto-install tables
+            if launch_bridge is not None:
+                from pr_watch_pg_runtime import PGLaunchService
+                self.pg_launcher = PGLaunchService(self.goals, launch_bridge)
+        else:
+            if db_path is None or pg_dsn:
+                raise PilotConfigError("SQLite mode requires only --db")
+            self.goals = GoalStore(db_path)
         self.tokens = tokens
         self.bridge = bridge
         self.launch_bridge = launch_bridge
@@ -88,6 +121,10 @@ class PilotService:
                 "mode": "LOCAL_ONLY",
             }
         try:
+            if self.pg_launcher is not None:
+                return self.pg_launcher.start_committed(
+                    user_id=user_id, goal_id=goal_id, owner=self._launch_owner,
+                )
             return self.launch_bridge.start_committed(
                 self.goals, user_id=user_id, goal_id=goal_id,
             )
@@ -100,6 +137,10 @@ class PilotService:
         if self.launch_bridge is None:
             return self.start_committed(user_id=user_id, goal_id=goal_id)
         try:
+            if self.pg_launcher is not None:
+                return self.pg_launcher.reconcile(
+                    user_id=user_id, goal_id=goal_id,
+                )
             return self.launch_bridge.reconcile(
                 self.goals, user_id=user_id, goal_id=goal_id,
             )
@@ -166,7 +207,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _json(self, status: int, value: object) -> None:
-        data = json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        data = json.dumps(
+            value, sort_keys=True, ensure_ascii=False, default=_json_default,
+        ).encode("utf-8")
         self._data(status, data, "application/json; charset=utf-8")
 
     def _identity(self) -> str | None:
@@ -243,7 +286,7 @@ class Handler(BaseHTTPRequestHandler):
                 if query:
                     raise WatchError("unexpected query")
                 self._json(200, {"goals": [
-                    asdict(goal) for goal in service.goals.list_goals(user_id=user)
+                    _goal_payload(goal) for goal in service.goals.list_goals(user_id=user)
                 ]})
                 return
             if path == "/api/events":
@@ -255,7 +298,7 @@ class Handler(BaseHTTPRequestHandler):
                 for event in events:
                     lines.append(f"id: {event['cursor']}\n")
                     lines.append("event: pr-watch\n")
-                    lines.append("data: " + json.dumps(event, ensure_ascii=False) + "\n\n")
+                    lines.append("data: " + json.dumps(event, ensure_ascii=False, default=_json_default) + "\n\n")
                 lines.append(": snapshot-complete\n\n")
                 self._data(200, "".join(lines).encode("utf-8"), "text/event-stream; charset=utf-8")
                 return
@@ -282,12 +325,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             match = re.fullmatch(r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})", path)
             if match:
-                self._json(200, {"goal": asdict(service.goals.get(
+                self._json(200, {"goal": _goal_payload(service.goals.get(
                     user_id=user, goal_id=match.group(1)
                 ))})
                 return
             self._json(404, {"error": "not found"})
-        except WatchError as exc:
+        except (WatchError, AdmissionError) as exc:
             status = 404 if "not found within user scope" in str(exc) else 400
             self._json(status, {"error": str(exc)})
 
@@ -319,12 +362,12 @@ class Handler(BaseHTTPRequestHandler):
                 goal = store.register(user_id=user, goal_id=data["goal_id"],
                                       repo=data["repo"], number=data["number"])
                 launch = self.server.service.start_committed(
-                    user_id=user, goal_id=goal.goal_id,
+                    user_id=user, goal_id=_goal_payload(goal)["goal_id"],
                 )
                 code = 200 if launch["state"] in (
                     "ACKED", "OBSERVED",
                 ) or launch.get("mode") == "LOCAL_ONLY" else 202
-                self._json(code, {"goal": asdict(goal), "launch": launch})
+                self._json(code, {"goal": _goal_payload(goal), "launch": launch})
                 return
             launch_reconcile = re.fullmatch(
                 r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/launch/reconcile", path
@@ -361,19 +404,24 @@ class Handler(BaseHTTPRequestHandler):
                     expected_version=data["expected_version"],
                 )
                 control = self.server.service.signal_committed(
-                    user_id=user, goal_id=goal.goal_id, version=goal.version,
+                    user_id=user, goal_id=_goal_payload(goal)["goal_id"],
+                    version=_goal_payload(goal)["version"],
                 )
                 self._json(
                     200 if control["signal_state"] == "ACKED" else 202,
-                    {"goal": asdict(goal), "control": control},
+                    {"goal": _goal_payload(goal), "control": control},
                 )
                 return
             self._json(404, {"error": "not found"})
         except WatchConflict as exc:
             self._json(409, {"error": str(exc)})
-        except WatchError as exc:
-            status = 404 if "not found within user scope" in str(exc) else 400
-            self._json(status, {"error": str(exc)})
+        except (WatchError, AdmissionError) as exc:
+            reason = str(exc)
+            if "stale version" in reason or "invalid lifecycle transition" in reason:
+                status = 409
+            else:
+                status = 404 if "not found within user scope" in reason else 400
+            self._json(status, {"error": reason})
 
 
 class PilotHTTPServer(ThreadingHTTPServer):
@@ -388,10 +436,20 @@ class PilotHTTPServer(ThreadingHTTPServer):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local PR-watch task API pilot")
-    parser.add_argument("--db", required=True)
+    parser.add_argument("--db")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8792)
     args = parser.parse_args()
+    storage_backend = os.getenv("PR_WATCH_STORAGE", "sqlite")
+    pg_dsn = os.getenv("PR_WATCH_PG_DSN")
+    if storage_backend == "postgres":
+        if args.db or os.getenv("PR_WATCH_DB") or not pg_dsn:
+            parser.error("PostgreSQL requires PR_WATCH_PG_DSN and forbids SQLite path")
+    elif storage_backend == "sqlite":
+        if not args.db or pg_dsn:
+            parser.error("SQLite requires --db and forbids PR_WATCH_PG_DSN")
+    else:
+        parser.error("PR_WATCH_STORAGE must be sqlite or postgres")
     raw = os.environ.get("PR_WATCH_LOCAL_TOKENS_JSON", "")
     try:
         tokens = json.loads(raw)
@@ -406,11 +464,16 @@ def main() -> None:
             interval_seconds=int(os.getenv("PR_WATCH_INTERVAL_SECONDS", "300")),
         ) if address else None
     )
-    service = PilotService(args.db, LocalTokens(tokens), bridge, launcher)
+    service = PilotService(
+        args.db, LocalTokens(tokens), bridge, launcher,
+        storage_backend=storage_backend, pg_dsn=pg_dsn,
+    )
     server = PilotHTTPServer((args.host, args.port), service)
-    if launcher is not None:
-        # Only on the exclusive single-node service startup, never on GET.
-        # This is a bounded sweep; UNKNOWN is read-only reconciled, not resent.
+    if service.pg_launcher is not None:
+        summary = service.pg_launcher.startup_sweep(owner=service._launch_owner)
+        print("PostgreSQL Temporal enrollment sweep: " + json.dumps(summary))
+    elif launcher is not None:
+        # SQLite mode remains single-node; no background replay of ambiguities.
         summary = launcher.recover_on_exclusive_startup(service.goals)
         print("Temporal enrollment sweep: " + json.dumps(summary, sort_keys=True))
     print(f"Local PR-watch pilot listening at http://{args.host}:{args.port}")
