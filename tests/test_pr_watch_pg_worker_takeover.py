@@ -66,7 +66,8 @@ async def first_observation(spec: dict) -> dict:
 async def main():
     client = await Client.connect(os.environ["PR_WATCH_TEMPORAL_TEST_ADDRESS"])
     async with Worker(client, task_queue=TASK_QUEUE,
-                      workflows=[PRWatchWorkflow], activities=[first_observation]):
+                      workflows=[PRWatchWorkflow], activities=[first_observation],
+                      max_cached_workflows=0):
         await asyncio.Event().wait()
 
 asyncio.run(main())
@@ -171,7 +172,7 @@ def test_os_worker_sigkill_and_temporal_activity_redelivery(tmp_path):
                         history = await handle.fetch_history()
                         print(
                             "TAKEOVER_HISTORY:",
-                            [item.event_type.name for item in history.events][-18:],
+                            [str(item.event_type) for item in history.events][-18:],
                             "PG_STATE:", store.goal(user_id=USER, goal_id=GOAL),
                             flush=True,
                         )
