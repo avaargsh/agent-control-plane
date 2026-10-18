@@ -12,8 +12,8 @@ frozen ACP v0.1 authority chain, nor authorize GitHub writes or VM operations.
 python -m pip install -e '.[dev]'
 mkdir -p .artifacts/pr-watch
 export PR_WATCH_LOCAL_TOKENS_JSON="$(python -c 'import json,secrets; print(json.dumps({"demo":secrets.token_hex(24)}))')"
-# Copy your generated token into your secure local development environment
-# rather than committing it; the command above does not print the token alone.
+python -c 'import os,json; print("Local demo token:", json.loads(os.environ["PR_WATCH_LOCAL_TOKENS_JSON"])["demo"])'
+# Keep this token in a local development terminal only; never commit it.
 python examples/pr_watch_service.py --db .artifacts/pr-watch/watch.db --port 8792
 ```
 
