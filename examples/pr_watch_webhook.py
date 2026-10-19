@@ -185,6 +185,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        # Close after each response, including early validation failures
+        # where the untrusted request body was intentionally not consumed.
+        self.send_header("Connection", "close")
+        self.close_connection = True
         self.end_headers()
         self.wfile.write(raw)
 
