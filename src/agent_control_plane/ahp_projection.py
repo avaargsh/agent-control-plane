@@ -102,7 +102,7 @@ class AhpProjection:
         self._server_seq = 0
         self._history: deque[ActionEnvelope] = deque(maxlen=replay_capacity)
         self._state: dict[ChannelKey, ChannelSnapshot] = {}
-        self._last_event: dict[ChannelKey, AuthoritativeEvent] = {}
+        self._last_envelope: dict[ChannelKey, ActionEnvelope] = {}
 
     @property
     def server_seq(self) -> int:
@@ -121,10 +121,10 @@ class AhpProjection:
         self._validate(event)
         old = self._state.get(event.key)
         if old and event.revision == old.revision:
-            if event != self._last_event[event.key]:
+            if event != self._last_envelope[event.key].event:
                 raise ProjectionRejected("same revision has conflicting content")
             # Exact resend is idempotent, even after older actions leave the ring.
-            return ActionEnvelope(self._server_seq, deepcopy(event))
+            return deepcopy(self._last_envelope[event.key])
         expected = 1 if old is None else old.revision + 1
         if event.revision != expected:
             raise ProjectionRejected(f"out of order channel revision: expected {expected}")
@@ -136,7 +136,7 @@ class AhpProjection:
         copied = deepcopy(event)
         envelope = ActionEnvelope(self._server_seq + 1, copied)
         self._state[event.key] = ChannelSnapshot(event.key, event.revision, state)
-        self._last_event[event.key] = copied
+        self._last_envelope[event.key] = envelope
         self._server_seq += 1
         self._history.append(envelope)
         return deepcopy(envelope)
