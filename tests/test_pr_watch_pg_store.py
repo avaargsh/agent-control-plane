@@ -22,6 +22,7 @@ from attention_plane import (  # noqa: E402
 from pr_watch_harness import PullSnapshot  # noqa: E402
 from pr_watch_pg_admission import AdmissionError  # noqa: E402
 from pr_watch_pg_store import PostgresWatchStore  # noqa: E402
+from pr_watch_task_projection import project_task  # noqa: E402
 from pr_watch_pg_dispatcher import PostgresLaunchDispatcher  # noqa: E402
 from pr_watch_launcher import TemporalLaunchBridge  # noqa: E402
 from temporalio.testing import WorkflowEnvironment  # noqa: E402
@@ -72,6 +73,27 @@ def test_v1_and_v2_share_atomic_registered_identity_and_launch(context):
         db.goal(user_id="not-owner", goal_id="g1")
     with pytest.raises(AdmissionError, match="not found"):
         db.launch(user_id="not-owner", goal_id="g1")
+
+
+def test_real_pg_task_projection_keeps_unverified_business_outcome(context):
+    db, user = context
+    before = db.goal(user_id=user, goal_id="g1")
+    launch = db.launch(user_id=user, goal_id="g1")
+    pending = project_task(before, launch, principal=user)
+    assert pending["state"] == "WAITING"
+    assert pending["business_outcome_verified"] is False
+    assert pending["source_of_truth"] == "pr-watch-goal"
+    assert pending["independent_proof_ref"] is None
+    assert observe(db, user, snapshot(state="MERGED", ci="UNKNOWN")) == "MERGED"
+    completed = project_task(
+        db.goal(user_id=user, goal_id="g1"),
+        db.launch(user_id=user, goal_id="g1"),
+        principal=user,
+    )
+    assert completed["state"] == "OBSERVED_TERMINAL"
+    assert completed["observation_phase"] == "MERGED"
+    assert completed["business_outcome_verified"] is False
+    assert db.goal(user_id=user, goal_id="g1")["state"] == "FINISHED"
 
 
 def test_atomic_observation_event_and_notify_in_single_pg_transaction(context):
