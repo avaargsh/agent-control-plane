@@ -56,6 +56,15 @@ def register(pg, user, goal="pr-169"):
     )
 
 
+def test_registration_rejects_dot_segments_before_database_access(store):
+    pg, user = store
+    for bad_repo in ("../target", "./repo", "owner/..", "owner/."):
+        with pytest.raises(AdmissionError, match="invalid scoped registration"):
+            pg.register(user_id=user, goal_id="bad-repo", repo=bad_repo, number=1)
+    with pytest.raises(AdmissionError, match="not found"):
+        pg.goal(user_id=user, goal_id="bad-repo")
+
+
 def test_registration_is_atomic_idempotent_and_user_scoped(store):
     pg, user = store
     first = register(pg, user)
