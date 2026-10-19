@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 from pr_watch_harness import PullSnapshot, WatchError
 
 _REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_HEAD_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 _BAD = {"failure", "timed_out", "cancelled", "action_required", "startup_failure", "error"}
 _GOOD = {"success", "neutral", "skipped"}
 
@@ -67,8 +68,11 @@ class GitHubReadOnlyReader:
         if not isinstance(pr, dict) or not isinstance(pr.get("head"), dict):
             raise ReadOnlyGitHubError("invalid PR response")
         head = pr["head"].get("sha")
-        if not isinstance(head, str):
-            raise ReadOnlyGitHubError("PR has no head revision")
+        # This value comes from an external provider response and is later
+        # interpolated into REST paths. Fail closed before constructing any
+        # check/status request if it is not an exact Git object SHA-1.
+        if not isinstance(head, str) or not _HEAD_SHA.fullmatch(head):
+            raise ReadOnlyGitHubError("PR has invalid head revision")
         if pr.get("state") == "open":
             state = "OPEN"
         elif pr.get("state") == "closed" and pr.get("merged") is True:
