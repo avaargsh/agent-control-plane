@@ -251,7 +251,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Operator-only PostgreSQL webhook extension schema"
     )
-    parser.add_argument("action", choices=("install", "validate"))
+    parser.add_argument("action", choices=("install", "validate", "reconcile"))
+    parser.add_argument("--user")
+    parser.add_argument("--goal")
+    parser.add_argument("--delivery")
+    parser.add_argument("--temporal-address")
+    parser.add_argument("--temporal-namespace", default="default")
     args = parser.parse_args()
     dsn = os.getenv("PR_WATCH_PG_DSN", "")
     if not dsn:
@@ -260,8 +265,30 @@ def main() -> None:
     try:
         if args.action == "install":
             schema.install()
-        else:
+        elif args.action == "validate":
             schema.validate()
+        else:
+            if not all((
+                args.user, args.goal, args.delivery, args.temporal_address,
+            )):
+                parser.error("reconcile requires user, goal, delivery and Temporal address")
+            from pr_watch_webhook import TemporalWebhookWake
+
+            # Never start a Workflow or send a Signal during reconciliation.
+            wake = TemporalWebhookWake(
+                args.temporal_address, args.temporal_namespace,
+                args.user, args.goal,
+            )
+            secret = os.getenv("PR_WATCH_WEBHOOK_SECRET", "").encode("utf-8")
+            ingress = PostgresWebhookIngress(
+                store=PostgresWatchStore(dsn), user_id=args.user,
+                goal_id=args.goal, secret=secret, signal=wake,
+            )
+            result = ingress.reconcile(
+                delivery=args.delivery, prove=wake.prove,
+            )
+            print("Webhook History reconciliation: " + result["signal_state"])
+            return
     except (ValueError, RuntimeError) as exc:
         parser.error(str(exc))
     print("PostgreSQL webhook extension: " + args.action + " verified")
