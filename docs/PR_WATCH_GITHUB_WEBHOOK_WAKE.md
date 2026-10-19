@@ -68,12 +68,15 @@ do not mix its SQLite journal with PostgreSQL's authoritative PR Watch store.
 
 ```bash
 python -m pytest -q tests/test_pr_watch_webhook.py
-python -m ruff check examples/pr_watch_webhook.py tests/test_pr_watch_webhook.py
+python -m pytest -q tests/test_pr_watch_webhook_temporal_e2e.py
+python -m ruff check examples/pr_watch_webhook.py tests/test_pr_watch_webhook.py tests/test_pr_watch_webhook_temporal_e2e.py
 ```
 
 Offline tests use a real loopback HTTP server, durable SQLite Goal/journal,
-a deterministic fake Signal transport, crashes and concurrency. They do
-**not** establish live GitHub webhook delivery, a production Temporal cluster,
-cross-process provider exactly-once or HA deployment. Operator reconciliation
-and a PostgreSQL inbox/migration are separate follow-up work; don't claim
-those exist in this version.
+a deterministic fake Signal transport, crashes and concurrency. The separate
+Temporal integration test uses a real SDK time-skipping server, Workflow,
+Signal, SQLite journal and Activity with **fixture GitHub observations**.
+It does **not** establish live GitHub webhook delivery, a production Temporal
+cluster, cross-process provider exactly-once or HA deployment. Operator
+reconciliation and a PostgreSQL inbox/migration are separate follow-up work;
+do not claim those exist in this version.
