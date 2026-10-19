@@ -59,6 +59,22 @@ including simultaneous HTTP workers. Replaying an already claimed delivery
 never resends the Signal; even after the Goal becomes terminal, the durable
 receipt remains visible.
 
+### CI completion wake
+
+Subscribe to GitHub **Pull requests**, **Check runs** and **Check suites** events
+on the webhook. The parser accepts PR lifecycle events and only
+`check_run.completed` / `check_suite.completed` with an explicit
+`pull_requests[].number` matching the already-bound Goal's PR. It never
+trusts check names, branches, SHAs or conclusions as proof of CI success:
+the Temporal Activity re-fetches current GitHub status using its own read-only
+credential. Other repo/PR associations and check actions do not wake tasks.
+
+GitHub may leave `pull_requests` empty for checks originating from forks.
+Such events are intentionally ignored; the existing Temporal periodic polling
+remains the fallback. No branch/commit heuristic is used to guess an
+association. This is a delivery latency improvement, not guaranteed CI
+event delivery or merge eligibility proof.
+
 ## Evidence and acknowledgement uncertainty
 
 Both inbox implementations provide a trusted, **non-HTTP** `reconcile`
