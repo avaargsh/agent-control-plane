@@ -203,11 +203,44 @@ class PostgresWebhookIngress:
         if not proved:
             return {"signal_state": row["state"]}
         with self._db() as db:
-            updated = db.execute(
+            db.execute(
                 """UPDATE pr_watch_pg_webhook_wakes SET state='ACKED'
                    WHERE user_id=%s AND goal_id=%s AND delivery=%s
-                     AND signal_id=%s AND state IN ('IN_FLIGHT','UNKNOWN')
-                   RETURNING state""",
+                     AND signal_id=%s AND state IN ('IN_FLIGHT','UNKNOWN')""",
                 (self.user_id, self.goal_id, delivery, row["signal_id"]),
+            )
+            current = db.execute(
+                """SELECT state FROM pr_watch_pg_webhook_wakes
+                   WHERE user_id=%s AND goal_id=%s AND delivery=%s""",
+                (self.user_id, self.goal_id, delivery),
             ).fetchone()
-        return {"signal_state": "ACKED" if updated else "ACKED"}
+        if current is None:
+            raise WebhookRejected(404, "delivery not found within goal scope")
+        return {"signal_state": current["state"]}
+
+
+def main() -> None:
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(
+        description="Operator-only PostgreSQL webhook extension schema"
+    )
+    parser.add_argument("action", choices=("install", "validate"))
+    args = parser.parse_args()
+    dsn = os.getenv("PR_WATCH_PG_DSN", "")
+    if not dsn:
+        parser.error("PR_WATCH_PG_DSN is required")
+    schema = PostgresWebhookSchema(dsn)
+    try:
+        if args.action == "install":
+            schema.install()
+        else:
+            schema.validate()
+    except (ValueError, RuntimeError) as exc:
+        parser.error(str(exc))
+    print("PostgreSQL webhook extension: " + args.action + " verified")
+
+
+if __name__ == "__main__":
+    main()
