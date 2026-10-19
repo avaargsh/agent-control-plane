@@ -69,6 +69,26 @@ matching History event upgrades `UNKNOWN` or `IN_FLIGHT` to `ACKED`.
 Missing/inaccessible/truncated History is uncertainty, **not** proof that
 the Signal never arrived. There is no retry or automatically created Workflow.
 
+After an operator verifies the bound Goal and the exact delivery UUID, perform
+an **out-of-band, read-only** History reconciliation using the same configured
+PostgreSQL DSN and webhook secret. The command updates only the existing
+delivery's state when a matching History event is positively proven:
+
+```bash
+PYTHONPATH=examples python examples/pr_watch_pg_webhook.py reconcile \\
+  --user demo --goal review-168 \\
+  --delivery '00000000-0000-4000-8000-000000000001' \\
+  --temporal-address localhost:7233
+```
+
+This UUID is an illustrative placeholder, not a real delivery; copy the
+recorded delivery ID in actual operations. Neither missing Workflow History,
+a stale or truncated History read nor a failed Temporal connection may cause
+a retry. The CLI does not start a Workflow or emit another Signal.
+Schema validation now checks precise column types, NOT NULL, the ordered
+scoped primary key, Goal FK and state constraint shape; merely retaining the
+same number of constraints is insufficient.
+
 Verification:
 
 ```bash
