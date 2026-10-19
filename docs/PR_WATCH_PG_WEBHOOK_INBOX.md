@@ -1,7 +1,8 @@
 # PR Watch — Explicit PostgreSQL Webhook Inbox Extension
 
-**Status:** experimental opt-in PG16 pilot, stacked on
-[PR #183](https://github.com/avaargsh/agent-control-plane/pull/183).
+**Status:** experimental opt-in PG16 pilot. Its prerequisite
+[PR #183](https://github.com/avaargsh/agent-control-plane/pull/183)
+has been merged; the current change targets `main` directly.
 Not a production ingress, HA claim, or replacement for ACP authorization.
 
 ## Design and migration boundary
@@ -30,6 +31,32 @@ This extension references the existing Goal table and adds a foreign key:
 a rollback of V2 **must not proceed while the extension exists**. No
 automatic destructive removal or downgrade is provided. Plan an explicit
 offline backup, retention and restore procedure before any release.
+
+## Merge and deployment acceptance boundary
+
+Merging the implementation is distinct from enabling the webhook listener.
+Even after all PR test matrices pass, the operator must separately verify
+the following in a **disposable** environment before a public-facing ingress
+is considered:
+
+1. Main-branch CI is green **after** the prerequisite merges (including
+   PR selector input validation and the PG16 webhook integration test).
+2. The PostgreSQL V2 migration ledger and the separately versioned webhook
+   extension validate after a fresh installation and after backup/restore;
+   never invoke install on each application startup.
+3. The event receiver stays on loopback; an external TLS ingress must be
+   independently reviewed for raw-body HMAC preservation, bounded requests,
+   allowlisted routes, secret handling and trusted Host rewriting.
+4. Deliver a real GitHub `pull_request`, `check_run` or `check_suite`
+   event, then verify the PostgreSQL delivery row, Temporal Signal History,
+   authoritative re-read of GitHub PR/CI, and scoped event visibility.
+5. Replay a real delivery and exercise ambiguous acknowledgements, restart,
+   revoked/paused Goal and PR association mismatch. Do not treat `UNKNOWN`
+   as a safe-to-retry permission.
+6. Document the rollout owner, secure secret rotation, History retention
+   assumptions, operational monitoring, and explicit rollback decision.
+
+This checklist is **not** fulfilled by the current fixture-based CI tests.
 
 ## Local run
 
