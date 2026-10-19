@@ -135,9 +135,12 @@ class GitHubWebhookIngress:
                 "WHERE user_id=? AND goal_id=?",
                 (self.user_id, self.goal_id),
             ).fetchone()
-            if (row is None or row["state"] != "RUNNING"
-                    or row["repo"] != self.repo or row["number"] != self.number):
+            if (row is None or row["repo"] != self.repo
+                    or row["number"] != self.number):
                 return {"status": "ignored"}
+            # Return durable prior evidence even when the first wake has
+            # already completed the Goal. Terminal state must not obscure
+            # a duplicate ACK (or allow a second Signal attempt).
             prior = db.execute(
                 "SELECT payload_sha256,state FROM pr_watch_webhook_wakes "
                 "WHERE user_id=? AND goal_id=? AND delivery=?",
@@ -147,6 +150,8 @@ class GitHubWebhookIngress:
                 if prior["payload_sha256"] != digest:
                     raise WebhookRejected(409, "delivery identity reused")
                 return {"status": "duplicate", "signal_state": prior["state"]}
+            if row["state"] != "RUNNING":
+                return {"status": "ignored"}
             db.execute(
                 "INSERT INTO pr_watch_webhook_wakes "
                 "(user_id,goal_id,delivery,payload_sha256,signal_id,state) "
