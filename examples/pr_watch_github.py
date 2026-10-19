@@ -60,9 +60,13 @@ class GitHubReadOnlyReader:
             raise ReadOnlyGitHubError("GitHub supplied invalid JSON") from exc
 
     def fetch(self, repo: str, number: int) -> PullSnapshot:
-        if not isinstance(repo, str) or not _REPO.fullmatch(repo) or not isinstance(number, int) or number < 1:
+        if not isinstance(repo, str) or not _REPO.fullmatch(repo) or type(number) is not int or number < 1:
             raise WatchError("invalid GitHub PR selector")
         owner, name = repo.split("/", 1)
+        # quote() never escapes periods. Reject dot segments before building
+        # a path, rather than trusting URL/client normalization.
+        if owner in (".", "..") or name in (".", ".."):
+            raise WatchError("invalid GitHub PR selector")
         prefix = "/repos/" + quote(owner, safe="") + "/" + quote(name, safe="")
         pr = self._get(f"{prefix}/pulls/{number}")
         if not isinstance(pr, dict) or not isinstance(pr.get("head"), dict):
