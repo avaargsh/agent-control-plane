@@ -58,23 +58,48 @@ class PostgresWebhookSchema:
         }:
             raise ValueError("webhook schema version/checksum mismatch")
         cols = conn.execute(
-            """SELECT attname FROM pg_attribute
+            """SELECT attname, format_type(atttypid,atttypmod) AS type,
+                      attnotnull AS required
+               FROM pg_attribute
                WHERE attrelid=to_regclass('pr_watch_pg_webhook_wakes')
                  AND attnum>0 AND NOT attisdropped"""
         ).fetchall()
-        if {c["attname"] for c in cols} != {
-            "user_id", "goal_id", "delivery", "payload_sha256",
-            "signal_id", "state",
-        }:
-            raise ValueError("webhook inbox columns mismatch")
+        # A table with the right column names but wrong types/nullable fields
+        # cannot safely honor the durable claim and scoped-key contract.
+        expected = {
+            "user_id": "text", "goal_id": "text", "delivery": "uuid",
+            "payload_sha256": "character(64)", "signal_id": "text",
+            "state": "text",
+        }
+        if ({r["attname"]: r["type"] for r in cols} != expected
+                or not all(r["required"] for r in cols)):
+            raise ValueError("webhook inbox columns/type/nullability mismatch")
         constraints = conn.execute(
-            """SELECT contype, count(*) AS n FROM pg_constraint
-               WHERE conrelid=to_regclass('pr_watch_pg_webhook_wakes')
-               GROUP BY contype"""
+            """SELECT contype, pg_get_constraintdef(oid) AS definition
+               FROM pg_constraint
+               WHERE conrelid=to_regclass('pr_watch_pg_webhook_wakes')"""
         ).fetchall()
-        types = {r["contype"]: r["n"] for r in constraints}
-        if any(types.get(t, 0) < 1 for t in ("p", "f", "c")):
-            raise ValueError("webhook inbox constraints are missing")
+        pk = [r["definition"] for r in constraints if r["contype"] == "p"]
+        fks = [r["definition"] for r in constraints if r["contype"] == "f"]
+        checks = [r["definition"] for r in constraints if r["contype"] == "c"]
+        if pk != ["PRIMARY KEY (user_id, goal_id, delivery)"]:
+            raise ValueError("webhook inbox scoped primary key drift")
+        if not any(
+            fk.startswith(
+                "FOREIGN KEY (user_id, goal_id) REFERENCES "
+                "pr_watch_pg_goals(user_id, goal_id)"
+            ) or fk.startswith(
+                "FOREIGN KEY (user_id, goal_id) REFERENCES "
+                "public.pr_watch_pg_goals(user_id, goal_id)"
+            ) for fk in fks
+        ):
+            raise ValueError("webhook inbox goal foreign key drift")
+        if not checks or not any(
+            "IN_FLIGHT" in check and "ACKED" in check
+            and "UNKNOWN" in check and "state" in check
+            for check in checks
+        ):
+            raise ValueError("webhook inbox state restriction drift")
 
     def install(self) -> None:
         """Explicit operator-only install; application startup never calls it."""
