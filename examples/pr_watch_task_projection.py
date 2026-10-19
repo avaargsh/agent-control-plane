@@ -35,35 +35,35 @@ def project_task(goal: Any, launch: Any, *, principal: str) -> dict:
     This deliberately has no SUCCEEDED state: the current Goal observation
     signature is a SHA-256 fingerprint, NOT independently authenticated proof.
     """
-    g, l = _mapping(goal), _mapping(launch)
+    goal_record, launch_record = _mapping(goal), _mapping(launch)
     if (
         not isinstance(principal, str) or not principal
-        or g.get("user_id") != principal or l.get("user_id") != principal
-        or g.get("goal_id") != l.get("goal_id")
+        or goal_record.get("user_id") != principal or launch_record.get("user_id") != principal
+        or goal_record.get("goal_id") != launch_record.get("goal_id")
     ):
         raise WatchError("task projection scope mismatch")
     if (
-        g.get("state") not in GOAL_STATES
-        or g.get("phase") not in GOAL_PHASES
-        or l.get("state") not in LAUNCH_STATES
-        or not isinstance(g.get("repo"), str) or "/" not in g["repo"]
-        or type(g.get("number")) is not int or g["number"] < 1
-        or type(g.get("version")) is not int or g["version"] < 0
-        or not isinstance(g.get("goal_id"), str) or not g["goal_id"]
+        goal_record.get("state") not in GOAL_STATES
+        or goal_record.get("phase") not in GOAL_PHASES
+        or launch_record.get("state") not in LAUNCH_STATES
+        or not isinstance(goal_record.get("repo"), str) or "/" not in goal_record["repo"]
+        or type(goal_record.get("number")) is not int or goal_record["number"] < 1
+        or type(goal_record.get("version")) is not int or goal_record["version"] < 0
+        or not isinstance(goal_record.get("goal_id"), str) or not goal_record["goal_id"]
     ):
         raise WatchError("invalid PR Watch projection record")
-    workflow = l.get("workflow_status")
+    workflow = launch_record.get("workflow_status")
     if workflow is not None and workflow not in WORKFLOW_STATES:
         raise WatchError("invalid workflow observation")
-    signature = g.get("signature")
+    signature = goal_record.get("signature")
     if not isinstance(signature, str) or (
         signature and (len(signature) != 64 or any(ch not in "0123456789abcdef" for ch in signature))
     ):
         raise WatchError("invalid observation digest")
 
-    state = g["state"]
-    phase = g["phase"]
-    started = l["state"]
+    state = goal_record["state"]
+    phase = goal_record["phase"]
+    started = launch_record["state"]
     if state == "FINISHED":
         # A stored GitHub observation may be terminal, but it is not a
         # trusted ACP proof. Never promote it to verified SUCCEEDED.
@@ -84,12 +84,12 @@ def project_task(goal: Any, launch: Any, *, principal: str) -> dict:
 
     return {
         "schema": "pr-watch-task-projection/v1",
-        "task_id": g["goal_id"],
+        "task_id": goal_record["goal_id"],
         "kind": "github-pr-watch",
         "source_of_truth": "pr-watch-goal",
-        "repo": g["repo"],
-        "pull_number": g["number"],
-        "version": g["version"],
+        "repo": goal_record["repo"],
+        "pull_number": goal_record["number"],
+        "version": goal_record["version"],
         "state": task_state,
         "goal_state": state,
         "observation_phase": phase or None,
