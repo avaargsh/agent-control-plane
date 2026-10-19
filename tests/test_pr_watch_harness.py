@@ -226,6 +226,21 @@ def test_git_checks_and_latest_review_conflict():
     assert "check-2" in snapshot.failed_checks
 
 
+def test_pr_selector_rejects_dot_segments_and_boolean_numbers_before_get():
+    reader = GitHubReadOnlyReader(token="test-read-only-token")
+
+    def no_http(path):
+        raise AssertionError("invalid selector reached GitHub API")
+
+    reader._get = no_http
+    for bad_repo in ("../target", "./repo", "owner/..", "owner/."):
+        with pytest.raises(WatchError, match="invalid GitHub PR selector"):
+            reader.fetch(bad_repo, 168)
+    for bad_number in (True, False, 0, -1):
+        with pytest.raises(WatchError, match="invalid GitHub PR selector"):
+            reader.fetch("owner/repo", bad_number)
+
+
 def test_untrusted_pr_head_never_selects_another_rest_resource():
     pr_path = "/repos/avaargsh/agent-control-plane/pulls/168"
     for bad_head in (None, "", "a" * 39, "g" * 40, "../commits/other",
