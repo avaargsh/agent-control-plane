@@ -87,6 +87,20 @@ def test_signed_event_commits_one_wake_and_replay_stays_idempotent(tmp_path):
     assert b"untrusted webpage instructions" not in repr(journal(store)).encode()
 
 
+def test_replay_receipt_is_visible_after_goal_paused_or_finished(tmp_path):
+    store, ingress, seen = setup(tmp_path)
+    event = delivery()
+    assert ingress.accept(**event)["signal_state"] == "ACKED"
+    store.transition(
+        user_id="alice", goal_id="watch", action="cancel", expected_version=0,
+    )
+    assert ingress.accept(**event) == {
+        "status": "duplicate", "signal_state": "ACKED",
+    }
+    assert ingress.accept(**delivery()) == {"status": "ignored"}
+    assert len(seen) == 1 and len(journal(store)) == 1
+
+
 def test_invalid_signature_and_bad_delivery_reject_before_journal(tmp_path):
     store, ingress, seen = setup(tmp_path)
     good = delivery()
