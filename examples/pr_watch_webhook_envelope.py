@@ -47,7 +47,7 @@ def verified_delivery(
         raise WebhookRejected(400, "invalid delivery identity") from exc
     if canonical != delivery:
         raise WebhookRejected(400, "invalid delivery identity")
-    if event != "pull_request":
+    if event not in ("pull_request", "check_run", "check_suite"):
         return None
     try:
         payload = json.loads(body)
@@ -56,18 +56,37 @@ def verified_delivery(
     if not isinstance(payload, dict):
         raise WebhookRejected(400, "invalid webhook payload")
     source = payload.get("repository")
-    pull = payload.get("pull_request")
     action = payload.get("action")
-    received_number = payload.get("number")
-    if (not isinstance(source, dict) or not isinstance(pull, dict)
-            or not isinstance(action, str)
-            or type(received_number) is not int
-            or type(pull.get("number")) is not int):
-        raise WebhookRejected(400, "invalid PR event shape")
-    if action not in ACTIONS:
+    if not isinstance(source, dict) or not isinstance(action, str):
+        raise WebhookRejected(400, "invalid webhook event shape")
+    if source.get("full_name") != repo:
         return None
-    if (source.get("full_name") != repo
-            or received_number != number or pull["number"] != number):
+    if event == "pull_request":
+        pull = payload.get("pull_request")
+        received_number = payload.get("number")
+        if (not isinstance(pull, dict) or type(received_number) is not int
+                or type(pull.get("number")) is not int):
+            raise WebhookRejected(400, "invalid PR event shape")
+        if (action not in ACTIONS or received_number != number
+                or pull["number"] != number):
+            return None
+        return canonical
+    # GitHub emits check_run/check_suite "completed" separately from PR
+    # lifecycle changes. These are merely wake hints; the Activity must
+    # independently read current GitHub PR + CI status. Never route by
+    # check name, branch, SHA alone, or an unassociated fork check event.
+    if action != "completed":
+        return None
+    checks = payload.get(event)
+    if not isinstance(checks, dict):
+        raise WebhookRejected(400, "invalid check event shape")
+    pulls = checks.get("pull_requests")
+    if not isinstance(pulls, list):
+        raise WebhookRejected(400, "missing PR association in check event")
+    for pull in pulls:
+        if not isinstance(pull, dict) or type(pull.get("number")) is not int:
+            raise WebhookRejected(400, "invalid associated PR")
+    if not any(pull["number"] == number for pull in pulls):
         return None
     return canonical
 
