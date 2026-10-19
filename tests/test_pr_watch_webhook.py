@@ -131,6 +131,58 @@ def test_event_not_allowed_to_route_to_other_goal_or_override_state(tmp_path):
     assert len(seen) == 0 and journal(store) == []
 
 
+def check_payload(*, kind, related=(NUMBER,), action="completed", repo=REPO):
+    return json.dumps({
+        "action": action,
+        "repository": {"full_name": repo},
+        kind: {"name": "untrusted workflow name",
+               "pull_requests": [{"number": n} for n in related]},
+    }).encode("utf-8")
+
+
+@pytest.mark.parametrize("kind", ("check_run", "check_suite"))
+def test_signed_check_completion_wakes_only_explicitly_associated_pr(tmp_path, kind):
+    store, ingress, seen = setup(tmp_path)
+    event = delivery(check_payload(kind=kind), event=kind)
+    assert ingress.accept(**event)["signal_state"] == "ACKED"
+    assert ingress.accept(**event) == {
+        "status": "duplicate", "signal_state": "ACKED",
+    }
+    assert len(seen) == 1 and len(journal(store)) == 1
+
+
+@pytest.mark.parametrize("kind", ("check_run", "check_suite"))
+def test_unassociated_checks_and_fork_missing_pr_ref_do_not_wake(tmp_path, kind):
+    store, ingress, seen = setup(tmp_path)
+    for raw in (
+        check_payload(kind=kind, related=()),
+        check_payload(kind=kind, related=(NUMBER + 1,)),
+        check_payload(kind=kind, repo="another/repo"),
+        check_payload(kind=kind, action="created"),
+        json.dumps({
+            "action": "completed", "repository": {"full_name": REPO},
+            kind: {"head_sha": "a" * 40, "head_branch": "main",
+                   "pull_requests": []},
+        }).encode("utf-8"),
+    ):
+        assert ingress.accept(**delivery(raw, event=kind)) == {"status": "ignored"}
+    assert len(seen) == 0 and journal(store) == []
+
+
+@pytest.mark.parametrize("kind", ("check_run", "check_suite"))
+def test_ambiguous_check_association_fails_closed_before_journal(tmp_path, kind):
+    store, ingress, seen = setup(tmp_path)
+    for refs in (None, "not-a-list", [{"number": True}],
+                 [{"number": NUMBER}, {"number": "169"}]):
+        raw = json.dumps({
+            "action": "completed", "repository": {"full_name": REPO},
+            kind: {"pull_requests": refs},
+        }).encode()
+        with pytest.raises(WebhookRejected, match="PR association|associated PR"):
+            ingress.accept(**delivery(raw, event=kind))
+    assert len(seen) == 0 and journal(store) == []
+
+
 def test_cross_delivery_id_reuse_rejected_even_when_hmac_is_valid(tmp_path):
     store, ingress, seen = setup(tmp_path)
     guid = str(uuid4())
