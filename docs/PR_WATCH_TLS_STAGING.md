@@ -51,11 +51,20 @@ OpenSSL** on an isolated GitHub runner. On Python 3.11 and 3.12 it:
 6. checks a signed `check_run.completed` hint creates a wake but cannot
    by itself rewrite the durable observed CI phase.
 
-The fixtures use **SQLite** for the local Inbox; existing
-`pr-watch-postgres-admission` independently exercises real PG16,
-Temporal Signal History and user-scoped events. This TLS test never
-claims an actual GitHub delivery or real PostgreSQL/TLS combined
-deployment.
+The standalone Nginx fixture above uses **SQLite** for its local Inbox.
+The `pr-watch-postgres-admission` CI additionally runs this **same real
+localhost TLS frontend against real PostgreSQL 16 and a real Temporal SDK
+test-server**: authenticated Goal registration -> Nginx HTTPS ->
+HMAC-bound Webhook -> PostgreSQL Inbox -> existing Temporal Workflow
+Signal -> independent fixture-based PR observation -> persisted events ->
+user-scoped API and positive History audit. Both normal ACK and deliberately
+lost ACK with replay/History reconciliation run in **direct HTTP and TLS**
+modes. Neither mode treats the signed event's `conclusion` as authoritative
+CI evidence. The resulting audit must still report `NO_GO`.
+
+This combined test closes the *composition* gap; it is not real GitHub
+Webhook delivery, a deployed public ingress, or a production Temporal
+cluster. Those release gates remain open in #185.
 
 To repeat on a disposable Ubuntu machine with Nginx and OpenSSL installed:
 
@@ -85,6 +94,8 @@ Only in an explicitly authorized staging host:
   never contain raw provider instructions.
 
 ## Remaining issue #185 release gates
+
+The combined local PG16/Nginx/Temporal test is **not** an operator signoff.
 
 A real GitHub Webhook delivery from a disposable repository, proper
 externally validated TLS certificate/DNS configuration, perimeter network
