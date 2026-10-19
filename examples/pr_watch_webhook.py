@@ -8,29 +8,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
-import hmac
 import json
 import os
-import re
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from uuid import UUID
 
 from pr_watch_control_bridge import workflow_id
 from pr_watch_harness import GoalStore, WatchError
 
-_MAX_BODY = 262_144
-_SIGNATURE = re.compile(r"^sha256=([0-9a-fA-F]{64})$")
-_ACTIONS = frozenset({
-    "opened", "reopened", "synchronize", "closed", "ready_for_review",
-    "converted_to_draft",
-})
-
-
-class WebhookRejected(ValueError):
-    def __init__(self, status: int, message: str):
-        super().__init__(message)
-        self.status = status
+from pr_watch_webhook_envelope import (
+    MAX_BODY, WebhookRejected, verified_delivery, wake_signal_id,
+)
 
 
 class TemporalWebhookWake:
@@ -81,51 +69,16 @@ class GitHubWebhookIngress:
         db.row_factory = sqlite3.Row
         return db
 
-    @staticmethod
-    def _uuid(value: str) -> str:
-        try:
-            parsed = UUID(value)
-        except (ValueError, AttributeError, TypeError) as exc:
-            raise WebhookRejected(400, "invalid delivery identity") from exc
-        if str(parsed) != value:
-            raise WebhookRejected(400, "invalid delivery identity")
-        return value
-
     def accept(self, *, signature: str, event: str, delivery: str,
                body: bytes) -> dict:
-        # Check the raw exact bytes before JSON parsing or any Goal/DB access.
-        match = _SIGNATURE.fullmatch(signature)
-        expected = hmac.new(self._secret, body, hashlib.sha256).hexdigest()
-        if not match or not hmac.compare_digest(match.group(1).lower(), expected):
-            raise WebhookRejected(403, "invalid webhook signature")
-        delivery = self._uuid(delivery)
-        if event != "pull_request":
+        delivery = verified_delivery(
+            secret=self._secret, repo=self.repo, number=self.number,
+            signature=signature, event=event, delivery=delivery, body=body,
+        )
+        if delivery is None:
             return {"status": "ignored"}
-        try:
-            payload = json.loads(body)
-        except (ValueError, UnicodeError) as exc:
-            raise WebhookRejected(400, "invalid webhook JSON") from exc
-        if not isinstance(payload, dict):
-            raise WebhookRejected(400, "invalid webhook payload")
-        repo = payload.get("repository")
-        pr = payload.get("pull_request")
-        action = payload.get("action")
-        number = payload.get("number")
-        if (not isinstance(repo, dict) or not isinstance(pr, dict)
-                or not isinstance(action, str) or type(number) is not int
-                or type(pr.get("number")) is not int):
-            raise WebhookRejected(400, "invalid PR event shape")
-        if action not in _ACTIONS:
-            return {"status": "ignored"}
-        if (repo.get("full_name") != self.repo
-                or number != self.number or pr["number"] != self.number):
-            return {"status": "ignored"}
-
         digest = hashlib.sha256(body).hexdigest()
-        signal_id = "pr-watch-webhook:" + hashlib.sha256(
-            json.dumps([self.user_id, self.goal_id, delivery],
-                       separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
+        signal_id = wake_signal_id(self.user_id, self.goal_id, delivery)
         # Source of truth stays the durable Goal row. Paused/closed tasks do
         # not acquire an event wake merely because a webhook was signed.
         with self._db() as db:
@@ -221,7 +174,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             if not size_text.isascii() or not size_text.isdecimal():
                 raise WebhookRejected(400, "invalid webhook length")
             size = int(size_text)
-            if not 1 <= size <= _MAX_BODY:
+            if not 1 <= size <= MAX_BODY:
                 raise WebhookRejected(413, "webhook body exceeds limit")
             signature = self._one("X-Hub-Signature-256")
             event = self._one("X-GitHub-Event")
