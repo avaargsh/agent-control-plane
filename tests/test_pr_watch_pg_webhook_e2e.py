@@ -36,7 +36,7 @@ from pr_watch_service import LocalTokens, PilotHTTPServer, PilotService  # noqa:
 from pr_watch_temporal import PRWatchWorkflow  # noqa: E402
 from pr_watch_webhook import WebhookServer  # noqa: E402
 from test_pr_watch_service import request  # noqa: E402
-from test_pr_watch_webhook import delivery, post  # noqa: E402
+from test_pr_watch_webhook import post  # noqa: E402
 
 DSN = os.getenv("PR_WATCH_PG_TEST_DSN")
 REPO = "avaargsh/agent-control-plane"
@@ -128,6 +128,21 @@ def test_postgres_real_http_check_wake_to_temporal_and_scoped_events():
                     )
                     try:
                         await asyncio.wait_for(first_observed.wait(), timeout=15)
+                        # A Timer must be durably scheduled before the
+                        # webhook arrives, otherwise an ordinary first
+                        # Activity completion could mimic wake behavior.
+                        async def wait_for_timer():
+                            for _ in range(120):
+                                history = await handle.fetch_history()
+                                if any(
+                                    e.event_type == EventType.EVENT_TYPE_TIMER_STARTED
+                                    for e in history.events
+                                ):
+                                    return
+                                await asyncio.sleep(0.05)
+                            raise AssertionError("Temporal timer not persisted")
+
+                        await asyncio.wait_for(wait_for_timer(), timeout=15)
                         loop = asyncio.get_running_loop()
 
                         def send_signal(signal_id):
