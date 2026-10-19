@@ -95,6 +95,7 @@ class PostgresAdmission:
         if (
             not _id(user_id) or not _id(goal_id) or not isinstance(repo, str)
             or not _REPO.fullmatch(repo) or type(number) is not int or number <= 0
+            or any(part in (".", "..") for part in repo.split("/"))
         ):
             raise AdmissionError("invalid scoped registration")
         with self._connection() as conn:

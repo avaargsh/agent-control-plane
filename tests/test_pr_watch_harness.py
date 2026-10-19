@@ -55,6 +55,11 @@ def test_idempotent_goal_and_immutable_pr_binding(tmp_path):
                        repo="avaargsh/agent-control-plane", number=169)
     with pytest.raises(WatchError):
         store.register(user_id="u1", goal_id="bad", repo="https://evil/target", number=1)
+    for bad_number in (True, False, 1.0, "1", 0):
+        with pytest.raises(WatchError, match="invalid scoped goal"):
+            store.register(user_id="u1", goal_id="bad", repo="owner/repo", number=bad_number)
+    with pytest.raises(WatchError, match="invalid scoped goal"):
+        store.register(user_id="u1", goal_id="bad", repo=None, number=1)
 
 
 def test_cross_user_isolation(tmp_path):
@@ -224,6 +229,38 @@ def test_git_checks_and_latest_review_conflict():
     assert snapshot.ci == "FAILURE"
     assert snapshot.review == "CHANGES_REQUESTED"
     assert "check-2" in snapshot.failed_checks
+
+
+def test_pr_selector_rejects_dot_segments_and_boolean_numbers_before_get():
+    reader = GitHubReadOnlyReader(token="test-read-only-token")
+
+    def no_http(path):
+        raise AssertionError("invalid selector reached GitHub API")
+
+    reader._get = no_http
+    for bad_repo in ("../target", "./repo", "owner/..", "owner/."):
+        with pytest.raises(WatchError, match="invalid GitHub PR selector"):
+            reader.fetch(bad_repo, 168)
+    for bad_number in (True, False, 0, -1):
+        with pytest.raises(WatchError, match="invalid GitHub PR selector"):
+            reader.fetch("owner/repo", bad_number)
+
+
+def test_untrusted_pr_head_never_selects_another_rest_resource():
+    pr_path = "/repos/avaargsh/agent-control-plane/pulls/168"
+    for bad_head in (None, "", "a" * 39, "g" * 40, "../commits/other",
+                     "a" * 40 + "/check-runs", "a" * 64):
+        paths = []
+
+        def response(path):
+            paths.append(path)
+            if path != pr_path:
+                raise AssertionError("untrusted head reached secondary REST path")
+            return {"head": {"sha": bad_head}, "state": "open", "merged": False}
+
+        with pytest.raises(ReadOnlyGitHubError, match="invalid head revision"):
+            github(response).fetch("avaargsh/agent-control-plane", 168)
+        assert paths == [pr_path]
 
 
 def test_bad_git_lifecycle_never_guessed():

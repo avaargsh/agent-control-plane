@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 from pr_watch_harness import PullSnapshot, WatchError
 
 _REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_HEAD_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 _BAD = {"failure", "timed_out", "cancelled", "action_required", "startup_failure", "error"}
 _GOOD = {"success", "neutral", "skipped"}
 
@@ -59,16 +60,23 @@ class GitHubReadOnlyReader:
             raise ReadOnlyGitHubError("GitHub supplied invalid JSON") from exc
 
     def fetch(self, repo: str, number: int) -> PullSnapshot:
-        if not isinstance(repo, str) or not _REPO.fullmatch(repo) or not isinstance(number, int) or number < 1:
+        if not isinstance(repo, str) or not _REPO.fullmatch(repo) or type(number) is not int or number < 1:
             raise WatchError("invalid GitHub PR selector")
         owner, name = repo.split("/", 1)
+        # quote() never escapes periods. Reject dot segments before building
+        # a path, rather than trusting URL/client normalization.
+        if owner in (".", "..") or name in (".", ".."):
+            raise WatchError("invalid GitHub PR selector")
         prefix = "/repos/" + quote(owner, safe="") + "/" + quote(name, safe="")
         pr = self._get(f"{prefix}/pulls/{number}")
         if not isinstance(pr, dict) or not isinstance(pr.get("head"), dict):
             raise ReadOnlyGitHubError("invalid PR response")
         head = pr["head"].get("sha")
-        if not isinstance(head, str):
-            raise ReadOnlyGitHubError("PR has no head revision")
+        # This value comes from an external provider response and is later
+        # interpolated into REST paths. Fail closed before constructing any
+        # check/status request if it is not an exact Git object SHA-1.
+        if not isinstance(head, str) or not _HEAD_SHA.fullmatch(head):
+            raise ReadOnlyGitHubError("PR has invalid head revision")
         if pr.get("state") == "open":
             state = "OPEN"
         elif pr.get("state") == "closed" and pr.get("merged") is True:

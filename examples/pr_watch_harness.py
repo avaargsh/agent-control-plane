@@ -171,7 +171,10 @@ class GoalStore:
         return db
 
     def register(self, *, user_id: str, goal_id: str, repo: str, number: int) -> Goal:
-        if not user_id or not goal_id or not _REPO.fullmatch(repo) or not 1 <= number:
+        if (
+            not user_id or not goal_id or not isinstance(repo, str)
+            or not _REPO.fullmatch(repo) or type(number) is not int or number < 1
+        ):
             raise WatchError("invalid scoped goal or GitHub repository")
         if repo.split("/")[0] in (".", "..") or repo.split("/")[1] in (".", ".."):
             raise WatchError("invalid repository path")
