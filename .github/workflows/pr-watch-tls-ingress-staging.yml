@@ -1,0 +1,42 @@
+name: pr-watch-tls-ingress-staging
+
+on:
+  pull_request:
+    paths:
+      - 'examples/pr_watch_nginx_staging.conf.template'
+      - 'examples/pr_watch_webhook.py'
+      - 'examples/pr_watch_webhook_envelope.py'
+      - 'tests/test_pr_watch_tls_ingress.py'
+      - 'tests/test_pr_watch_webhook.py'
+      - 'docs/PR_WATCH_TLS_STAGING.md'
+      - '.github/workflows/pr-watch-tls-ingress-staging.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-nginx-loopback-tls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install actual Nginx and OpenSSL
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nginx openssl
+          test -x /usr/sbin/nginx
+          openssl version
+      - name: Install reference test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Lint TLS ingress acceptance
+        run: python -m ruff check tests/test_pr_watch_tls_ingress.py
+      - name: Real localhost HTTPS through Nginx to scoped webhook
+        run: python -m pytest -vv tests/test_pr_watch_tls_ingress.py -x

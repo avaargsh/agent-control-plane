@@ -1,0 +1,50 @@
+# PR Watch #185 — REVIEW-REQUIRED localhost-only TLS proxy template.
+# Do NOT expose as a public service or use real credentials in CI.
+# Fill @@...@@ tokens only from vetted local operator configuration.
+worker_processes 1;
+error_log @@ERROR_LOG@@ warn;
+pid @@PID_FILE@@;
+events { worker_connections 128; }
+http {
+    access_log off;
+    server_tokens off;
+    client_max_body_size 256k;
+    client_body_timeout 5s;
+    client_header_timeout 5s;
+    keepalive_timeout 5s;
+    send_timeout 12s;
+
+    server {
+        listen 127.0.0.1:@@TLS_PORT@@ ssl;
+        server_name @@PUBLIC_HOST@@;
+        ssl_certificate @@CERT_FILE@@;
+        ssl_certificate_key @@KEY_FILE@@;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_session_tickets off;
+
+        # A single fixed endpoint. Neither path/query nor caller-supplied
+        # forwarding headers select the upstream Goal, owner or capability.
+        location = /webhooks/github {
+            if ($host != "@@PUBLIC_HOST@@") { return 421; }
+            if ($http_origin != "") { return 403; }
+            if ($http_transfer_encoding != "") { return 400; }
+
+            limit_except POST { deny all; }
+            proxy_pass http://127.0.0.1:@@BACKEND_PORT@@;
+            proxy_http_version 1.1;
+            proxy_set_header Host 127.0.0.1:@@BACKEND_PORT@@;
+            proxy_set_header Connection close;
+            proxy_set_header X-Forwarded-For "";
+            proxy_set_header X-Forwarded-Host "";
+            proxy_set_header X-Forwarded-Proto "";
+            proxy_set_header Forwarded "";
+            proxy_request_buffering on;
+            proxy_buffering off;
+            proxy_connect_timeout 3s;
+            proxy_read_timeout 12s;
+            proxy_send_timeout 12s;
+            proxy_next_upstream off;
+        }
+        location / { return 404; }
+    }
+}
