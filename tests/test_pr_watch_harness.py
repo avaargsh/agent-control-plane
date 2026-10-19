@@ -226,6 +226,23 @@ def test_git_checks_and_latest_review_conflict():
     assert "check-2" in snapshot.failed_checks
 
 
+def test_untrusted_pr_head_never_selects_another_rest_resource():
+    pr_path = "/repos/avaargsh/agent-control-plane/pulls/168"
+    for bad_head in (None, "", "a" * 39, "g" * 40, "../commits/other",
+                     "a" * 40 + "/check-runs", "a" * 64):
+        paths = []
+
+        def response(path):
+            paths.append(path)
+            if path != pr_path:
+                raise AssertionError("untrusted head reached secondary REST path")
+            return {"head": {"sha": bad_head}, "state": "open", "merged": False}
+
+        with pytest.raises(ReadOnlyGitHubError, match="invalid head revision"):
+            github(response).fetch("avaargsh/agent-control-plane", 168)
+        assert paths == [pr_path]
+
+
 def test_bad_git_lifecycle_never_guessed():
     def response(path):
         if path.endswith("/pulls/168"):
