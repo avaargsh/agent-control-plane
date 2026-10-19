@@ -156,3 +156,28 @@ def test_unknown_receipt_plus_positive_history_still_requires_release_review(exi
     assert report["inbox_state"] == "UNKNOWN"  # audit never mutates
     assert report["temporal_history"] == "PROVEN"
     assert report["release_decision"] == "NO_GO"
+
+
+def test_cli_sanitizes_connector_errors(monkeypatch, capsys):
+    import pr_watch_pilot_evidence as module
+
+    monkeypatch.setenv("PR_WATCH_STORAGE", "postgres")
+    monkeypatch.delenv("PR_WATCH_DB", raising=False)
+    monkeypatch.setenv("PR_WATCH_PG_DSN", "postgresql://private:password@secret.host/db")
+    monkeypatch.setattr(sys, "argv", [
+        "pr_watch_pilot_evidence.py", "--user", "alice",
+        "--goal", "scope", "--delivery", str(uuid4()),
+    ])
+
+    def leak_if_unhandled(**_):
+        raise ConnectionError("password=topsecret host=secret.host")
+
+    monkeypatch.setattr(module, "audit_delivery", leak_if_unhandled)
+    with pytest.raises(SystemExit) as caught:
+        module.main()
+    assert caught.value.code != 0
+    stderr = capsys.readouterr().err
+    assert "evidence unavailable or unverified" in stderr
+    assert "topsecret" not in stderr
+    assert "secret.host" not in stderr
+    assert "password" not in stderr
