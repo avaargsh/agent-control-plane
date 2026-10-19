@@ -1,7 +1,7 @@
 """Opt-in loopback GitHub webhook -> durable, scoped Temporal PR Watch wake.
 
 An authenticated webhook is a scheduling hint, never a provider observation,
-approval or authority to write to GitHub. SQLite-only single-host reference.
+approval or authority to write to GitHub. Optional SQLite or PostgreSQL, loopback-only developer reference.
 """
 from __future__ import annotations
 
@@ -260,7 +260,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 class WebhookServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], ingress: GitHubWebhookIngress):
+    def __init__(self, address: tuple[str, int], ingress):
         if address[0] not in ("127.0.0.1", "localhost"):
             raise ValueError("webhook must bind to loopback; use a trusted proxy")
         self.ingress = ingress
@@ -269,25 +269,43 @@ class WebhookServer(ThreadingHTTPServer):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Opt-in local GitHub PR wake ingress")
-    parser.add_argument("--db", required=True)
+    parser.add_argument("--db")
     parser.add_argument("--user", required=True)
     parser.add_argument("--goal", required=True)
     parser.add_argument("--port", type=int, default=8793)
     parser.add_argument("--temporal-address", required=True)
     parser.add_argument("--temporal-namespace", default="default")
     args = parser.parse_args()
-    if os.getenv("PR_WATCH_STORAGE", "sqlite") != "sqlite" or os.getenv("PR_WATCH_PG_DSN"):
-        parser.error("webhook pilot is SQLite-only; never mix PostgreSQL")
+    backend = os.getenv("PR_WATCH_STORAGE", "sqlite")
+    pg_dsn = os.getenv("PR_WATCH_PG_DSN")
+    if backend == "sqlite":
+        if not args.db or pg_dsn:
+            parser.error("SQLite webhook mode requires --db and forbids PG DSN")
+    elif backend == "postgres":
+        if args.db or not pg_dsn or os.getenv("PR_WATCH_DB"):
+            parser.error("PostgreSQL webhook mode requires only PR_WATCH_PG_DSN")
+    else:
+        parser.error("unknown webhook storage backend")
     secret = os.getenv("PR_WATCH_WEBHOOK_SECRET", "").encode("utf-8")
     try:
-        store = GoalStore(args.db)
         wake = TemporalWebhookWake(
             args.temporal_address, args.temporal_namespace, args.user, args.goal,
         )
-        ingress = GitHubWebhookIngress(
-            store=store, user_id=args.user, goal_id=args.goal,
-            secret=secret, signal=wake,
-        )
+        if backend == "sqlite":
+            ingress = GitHubWebhookIngress(
+                store=GoalStore(args.db), user_id=args.user, goal_id=args.goal,
+                secret=secret, signal=wake,
+            )
+        else:
+            # Optional dependency, imported only in explicitly selected PG mode.
+            from pr_watch_pg_store import PostgresWatchStore
+            from pr_watch_pg_webhook import PostgresWebhookIngress
+
+            ingress = PostgresWebhookIngress(
+                store=PostgresWatchStore(pg_dsn),
+                user_id=args.user, goal_id=args.goal,
+                secret=secret, signal=wake,
+            )
         server = WebhookServer(("127.0.0.1", args.port), ingress)
     except (ValueError, WatchError) as exc:
         parser.error(str(exc))
