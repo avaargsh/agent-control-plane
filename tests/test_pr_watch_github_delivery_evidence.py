@@ -15,7 +15,7 @@ pytest.importorskip("psycopg")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 
 from pr_watch_github_delivery_evidence import (  # noqa: E402
-    _read_json, audit_github_delivery, verify_delivery_record,
+    _read_json, audit_github_delivery,
 )
 from pr_watch_pg_store import PostgresWatchStore  # noqa: E402
 from pr_watch_pg_webhook import (  # noqa: E402
