@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from pr_watch_harness import GoalStore, WatchConflict, WatchError
 from pr_watch_control_bridge import TemporalControlBridge
 from pr_watch_launcher import TemporalLaunchBridge
+from pr_watch_task_projection import project_task
 
 
 def _goal_payload(value) -> dict:
@@ -298,6 +299,34 @@ class Handler(BaseHTTPRequestHandler):
             if user is None:
                 return
             service = self.server.service
+            if path == "/api/tasks":
+                if query:
+                    raise WatchError("unexpected query")
+                # Read-only projection; the Goal store remains authoritative.
+                # Bound the list to the existing scoped 100-Goal API limit.
+                tasks = [
+                    project_task(goal, service.goals.launch(
+                        user_id=user, goal_id=_goal_payload(goal)["goal_id"],
+                    ), principal=user)
+                    for goal in service.goals.list_goals(user_id=user)
+                ]
+                self._json(200, {"schema": "pr-watch-task-projection/v1", "tasks": tasks})
+                return
+            task_match = re.fullmatch(
+                r"/api/tasks/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})", path
+            )
+            if task_match:
+                if query:
+                    raise WatchError("unexpected query")
+                goal_id = task_match.group(1)
+                # Scoped goal lookup happens before reading any launch record.
+                task = project_task(
+                    service.goals.get(user_id=user, goal_id=goal_id),
+                    service.goals.launch(user_id=user, goal_id=goal_id),
+                    principal=user,
+                )
+                self._json(200, {"task": task})
+                return
             if path == "/api/goals":
                 if query:
                     raise WatchError("unexpected query")
