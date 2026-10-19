@@ -172,6 +172,34 @@ def test_ack_loss_never_retries_and_positive_history_witness_recovers(context):
     assert len(sent) == 1
 
 
+@pytest.mark.parametrize("kind", ("check_run", "check_suite"))
+def test_signed_check_completion_uses_same_postgres_inbox(context, kind):
+    store, goal = context
+    sent = []
+    worker = ingress(store, goal, sent.append)
+
+    def event_for(refs):
+        raw = json.dumps({
+            "action": "completed", "repository": {"full_name": REPO},
+            kind: {"pull_requests": [{"number": n} for n in refs]},
+        }).encode()
+        return {
+            "signature": "sha256=" + hmac.new(
+                SECRET, raw, hashlib.sha256,
+            ).hexdigest(),
+            "event": kind, "delivery": str(uuid4()), "body": raw,
+        }
+
+    assert worker.accept(**event_for((170,))) == {"status": "ignored"}
+    assert worker.accept(**event_for(())) == {"status": "ignored"}
+    valid = event_for((169,))
+    assert worker.accept(**valid)["signal_state"] == "ACKED"
+    assert ingress(PostgresWatchStore(DSN), goal, sent.append).accept(**valid) == {
+        "status": "duplicate", "signal_state": "ACKED",
+    }
+    assert len(rows(store, goal)) == 1 and len(sent) == 1
+
+
 def test_postgres_crash_after_claim_keeps_in_flight_not_restarted(context):
     store, goal = context
     attempts = []
