@@ -39,6 +39,28 @@ class TemporalWebhookWake:
 
         asyncio.run(send())
 
+    def prove(self, signal_id: str) -> bool:
+        """Read-only positive proof in the exact deterministic Workflow History."""
+        async def inspect() -> bool:
+            from temporalio.client import Client
+
+            client = await Client.connect(self.address, namespace=self.namespace)
+            handle = client.get_workflow_handle(self.workflow)
+            history = await handle.fetch_history()
+            for event in history.events:
+                attrs = event.workflow_execution_signaled_event_attributes
+                if attrs.signal_name != "wake" or not attrs.input.payloads:
+                    continue
+                try:
+                    decoded = await client.data_converter.decode(attrs.input.payloads)
+                except Exception:
+                    continue
+                if decoded == [signal_id]:
+                    return True
+            return False
+
+        return asyncio.run(inspect())
+
 
 class GitHubWebhookIngress:
     """One immutable (user, goal, repository, PR) binding, never payload routing."""
@@ -126,6 +148,48 @@ class GitHubWebhookIngress:
                 (state, self.user_id, self.goal_id, delivery),
             )
         return {"status": "accepted", "signal_state": state}
+
+    def reconcile(self, *, delivery: str, prove) -> dict:
+        """Positive proof only; uncertainty is never permission to resend."""
+        from uuid import UUID
+
+        try:
+            canonical = str(UUID(delivery))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise WebhookRejected(400, "invalid delivery identity") from exc
+        if canonical != delivery or not callable(prove):
+            raise WebhookRejected(400, "invalid reconciliation request")
+        with self._db() as db:
+            row = db.execute(
+                "SELECT state,signal_id FROM pr_watch_webhook_wakes "
+                "WHERE user_id=? AND goal_id=? AND delivery=?",
+                (self.user_id, self.goal_id, delivery),
+            ).fetchone()
+        if row is None:
+            raise WebhookRejected(404, "delivery not found within goal scope")
+        if row["state"] == "ACKED":
+            return {"signal_state": "ACKED"}
+        try:
+            proved = prove(row["signal_id"]) is True
+        except Exception:
+            proved = False
+        if not proved:
+            return {"signal_state": row["state"]}
+        with self._db() as db:
+            db.execute(
+                "UPDATE pr_watch_webhook_wakes SET state='ACKED' "
+                "WHERE user_id=? AND goal_id=? AND delivery=? "
+                "AND signal_id=? AND state IN ('IN_FLIGHT','UNKNOWN')",
+                (self.user_id, self.goal_id, delivery, row["signal_id"]),
+            )
+            current = db.execute(
+                "SELECT state FROM pr_watch_webhook_wakes "
+                "WHERE user_id=? AND goal_id=? AND delivery=?",
+                (self.user_id, self.goal_id, delivery),
+            ).fetchone()
+        if current is None:
+            raise WebhookRejected(404, "delivery not found within goal scope")
+        return {"signal_state": current["state"]}
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
