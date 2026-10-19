@@ -24,17 +24,23 @@ from pr_watch_webhook_envelope import (
 class TemporalWebhookWake:
     """One Signal RPC. Never start/restart a workflow or retry an uncertain ACK."""
 
-    def __init__(self, address: str, namespace: str, user_id: str, goal_id: str):
+    def __init__(self, address: str, namespace: str, user_id: str, goal_id: str,
+                 client_factory=None):
         if not all((address, namespace, user_id, goal_id)):
             raise ValueError("Temporal webhook wake requires a trusted workflow binding")
         self.address, self.namespace = address, namespace
         self.workflow = workflow_id(user_id=user_id, goal_id=goal_id)
+        self._factory = client_factory
+
+    async def _client(self):
+        if self._factory is not None:
+            return await self._factory()
+        from temporalio.client import Client
+        return await Client.connect(self.address, namespace=self.namespace)
 
     def __call__(self, signal_id: str) -> None:
         async def send() -> None:
-            from temporalio.client import Client
-
-            client = await Client.connect(self.address, namespace=self.namespace)
+            client = await self._client()
             await client.get_workflow_handle(self.workflow).signal("wake", signal_id)
 
         asyncio.run(send())
@@ -42,9 +48,7 @@ class TemporalWebhookWake:
     def prove(self, signal_id: str) -> bool:
         """Read-only positive proof in the exact deterministic Workflow History."""
         async def inspect() -> bool:
-            from temporalio.client import Client
-
-            client = await Client.connect(self.address, namespace=self.namespace)
+            client = await self._client()
             handle = client.get_workflow_handle(self.workflow)
             history = await handle.fetch_history()
             for event in history.events:
