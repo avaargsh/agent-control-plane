@@ -11,7 +11,7 @@ import hmac
 import json
 import os
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Thread
@@ -32,11 +32,13 @@ from pr_watch_control_bridge import workflow_id  # noqa: E402
 from pr_watch_harness import PullSnapshot  # noqa: E402
 from pr_watch_pg_store import PostgresWatchStore  # noqa: E402
 from pr_watch_pg_webhook import PostgresWebhookIngress, PostgresWebhookSchema  # noqa: E402
+from pr_watch_pilot_evidence import audit_delivery  # noqa: E402
 from pr_watch_service import LocalTokens, PilotHTTPServer, PilotService  # noqa: E402
 from pr_watch_temporal import PRWatchWorkflow  # noqa: E402
 from pr_watch_webhook import TemporalWebhookWake, WebhookServer  # noqa: E402
 from test_pr_watch_service import request  # noqa: E402
 from test_pr_watch_webhook import post  # noqa: E402
+from test_pr_watch_tls_ingress import send as tls_send, tls_ingress  # noqa: E402
 
 DSN = os.getenv("PR_WATCH_PG_TEST_DSN")
 REPO = "avaargsh/agent-control-plane"
@@ -57,9 +59,12 @@ def serve_http(cls, service):
         server.server_close()
 
 
-@pytest.mark.timeout(90)
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("use_tls", (False, True), ids=("direct-http", "nginx-tls"))
 @pytest.mark.parametrize("lose_ack", (False, True), ids=("ack", "lost-ack"))
-def test_postgres_real_http_check_wake_to_temporal_and_scoped_events(lose_ack):
+def test_postgres_real_http_check_wake_to_temporal_and_scoped_events(
+    lose_ack, use_tls, tmp_path,
+):
     if not DSN:
         pytest.skip("requires disposable PR_WATCH_PG_TEST_DSN")
 
@@ -161,100 +166,133 @@ def test_postgres_real_http_check_wake_to_temporal_and_scoped_events(lose_ack):
                             goal_id=goal_id, secret=SECRET, signal=send_signal,
                         )
                         with serve_http(WebhookServer, ingress) as webhook_http:
-                            # The first provider observation is a durable
-                            # CI failure; bogus signatures must not wake it.
-                            check = json.dumps({
-                                "action": "completed",
-                                "repository": {"full_name": REPO},
-                                "check_run": {
-                                    "pull_requests": [{"number": PR}],
-                                    "conclusion": "success",
-                                    "name": "untrusted-ci-name",
-                                },
-                            }).encode()
-                            event = {
-                                "signature": "sha256=" + hmac.new(
-                                    SECRET, check, hashlib.sha256,
-                                ).hexdigest(),
-                                "event": "check_run",
-                                "delivery": str(uuid4()), "body": check,
-                            }
-                            bad = {**event, "signature": "sha256=" + "0" * 64}
-                            assert (await asyncio.to_thread(
-                                post, webhook_http, bad,
-                            ))[0] == 403
-                            first_code, first = await asyncio.to_thread(
-                                post, webhook_http, event,
+                            proxy_context = (
+                                tls_ingress(tmp_path, webhook_http.server_port)
+                                if use_tls else nullcontext(None)
                             )
-                            second_code, duplicate = await asyncio.to_thread(
-                                post, webhook_http, event,
-                            )
-                            expected = "UNKNOWN" if lose_ack else "ACKED"
-                            assert first_code == 202 and first["signal_state"] == expected
-                            assert second_code == 200 and duplicate == {
-                                "status": "duplicate", "signal_state": expected,
-                            }
-                            await asyncio.wait_for(second_observed.wait(), timeout=20)
-                            if lose_ack:
-                                async def client_factory():
+                            with proxy_context as proxy:
+                                async def post_event(ev):
+                                    if proxy is None:
+                                        return await asyncio.to_thread(post, webhook_http, ev)
+                                    url, ctx = proxy
+                                    headers = {
+                                        "Content-Type": "application/json",
+                                        "X-Hub-Signature-256": ev["signature"],
+                                        "X-GitHub-Event": ev["event"],
+                                        "X-GitHub-Delivery": ev["delivery"],
+                                    }
+                                    return await asyncio.to_thread(
+                                        tls_send, url, ctx, raw=ev["body"], headers=headers,
+                                    )
+
+                                if proxy is not None:
+                                    url, ctx = proxy
+                                    assert (await asyncio.to_thread(
+                                        tls_send, url, ctx, raw=b"x", headers={},
+                                        path="/api/events",
+                                    ))[0] == 404
+                                # The first provider observation is a durable
+                                # CI failure; bogus signatures must not wake it.
+                                check = json.dumps({
+                                    "action": "completed",
+                                    "repository": {"full_name": REPO},
+                                    "check_run": {
+                                        "pull_requests": [{"number": PR}],
+                                        "conclusion": "success",
+                                        "name": "untrusted-ci-name",
+                                    },
+                                }).encode()
+                                event = {
+                                    "signature": "sha256=" + hmac.new(
+                                        SECRET, check, hashlib.sha256,
+                                    ).hexdigest(),
+                                    "event": "check_run",
+                                    "delivery": str(uuid4()), "body": check,
+                                }
+                                bad = {**event, "signature": "sha256=" + "0" * 64}
+                                assert (await post_event(bad))[0] == 403
+                                first_code, first = await post_event(event)
+                                second_code, duplicate = await post_event(event)
+                                expected = "UNKNOWN" if lose_ack else "ACKED"
+                                assert first_code == 202 and first["signal_state"] == expected
+                                assert second_code == 200 and duplicate == {
+                                    "status": "duplicate", "signal_state": expected,
+                                }
+                                await asyncio.wait_for(second_observed.wait(), timeout=20)
+                                if lose_ack:
+                                    async def client_factory():
+                                        return env.client
+
+                                    witness = TemporalWebhookWake(
+                                        "test:7233", "default", principal, goal_id,
+                                        client_factory=client_factory,
+                                    )
+                                    # No History proof -> remain uncertain,
+                                    # and a duplicate must never resend the wake.
+                                    unproved = await asyncio.to_thread(
+                                        ingress.reconcile, delivery=event["delivery"],
+                                        prove=lambda _: False,
+                                    )
+                                    assert unproved == {"signal_state": "UNKNOWN"}
+                                    proved = await asyncio.to_thread(
+                                        ingress.reconcile, delivery=event["delivery"],
+                                        prove=witness.prove,
+                                    )
+                                    assert proved == {"signal_state": "ACKED"}
+                                    again_code, again = await post_event(event)
+                                    assert again_code == 200 and again == {
+                                        "status": "duplicate", "signal_state": "ACKED",
+                                    }
+                                current = store.goal(
+                                    user_id=principal, goal_id=goal_id,
+                                )
+                                assert current["phase"] == "CI_CLEARED"
+                                with store._connection() as conn:
+                                    saved = conn.execute(
+                                        """SELECT state FROM pr_watch_pg_webhook_wakes
+                                           WHERE user_id=%s AND goal_id=%s""",
+                                        (principal, goal_id),
+                                    ).fetchall()
+                                assert len(saved) == 1 and saved[0]["state"] == "ACKED"
+                                async def witness_client():
                                     return env.client
 
                                 witness = TemporalWebhookWake(
                                     "test:7233", "default", principal, goal_id,
-                                    client_factory=client_factory,
+                                    client_factory=witness_client,
                                 )
-                                # No History proof -> remain uncertain,
-                                # and a duplicate must never resend the wake.
-                                unproved = await asyncio.to_thread(
-                                    ingress.reconcile, delivery=event["delivery"],
-                                    prove=lambda _: False,
-                                )
-                                assert unproved == {"signal_state": "UNKNOWN"}
-                                proved = await asyncio.to_thread(
-                                    ingress.reconcile, delivery=event["delivery"],
+                                audit = await asyncio.to_thread(
+                                    audit_delivery, dsn=DSN, user_id=principal,
+                                    goal_id=goal_id, delivery=event["delivery"],
                                     prove=witness.prove,
                                 )
-                                assert proved == {"signal_state": "ACKED"}
-                                again_code, again = await asyncio.to_thread(
-                                    post, webhook_http, event,
+                                assert audit["inbox_state"] == "ACKED"
+                                assert audit["temporal_history"] == "PROVEN"
+                                assert audit["actual_github_delivery_origin"] == "NOT_ATTESTED"
+                                assert audit["release_decision"] == "NO_GO"
+                                own_status, own_response, _ = await asyncio.to_thread(
+                                    request, api_http, "GET", "/api/events?after=0",
+                                    headers={"Authorization": "Bearer " + tokens[principal]},
                                 )
-                                assert again_code == 200 and again == {
-                                    "status": "duplicate", "signal_state": "ACKED",
-                                }
-                            current = store.goal(
-                                user_id=principal, goal_id=goal_id,
-                            )
-                            assert current["phase"] == "CI_CLEARED"
-                            with store._connection() as conn:
-                                saved = conn.execute(
-                                    """SELECT state FROM pr_watch_pg_webhook_wakes
-                                       WHERE user_id=%s AND goal_id=%s""",
-                                    (principal, goal_id),
-                                ).fetchall()
-                            assert len(saved) == 1 and saved[0]["state"] == "ACKED"
-                            own_status, own_response, _ = await asyncio.to_thread(
-                                request, api_http, "GET", "/api/events?after=0",
-                                headers={"Authorization": "Bearer " + tokens[principal]},
-                            )
-                            assert own_status == 200
-                            own_events = json.loads(own_response)["events"]
-                            assert any(e["kind"] == "ACTION_REQUIRED" for e in own_events)
-                            assert any(e["kind"] == "TASK_SUCCEEDED" for e in own_events)
-                            other_status, other_response, _ = await asyncio.to_thread(
-                                request, api_http, "GET", "/api/events?after=0",
-                                headers={"Authorization": "Bearer " + tokens["other"]},
-                            )
-                            assert other_status == 200
-                            assert all(
-                                e.get("goal_id") != goal_id
-                                for e in json.loads(other_response)["events"]
-                            )
-                            history = await handle.fetch_history()
-                            assert sum(
-                                x.event_type ==
-                                EventType.EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED
-                                for x in history.events
-                            ) == 1
+                                assert own_status == 200
+                                own_events = json.loads(own_response)["events"]
+                                assert any(e["kind"] == "ACTION_REQUIRED" for e in own_events)
+                                assert any(e["kind"] == "TASK_SUCCEEDED" for e in own_events)
+                                other_status, other_response, _ = await asyncio.to_thread(
+                                    request, api_http, "GET", "/api/events?after=0",
+                                    headers={"Authorization": "Bearer " + tokens["other"]},
+                                )
+                                assert other_status == 200
+                                assert all(
+                                    e.get("goal_id") != goal_id
+                                    for e in json.loads(other_response)["events"]
+                                )
+                                history = await handle.fetch_history()
+                                assert sum(
+                                    x.event_type ==
+                                    EventType.EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED
+                                    for x in history.events
+                                ) == 1
                     finally:
                         # Test hygiene: no unattended long-lived Workflow
                         # continues after assertion failures.
