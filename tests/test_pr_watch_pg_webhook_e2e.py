@@ -34,7 +34,7 @@ from pr_watch_pg_store import PostgresWatchStore  # noqa: E402
 from pr_watch_pg_webhook import PostgresWebhookIngress, PostgresWebhookSchema  # noqa: E402
 from pr_watch_service import LocalTokens, PilotHTTPServer, PilotService  # noqa: E402
 from pr_watch_temporal import PRWatchWorkflow  # noqa: E402
-from pr_watch_webhook import WebhookServer  # noqa: E402
+from pr_watch_webhook import TemporalWebhookWake, WebhookServer  # noqa: E402
 from test_pr_watch_service import request  # noqa: E402
 from test_pr_watch_webhook import post  # noqa: E402
 
@@ -57,8 +57,9 @@ def serve_http(cls, service):
         server.server_close()
 
 
-@pytest.mark.timeout(75)
-def test_postgres_real_http_check_wake_to_temporal_and_scoped_events():
+@pytest.mark.timeout(90)
+@pytest.mark.parametrize("lose_ack", (False, True), ids=("ack", "lost-ack"))
+def test_postgres_real_http_check_wake_to_temporal_and_scoped_events(lose_ack):
     if not DSN:
         pytest.skip("requires disposable PR_WATCH_PG_TEST_DSN")
 
@@ -150,6 +151,10 @@ def test_postgres_real_http_check_wake_to_temporal_and_scoped_events():
                                 handle.signal("wake", signal_id), loop,
                             )
                             result.result(timeout=10)
+                            if lose_ack:
+                                # Temporal has accepted the Signal, but the
+                                # HTTP ingress sees an ambiguous provider ACK.
+                                raise ConnectionError("signal ACK lost after commit")
 
                         ingress = PostgresWebhookIngress(
                             store=PostgresWatchStore(DSN), user_id=principal,
@@ -184,11 +189,38 @@ def test_postgres_real_http_check_wake_to_temporal_and_scoped_events():
                             second_code, duplicate = await asyncio.to_thread(
                                 post, webhook_http, event,
                             )
-                            assert first_code == 202 and first["signal_state"] == "ACKED"
+                            expected = "UNKNOWN" if lose_ack else "ACKED"
+                            assert first_code == 202 and first["signal_state"] == expected
                             assert second_code == 200 and duplicate == {
-                                "status": "duplicate", "signal_state": "ACKED",
+                                "status": "duplicate", "signal_state": expected,
                             }
                             await asyncio.wait_for(second_observed.wait(), timeout=20)
+                            if lose_ack:
+                                async def client_factory():
+                                    return env.client
+
+                                witness = TemporalWebhookWake(
+                                    "test:7233", "default", principal, goal_id,
+                                    client_factory=client_factory,
+                                )
+                                # No History proof -> remain uncertain,
+                                # and a duplicate must never resend the wake.
+                                unproved = await asyncio.to_thread(
+                                    ingress.reconcile, delivery=event["delivery"],
+                                    prove=lambda _: False,
+                                )
+                                assert unproved == {"signal_state": "UNKNOWN"}
+                                proved = await asyncio.to_thread(
+                                    ingress.reconcile, delivery=event["delivery"],
+                                    prove=witness.prove,
+                                )
+                                assert proved == {"signal_state": "ACKED"}
+                                again_code, again = await asyncio.to_thread(
+                                    post, webhook_http, event,
+                                )
+                                assert again_code == 200 and again == {
+                                    "status": "duplicate", "signal_state": "ACKED",
+                                }
                             current = store.goal(
                                 user_id=principal, goal_id=goal_id,
                             )
