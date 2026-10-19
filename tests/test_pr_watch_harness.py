@@ -55,6 +55,11 @@ def test_idempotent_goal_and_immutable_pr_binding(tmp_path):
                        repo="avaargsh/agent-control-plane", number=169)
     with pytest.raises(WatchError):
         store.register(user_id="u1", goal_id="bad", repo="https://evil/target", number=1)
+    for bad_number in (True, False, 1.0, "1", 0):
+        with pytest.raises(WatchError, match="invalid scoped goal"):
+            store.register(user_id="u1", goal_id="bad", repo="owner/repo", number=bad_number)
+    with pytest.raises(WatchError, match="invalid scoped goal"):
+        store.register(user_id="u1", goal_id="bad", repo=None, number=1)
 
 
 def test_cross_user_isolation(tmp_path):
