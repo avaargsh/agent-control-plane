@@ -77,6 +77,44 @@ def test_explicit_schema_install_is_idempotent_and_has_checksum(context):
     assert rows(store, goal) == []
 
 
+def test_schema_drift_rejects_wrong_scoped_primary_key(context):
+    store, goal = context
+    # Tampering is rolled back in one transaction; no shared CI data is
+    # permanently mutated. Existing column names/constraint count alone
+    # would incorrectly accept this degraded uniqueness boundary.
+    with store._connection() as db:
+        db.execute(
+            "ALTER TABLE pr_watch_pg_webhook_wakes "
+            "DROP CONSTRAINT pr_watch_pg_webhook_wakes_pkey"
+        )
+        with pytest.raises(ValueError, match="scoped primary key drift"):
+            PostgresWebhookSchema._verify(db)
+        db.rollback()
+    PostgresWebhookSchema(DSN).validate()
+    assert rows(store, goal) == []
+
+
+def test_schema_drift_rejects_nullable_digest_and_type_changes(context):
+    store, goal = context
+    with store._connection() as db:
+        db.execute(
+            "ALTER TABLE pr_watch_pg_webhook_wakes "
+            "ALTER COLUMN payload_sha256 DROP NOT NULL"
+        )
+        with pytest.raises(ValueError, match="nullability mismatch"):
+            PostgresWebhookSchema._verify(db)
+        db.rollback()
+    with store._connection() as db:
+        db.execute(
+            "ALTER TABLE pr_watch_pg_webhook_wakes "
+            "ALTER COLUMN payload_sha256 TYPE VARCHAR(64)"
+        )
+        with pytest.raises(ValueError, match="type/nullability mismatch"):
+            PostgresWebhookSchema._verify(db)
+        db.rollback()
+    PostgresWebhookSchema(DSN).validate()
+
+
 def test_repeated_webhook_across_independent_postgres_connections(context):
     store, goal = context
     sent = []
