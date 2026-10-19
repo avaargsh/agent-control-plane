@@ -69,6 +69,9 @@ def test_duplicate_exact_is_idempotent_but_conflict_is_rejected():
     projection.ingest(event(), verify=verified)
     assert projection.ingest(event(), verify=verified).server_seq == 1
     assert projection.server_seq == 1
+    projection.ingest(event(1, kind=ChannelKind.APPROVAL, status="PENDING"), verify=verified)
+    assert projection.ingest(event(), verify=verified).server_seq == 1
+    assert projection.server_seq == 2
     with pytest.raises(ProjectionRejected, match="conflicting"):
         projection.ingest(event(status="FAILED"), verify=verified)
 
