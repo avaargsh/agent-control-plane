@@ -91,9 +91,9 @@ PostgreSQL DSN and webhook secret. The command updates only the existing
 delivery's state when a matching History event is positively proven:
 
 ```bash
-PYTHONPATH=examples python examples/pr_watch_pg_webhook.py reconcile \\
-  --user demo --goal review-168 \\
-  --delivery '00000000-0000-4000-8000-000000000001' \\
+PYTHONPATH=examples python examples/pr_watch_pg_webhook.py reconcile \
+  --user demo --goal review-168 \
+  --delivery '00000000-0000-4000-8000-000000000001' \
   --temporal-address localhost:7233
 ```
 
@@ -115,7 +115,13 @@ pytest -q tests/test_pr_watch_webhook.py
 
 GitHub Actions runs these against disposable PG16 on Python 3.11 and 3.12.
 Unit tests use a fake Signal provider for ACK/crash and History predicates.
-The stacked PR inherits #183's actual Temporal test-server integration;
-that remains a fixture-only GitHub observation. Do not claim live GitHub
-delivery, real production Temporal History retention, secret rotation, RLS,
-HA, or cross-process exactly-once external RPC as proven.
+The stacked PR inherits #183's actual Temporal test-server integration.
+The opt-in PG16 integration test now exercises **both** the normal Signal ACK
+path and a real Temporal Signal whose acknowledgement is intentionally lost:
+HTTP redelivery remains deduplicated and `UNKNOWN` is promoted to `ACKED`
+only after the exact Signal is positively found in Workflow History. The
+resulting attention events are fetched through the authenticated user-scoped
+API. GitHub PR/CI observations remain fixtures, not live delivery or production
+GitHub evidence. Do not claim live GitHub delivery, public secure ingress,
+real production Temporal History retention, secret rotation, RLS, HA, or
+cross-process exactly-once external RPC as proven.
