@@ -127,21 +127,25 @@ def main() -> None:
             or os.getenv("PR_WATCH_DB")):
         parser.error("audit requires exclusive PostgreSQL mode")
     dsn = os.getenv("PR_WATCH_PG_DSN", "")
-    witness = None
-    if args.temporal_address:
-        from pr_watch_webhook import TemporalWebhookWake
-
-        witness = TemporalWebhookWake(
-            args.temporal_address, args.temporal_namespace,
-            args.user, args.goal,
-        ).prove
     try:
+        witness = None
+        if args.temporal_address:
+            from pr_watch_webhook import TemporalWebhookWake
+
+            witness = TemporalWebhookWake(
+                args.temporal_address, args.temporal_namespace,
+                args.user, args.goal,
+            ).prove
         report = audit_delivery(
             dsn=dsn, user_id=args.user, goal_id=args.goal,
             delivery=args.delivery, prove=witness,
         )
-    except (EvidenceAuditError, ValueError) as exc:
+    except EvidenceAuditError as exc:
         parser.error(str(exc))
+    except Exception:
+        # psycopg and Temporal errors can contain private hosts/DSN details.
+        # Never echo their raw diagnostics in a release-evidence CLI.
+        parser.error("evidence unavailable or unverified; release remains NO_GO")
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
 
 
