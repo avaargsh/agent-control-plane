@@ -1,55 +1,69 @@
 """Opt-in loopback GitHub webhook -> durable, scoped Temporal PR Watch wake.
 
 An authenticated webhook is a scheduling hint, never a provider observation,
-approval or authority to write to GitHub. SQLite-only single-host reference.
+approval or authority to write to GitHub. Optional SQLite or PostgreSQL, loopback-only developer reference.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import hashlib
-import hmac
 import json
 import os
-import re
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from uuid import UUID
 
 from pr_watch_control_bridge import workflow_id
 from pr_watch_harness import GoalStore, WatchError
 
-_MAX_BODY = 262_144
-_SIGNATURE = re.compile(r"^sha256=([0-9a-fA-F]{64})$")
-_ACTIONS = frozenset({
-    "opened", "reopened", "synchronize", "closed", "ready_for_review",
-    "converted_to_draft",
-})
-
-
-class WebhookRejected(ValueError):
-    def __init__(self, status: int, message: str):
-        super().__init__(message)
-        self.status = status
+from pr_watch_webhook_envelope import (
+    MAX_BODY, WebhookRejected, verified_delivery, wake_signal_id,
+)
 
 
 class TemporalWebhookWake:
     """One Signal RPC. Never start/restart a workflow or retry an uncertain ACK."""
 
-    def __init__(self, address: str, namespace: str, user_id: str, goal_id: str):
+    def __init__(self, address: str, namespace: str, user_id: str, goal_id: str,
+                 client_factory=None):
         if not all((address, namespace, user_id, goal_id)):
             raise ValueError("Temporal webhook wake requires a trusted workflow binding")
         self.address, self.namespace = address, namespace
         self.workflow = workflow_id(user_id=user_id, goal_id=goal_id)
+        self._factory = client_factory
+
+    async def _client(self):
+        if self._factory is not None:
+            return await self._factory()
+        from temporalio.client import Client
+        return await Client.connect(self.address, namespace=self.namespace)
 
     def __call__(self, signal_id: str) -> None:
         async def send() -> None:
-            from temporalio.client import Client
-
-            client = await Client.connect(self.address, namespace=self.namespace)
+            client = await self._client()
             await client.get_workflow_handle(self.workflow).signal("wake", signal_id)
 
         asyncio.run(send())
+
+    def prove(self, signal_id: str) -> bool:
+        """Read-only positive proof in the exact deterministic Workflow History."""
+        async def inspect() -> bool:
+            client = await self._client()
+            handle = client.get_workflow_handle(self.workflow)
+            history = await handle.fetch_history()
+            for event in history.events:
+                attrs = event.workflow_execution_signaled_event_attributes
+                if attrs.signal_name != "wake" or not attrs.input.payloads:
+                    continue
+                try:
+                    decoded = await client.data_converter.decode(attrs.input.payloads)
+                except Exception:
+                    continue
+                if decoded == [signal_id]:
+                    return True
+            return False
+
+        return asyncio.run(inspect())
 
 
 class GitHubWebhookIngress:
@@ -81,51 +95,16 @@ class GitHubWebhookIngress:
         db.row_factory = sqlite3.Row
         return db
 
-    @staticmethod
-    def _uuid(value: str) -> str:
-        try:
-            parsed = UUID(value)
-        except (ValueError, AttributeError, TypeError) as exc:
-            raise WebhookRejected(400, "invalid delivery identity") from exc
-        if str(parsed) != value:
-            raise WebhookRejected(400, "invalid delivery identity")
-        return value
-
     def accept(self, *, signature: str, event: str, delivery: str,
                body: bytes) -> dict:
-        # Check the raw exact bytes before JSON parsing or any Goal/DB access.
-        match = _SIGNATURE.fullmatch(signature)
-        expected = hmac.new(self._secret, body, hashlib.sha256).hexdigest()
-        if not match or not hmac.compare_digest(match.group(1).lower(), expected):
-            raise WebhookRejected(403, "invalid webhook signature")
-        delivery = self._uuid(delivery)
-        if event != "pull_request":
+        delivery = verified_delivery(
+            secret=self._secret, repo=self.repo, number=self.number,
+            signature=signature, event=event, delivery=delivery, body=body,
+        )
+        if delivery is None:
             return {"status": "ignored"}
-        try:
-            payload = json.loads(body)
-        except (ValueError, UnicodeError) as exc:
-            raise WebhookRejected(400, "invalid webhook JSON") from exc
-        if not isinstance(payload, dict):
-            raise WebhookRejected(400, "invalid webhook payload")
-        repo = payload.get("repository")
-        pr = payload.get("pull_request")
-        action = payload.get("action")
-        number = payload.get("number")
-        if (not isinstance(repo, dict) or not isinstance(pr, dict)
-                or not isinstance(action, str) or type(number) is not int
-                or type(pr.get("number")) is not int):
-            raise WebhookRejected(400, "invalid PR event shape")
-        if action not in _ACTIONS:
-            return {"status": "ignored"}
-        if (repo.get("full_name") != self.repo
-                or number != self.number or pr["number"] != self.number):
-            return {"status": "ignored"}
-
         digest = hashlib.sha256(body).hexdigest()
-        signal_id = "pr-watch-webhook:" + hashlib.sha256(
-            json.dumps([self.user_id, self.goal_id, delivery],
-                       separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
+        signal_id = wake_signal_id(self.user_id, self.goal_id, delivery)
         # Source of truth stays the durable Goal row. Paused/closed tasks do
         # not acquire an event wake merely because a webhook was signed.
         with self._db() as db:
@@ -174,6 +153,48 @@ class GitHubWebhookIngress:
             )
         return {"status": "accepted", "signal_state": state}
 
+    def reconcile(self, *, delivery: str, prove) -> dict:
+        """Positive proof only; uncertainty is never permission to resend."""
+        from uuid import UUID
+
+        try:
+            canonical = str(UUID(delivery))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise WebhookRejected(400, "invalid delivery identity") from exc
+        if canonical != delivery or not callable(prove):
+            raise WebhookRejected(400, "invalid reconciliation request")
+        with self._db() as db:
+            row = db.execute(
+                "SELECT state,signal_id FROM pr_watch_webhook_wakes "
+                "WHERE user_id=? AND goal_id=? AND delivery=?",
+                (self.user_id, self.goal_id, delivery),
+            ).fetchone()
+        if row is None:
+            raise WebhookRejected(404, "delivery not found within goal scope")
+        if row["state"] == "ACKED":
+            return {"signal_state": "ACKED"}
+        try:
+            proved = prove(row["signal_id"]) is True
+        except Exception:
+            proved = False
+        if not proved:
+            return {"signal_state": row["state"]}
+        with self._db() as db:
+            db.execute(
+                "UPDATE pr_watch_webhook_wakes SET state='ACKED' "
+                "WHERE user_id=? AND goal_id=? AND delivery=? "
+                "AND signal_id=? AND state IN ('IN_FLIGHT','UNKNOWN')",
+                (self.user_id, self.goal_id, delivery, row["signal_id"]),
+            )
+            current = db.execute(
+                "SELECT state FROM pr_watch_webhook_wakes "
+                "WHERE user_id=? AND goal_id=? AND delivery=?",
+                (self.user_id, self.goal_id, delivery),
+            ).fetchone()
+        if current is None:
+            raise WebhookRejected(404, "delivery not found within goal scope")
+        return {"signal_state": current["state"]}
+
 
 class WebhookHandler(BaseHTTPRequestHandler):
     server_version = "PRWatchWebhook/0.1"
@@ -221,7 +242,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             if not size_text.isascii() or not size_text.isdecimal():
                 raise WebhookRejected(400, "invalid webhook length")
             size = int(size_text)
-            if not 1 <= size <= _MAX_BODY:
+            if not 1 <= size <= MAX_BODY:
                 raise WebhookRejected(413, "webhook body exceeds limit")
             signature = self._one("X-Hub-Signature-256")
             event = self._one("X-GitHub-Event")
@@ -243,7 +264,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 class WebhookServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], ingress: GitHubWebhookIngress):
+    def __init__(self, address: tuple[str, int], ingress):
         if address[0] not in ("127.0.0.1", "localhost"):
             raise ValueError("webhook must bind to loopback; use a trusted proxy")
         self.ingress = ingress
@@ -252,25 +273,43 @@ class WebhookServer(ThreadingHTTPServer):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Opt-in local GitHub PR wake ingress")
-    parser.add_argument("--db", required=True)
+    parser.add_argument("--db")
     parser.add_argument("--user", required=True)
     parser.add_argument("--goal", required=True)
     parser.add_argument("--port", type=int, default=8793)
     parser.add_argument("--temporal-address", required=True)
     parser.add_argument("--temporal-namespace", default="default")
     args = parser.parse_args()
-    if os.getenv("PR_WATCH_STORAGE", "sqlite") != "sqlite" or os.getenv("PR_WATCH_PG_DSN"):
-        parser.error("webhook pilot is SQLite-only; never mix PostgreSQL")
+    backend = os.getenv("PR_WATCH_STORAGE", "sqlite")
+    pg_dsn = os.getenv("PR_WATCH_PG_DSN")
+    if backend == "sqlite":
+        if not args.db or pg_dsn:
+            parser.error("SQLite webhook mode requires --db and forbids PG DSN")
+    elif backend == "postgres":
+        if args.db or not pg_dsn or os.getenv("PR_WATCH_DB"):
+            parser.error("PostgreSQL webhook mode requires only PR_WATCH_PG_DSN")
+    else:
+        parser.error("unknown webhook storage backend")
     secret = os.getenv("PR_WATCH_WEBHOOK_SECRET", "").encode("utf-8")
     try:
-        store = GoalStore(args.db)
         wake = TemporalWebhookWake(
             args.temporal_address, args.temporal_namespace, args.user, args.goal,
         )
-        ingress = GitHubWebhookIngress(
-            store=store, user_id=args.user, goal_id=args.goal,
-            secret=secret, signal=wake,
-        )
+        if backend == "sqlite":
+            ingress = GitHubWebhookIngress(
+                store=GoalStore(args.db), user_id=args.user, goal_id=args.goal,
+                secret=secret, signal=wake,
+            )
+        else:
+            # Optional dependency, imported only in explicitly selected PG mode.
+            from pr_watch_pg_store import PostgresWatchStore
+            from pr_watch_pg_webhook import PostgresWebhookIngress
+
+            ingress = PostgresWebhookIngress(
+                store=PostgresWatchStore(pg_dsn),
+                user_id=args.user, goal_id=args.goal,
+                secret=secret, signal=wake,
+            )
         server = WebhookServer(("127.0.0.1", args.port), ingress)
     except (ValueError, WatchError) as exc:
         parser.error(str(exc))

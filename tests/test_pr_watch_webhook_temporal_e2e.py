@@ -26,7 +26,7 @@ from temporalio.worker import Worker
 from pr_watch_control_bridge import workflow_id
 from pr_watch_harness import GoalStore, PullSnapshot
 from pr_watch_temporal import PRWatchWorkflow
-from pr_watch_webhook import GitHubWebhookIngress
+from pr_watch_webhook import GitHubWebhookIngress, TemporalWebhookWake
 
 
 def test_signed_webhook_wakes_existing_workflow_and_observes_real_state(tmp_path):
@@ -123,7 +123,38 @@ def test_signed_webhook_wakes_existing_workflow_and_observes_real_state(tmp_path
                 duplicate = await asyncio.to_thread(ingress.accept, **args)
                 result = await asyncio.wait_for(handle.result(), timeout=25)
                 history = await handle.fetch_history()
+                async def factory():
+                    return env.client
 
+                witness = TemporalWebhookWake(
+                    "test:7233", "default", "alice", "webhook-e2e",
+                    client_factory=factory,
+                )
+                # Simulate a lost ACK after Temporal accepted the Signal.
+                with store._connection() as db:
+                    db.execute(
+                        "UPDATE pr_watch_webhook_wakes SET state='UNKNOWN' "
+                        "WHERE user_id='alice' AND goal_id='webhook-e2e'",
+                    )
+                failed_proof = await asyncio.to_thread(
+                    ingress.reconcile, delivery=args["delivery"],
+                    prove=lambda _: False,
+                )
+                verified_proof = await asyncio.to_thread(
+                    ingress.reconcile, delivery=args["delivery"],
+                    prove=witness.prove,
+                )
+                signal_id = "pr-watch-webhook:" + hashlib.sha256(
+                    json.dumps(["alice", "webhook-e2e", args["delivery"]],
+                               separators=(",", ":")).encode(),
+                ).hexdigest()
+                wrong_history = await asyncio.to_thread(
+                    witness.prove, signal_id + "-not-recorded",
+                )
+
+        assert failed_proof == {"signal_state": "UNKNOWN"}
+        assert verified_proof == {"signal_state": "ACKED"}
+        assert wrong_history is False
         assert first == {"status": "accepted", "signal_state": "ACKED"}
         assert duplicate == {"status": "duplicate", "signal_state": "ACKED"}
         assert result["state"] == "FINISHED" and result["phase"] == "MERGED"
