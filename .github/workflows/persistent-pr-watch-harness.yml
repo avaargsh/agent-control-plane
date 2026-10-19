@@ -6,6 +6,8 @@ on:
       - 'examples/pr_watch_*.py'
       - 'examples/pr_watch_panel.*'
       - 'tests/test_pr_watch_service.py'
+      - 'tests/test_pr_watch_task_projection.py'
+      - 'docs/PR_WATCH_TASK_PROJECTION.md'
       - 'tests/test_pr_watch_webhook.py'
       - 'examples/pr_watch_webhook_envelope.py'
       - 'docs/PR_WATCH_GITHUB_WEBHOOK_WAKE.md'
@@ -35,6 +37,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e '.[dev]' 'temporalio>=1.8,<2'
       - run: python -m ruff check examples/pr_watch_harness.py examples/pr_watch_github.py examples/pr_watch_temporal.py examples/pr_watch_service.py examples/pr_watch_webhook.py tests/test_pr_watch_webhook.py examples/pr_watch_webhook_envelope.py
-      - run: pytest -q tests/test_pr_watch_harness.py tests/test_attention_plane_reference.py tests/test_pr_watch_service.py tests/test_pr_watch_webhook.py
+      - run: pytest -q tests/test_pr_watch_harness.py tests/test_attention_plane_reference.py tests/test_pr_watch_service.py tests/test_pr_watch_task_projection.py tests/test_pr_watch_webhook.py
       - run: node --check examples/pr_watch_panel.js
       - run: PYTHONPATH=examples python -c 'import pr_watch_temporal; print(pr_watch_temporal.TASK_QUEUE)'
