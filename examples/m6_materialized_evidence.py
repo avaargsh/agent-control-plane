@@ -63,6 +63,10 @@ def verify_materialized(report: object, root: Path) -> dict:
         return _result(errors, 0)
 
     try:
+        # The selected root is itself part of the trust boundary. Resolving a
+        # symlink first would hide that the operator selected a redirected root.
+        if root.is_symlink():
+            raise ValueError("evidence root must not be a symbolic link")
         root = root.resolve(strict=True)
         if not root.is_dir():
             raise ValueError("evidence root is not a directory")
@@ -136,9 +140,13 @@ def main() -> int:
     args = parser.parse_args()
     try:
         # Bounded, local manifest parse. Never echo its contents or raw paths.
-        if args.manifest.stat().st_size > _MAX_BYTES:
+        if args.manifest.is_symlink():
+            raise ValueError("manifest must not be a symbolic link")
+        with args.manifest.open("rb") as stream:
+            payload = stream.read(_MAX_BYTES + 1)
+        if len(payload) > _MAX_BYTES:
             raise ValueError("manifest exceeds size bound")
-        report = json.loads(args.manifest.read_text(encoding="utf-8"))
+        report = json.loads(payload.decode("utf-8"))
         result = verify_materialized(report, args.root)
     except (OSError, UnicodeError, ValueError):
         result = _result(["unavailable or malformed operator manifest"], 0)

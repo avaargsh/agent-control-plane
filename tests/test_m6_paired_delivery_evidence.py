@@ -94,6 +94,27 @@ def test_untrusted_non_object_is_no_go(bad):
     assert correlate(pr, bad)["correlation"] == "NOT_CORROBORATED"
 
 
+def test_pair_report_reader_rejects_symlink_and_oversized_file(tmp_path):
+    from m6_paired_delivery_evidence import _read_json
+
+    target = tmp_path / "target.json"
+    target.write_text(json.dumps({"safe": True}), encoding="utf-8")
+    link = tmp_path / "link.json"
+    link.symlink_to(target)
+    with pytest.raises(ValueError, match="symbolic link"):
+        _read_json(link)
+
+    large = tmp_path / "large.json"
+    large.write_bytes(b" " * 4_000_001)
+    with pytest.raises(ValueError, match="byte limit"):
+        _read_json(large)
+
+    empty = tmp_path / "empty.json"
+    empty.write_bytes(b"")
+    with pytest.raises(ValueError, match="byte limit"):
+        _read_json(empty)
+
+
 def test_offline_cli_success_and_fail_closed(tmp_path):
     pr, check = pair()
     a, b = tmp_path / "pr.json", tmp_path / "check.json"

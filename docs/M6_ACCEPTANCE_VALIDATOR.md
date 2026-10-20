@@ -65,3 +65,14 @@ pytest -q tests/test_m6_acceptance_validator.py \
 
 Never commit secrets, unredacted webhook bodies, or private raw evidence
 into this repository.
+
+
+## Evidence reader hardening
+
+The materialized validator rejects a symbolic-link evidence root as well as
+symbolic links in evidence paths and a symbolic-link manifest. The standalone
+paired-delivery CLI also rejects symbolic-link report files, empty files, and
+reports larger than 4 MiB before JSON parsing. These checks bound accidental
+or hostile local evidence inputs; they do not authenticate the author or prove
+that a report was produced from a real GitHub delivery. The final decision
+remains `NO_GO` until independently verified live evidence and signed review.
