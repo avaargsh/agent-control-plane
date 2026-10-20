@@ -53,3 +53,7 @@ footer { margin-top:24px; }
 .detail-filter select { flex:1; min-width:0; padding:9px; border:1px solid var(--border); border-radius:9px; background:#fff; }
 .task-detail { padding:12px; border:1px solid var(--border); border-radius:10px; margin:12px 0; background:var(--bg); overflow-wrap:anywhere; }
 .task-detail p { margin-top:8px; }
+
+.control-entry { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:9px 0; border-bottom:1px solid var(--border); font-size:12px; }
+.control-entry:last-child { border-bottom:0; }
+.control-entry button,.task-detail > button { font-size:12px; padding:7px 10px; }
