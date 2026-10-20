@@ -245,3 +245,53 @@ def test_keyed_unattempted_claim_only_and_crashed_claim_stays_unknown(tmp_path):
     assert reopened.control(user_id=USER, goal_id=GOAL, version=1)[
         "signal_state"
     ] == "UNKNOWN"
+
+
+def test_real_temporal_history_matches_signal_after_durable_send_claim(tmp_path):
+    async def scenario():
+        store = setup(tmp_path)
+        request_id = "c" * 32
+        command = dict(
+            user_id=USER, goal_id=GOAL,
+            request_id=request_id, action="pause", expected_version=0,
+        )
+        store.prepare_control(**command)
+        store.transition_with_request(**command)
+        claimed = store.claim_control_signal(
+            user_id=USER, goal_id=GOAL, version=1, unattempted_only=True,
+        )
+        assert claimed is not None
+        assert claimed["signal_state"] == "UNKNOWN"
+        async with await WorkflowEnvironment.start_time_skipping() as env:
+            async def factory():
+                return env.client
+            bridge = TemporalControlBridge(
+                address="test-in-memory:7233", client_factory=factory,
+            )
+            handle = await env.client.start_workflow(
+                PRWatchWorkflow.run,
+                {"user_id": USER, "goal_id": GOAL, "interval_seconds": 86400},
+                id=workflow_id(user_id=USER, goal_id=GOAL),
+                task_queue="control-claim-history-proof",
+            )
+            token = control_signal_id(
+                user_id=USER, goal_id=GOAL, version=1, action="pause",
+            )
+            await handle.signal("wake", token)
+            assert await bridge._history_proves(
+                user_id=USER, goal_id=GOAL, signal_id=token,
+            )
+            assert not await bridge._history_proves(
+                user_id=USER, goal_id=GOAL, signal_id=token + "-different",
+            )
+            assert store.claim_control_signal(
+                user_id=USER, goal_id=GOAL, version=1, unattempted_only=True,
+            ) is None
+            ack = store.record_control_signal(
+                user_id=USER, goal_id=GOAL, version=1,
+                state="ACKED", evidence="HISTORY_PROOF",
+            )
+            assert ack["signal_state"] == "ACKED"
+            assert ack["evidence"] == "HISTORY_PROOF"
+
+    asyncio.run(scenario())
