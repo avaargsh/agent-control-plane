@@ -242,3 +242,96 @@ def test_chromium_mobile_filters_and_controls_fit_viewport(page, pilot):
     assert page.evaluate(
         "document.documentElement.scrollWidth <= window.innerWidth"
     )
+
+
+def test_chromium_lost_ack_reads_durable_control_without_resending(page, pilot):
+    base, server = pilot
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    posts = []
+
+    def commit_then_drop(route):
+        posts.append(route.request.url)
+        # Simulate a transport drop AFTER the server committed the CAS.
+        body = json.dumps({"expected_version": 0}).encode("utf-8")
+        request = Request(
+            base + "/api/goals/pr-a/pause", data=body, method="POST",
+            headers={
+                "Authorization": "Bearer " + TOKENS["alice"],
+                "Content-Type": "application/json",
+            },
+        )
+        with urlopen(request, timeout=5) as response:
+            assert response.status == 202
+        route.abort("failed")
+
+    page.route("**/api/goals/pr-a/pause", commit_then_drop)
+    card = page.locator("#goals .goal").filter(has_text="pr-a")
+    card.get_by_role("button", name="Pause").click()
+    expect(page.locator("#control-recovery")).to_contain_text(
+        "response lost or uncertain at v0",
+    )
+    expect(page.locator("#message")).to_contain_text("outcome UNKNOWN")
+    expect(card).to_contain_text("PAUSED")
+    expect(card.get_by_role("button", name="Cancel")).to_be_disabled()
+    assert len(posts) == 1
+    journal = server.service.goals.controls(user_id="alice", goal_id="pr-a")
+    assert len(journal) == 1 and journal[0]["action"] == "pause"
+
+    page.get_by_role("button", name="Check committed record").click()
+    expect(page.locator("#control-recovery")).to_be_empty()
+    expect(page.locator("#message")).to_contain_text(
+        "matching durable pause recorded at v1",
+    )
+    expect(page.locator("#message")).to_contain_text(
+        "does not establish which request committed it",
+    )
+    assert len(posts) == 1, "readback must never re-POST an uncertain action"
+    assert len(server.service.goals.controls(user_id="alice", goal_id="pr-a")) == 1
+
+
+def test_chromium_unknown_outcome_without_record_stays_locked(page, pilot):
+    base, server = pilot
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    posts = []
+    def fail_transport(route):
+        posts.append(route.request.url)
+        route.abort("failed")
+    page.route("**/api/goals/pr-a/pause", fail_transport)
+    card = page.locator("#goals .goal").filter(has_text="pr-a")
+    card.get_by_role("button", name="Pause").click()
+    expect(page.locator("#control-recovery")).to_contain_text(
+        "response lost or uncertain",
+    )
+    page.get_by_role("button", name="Check committed record").click()
+    expect(page.locator("#message")).to_contain_text(
+        "no conclusive control record yet",
+    )
+    expect(card.get_by_role("button", name="Pause")).to_be_disabled()
+    expect(card.get_by_role("button", name="Cancel")).to_be_disabled()
+    assert not server.service.goals.controls(user_id="alice", goal_id="pr-a")
+    assert len(posts) == 1
+
+    # Uncertainty is kept only in current tab and never leaks into Bob's view.
+    page.locator("#token").fill(TOKENS["bob"])
+    page.get_by_role("button", name="Connect").click()
+    expect(page.locator("#goals")).to_contain_text("pr-bob")
+    expect(page.locator("#control-recovery")).to_be_empty()
+    assert page.evaluate("localStorage.length + sessionStorage.length") == 0
+
+
+def test_chromium_definite_cas_rejection_never_offers_ambiguous_retry(page, pilot):
+    base, server = pilot
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    # Another authorized actor has already committed v1; UI holds stale v0.
+    server.service.goals.transition(
+        user_id="alice", goal_id="pr-a", action="pause", expected_version=0,
+    )
+    card = page.locator("#goals .goal").filter(has_text="pr-a")
+    card.get_by_role("button", name="Pause").click()
+    expect(page.locator("#message")).to_contain_text("rejected (HTTP 409")
+    expect(page.locator("#control-recovery")).to_be_empty()
+    expect(card).to_contain_text("PAUSED")
+    assert len(server.service.goals.controls(user_id="alice", goal_id="pr-a")) == 1

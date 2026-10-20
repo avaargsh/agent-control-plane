@@ -7,6 +7,9 @@
   let refreshBusy = false;
   let refreshHadError = false;
   const pendingControls = new Set();
+  // In-tab only: uncertainty is not persisted across reloads or logins.
+  // A network failure cannot prove that the CAS mutation did not commit.
+  const uncertainControls = new Map();
   const el = (id) => document.getElementById(id);
   const msg = (text) => { el("message").textContent = String(text); };
   const setSync = (text, state) => {
@@ -36,9 +39,77 @@
     if (requestToken !== token) throw Error("Session changed; stale response discarded.");
     if (!result.ok) {
       const detail = typeof body.error === "string" ? body.error : "Request failed";
-      throw Error("HTTP " + result.status + ": " + detail);
+      const failure = Error("HTTP " + result.status + ": " + detail);
+      failure.httpStatus = result.status;
+      throw failure;
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body) || !Object.keys(body).length) {
+      throw Error("Missing or invalid response body; write outcome may be unknown.");
     }
     return body;
+  };
+  const renderRecovery = () => {
+    const area = el("control-recovery");
+    area.replaceChildren();
+    for (const [goalId, attempt] of uncertainControls) {
+      const entry = document.createElement("section");
+      entry.className = "recovery-entry";
+      const note = document.createElement("p");
+      note.textContent = goalId + ": " + attempt.action +
+        " response lost or uncertain at v" + attempt.expectedVersion +
+        ". Do not repeat the action. Read the durable control journal.";
+      const check = document.createElement("button");
+      check.type = "button";
+      check.className = "secondary";
+      check.textContent = "Check committed record";
+      check.addEventListener("click", async () => {
+        check.disabled = true;
+        const checkSession = sessionEpoch;
+        try {
+          // Read-only authority checks: never automatically re-POST the action
+          // or send a second Temporal signal after an ambiguous response.
+          const [goalReply, recordsReply] = await Promise.all([
+            api("/api/goals/" + encodeURIComponent(goalId)),
+            api("/api/goals/" + encodeURIComponent(goalId) + "/controls"),
+          ]);
+          if (checkSession !== sessionEpoch || uncertainControls.get(goalId) !== attempt) return;
+          const nextVersion = attempt.expectedVersion + 1;
+          const matching = recordsReply.controls.find((record) =>
+            record.version === nextVersion && record.action === attempt.action
+          );
+          if (matching && goalReply.goal.version >= nextVersion) {
+            uncertainControls.delete(goalId);
+            msg(goalId + ": matching durable " + attempt.action + " recorded at v" +
+              nextVersion + " (Temporal " + matching.signal_state +
+              "). This does not establish which request committed it or prove execution.");
+            await refresh();
+          } else if (goalReply.goal.version > attempt.expectedVersion &&
+                     recordsReply.controls.some((record) =>
+                       record.version === nextVersion && record.action !== attempt.action)) {
+            uncertainControls.delete(goalId);
+            msg(goalId + ": another action holds v" + nextVersion +
+              "; the ambiguous " + attempt.action +
+              " cannot commit against that stale version. Review current state.");
+            await refresh();
+          } else {
+            msg(goalId + ": no conclusive control record yet. The request may still arrive; " +
+              "keep controls locked and check again. No automatic retry.");
+          }
+        } catch (error) {
+          if (checkSession === sessionEpoch) {
+            msg(goalId + ": readback failed: " + error.message +
+              ". Outcome still unknown; controls remain locked.");
+          }
+        } finally {
+          if (checkSession === sessionEpoch) {
+            check.disabled = false;
+            renderRecovery();
+          }
+        }
+      });
+      entry.append(note, check);
+      area.append(entry);
+    }
   };
   const goalCard = (goal, task) => {
     const card = document.createElement("article");
@@ -70,7 +141,7 @@
       button.className = action === "cancel" ? "danger" : "secondary";
       button.textContent = action[0].toUpperCase() + action.slice(1);
       button.addEventListener("click", async () => {
-        if (pendingControls.has(goal.goal_id)) return;
+        if (pendingControls.has(goal.goal_id) || uncertainControls.has(goal.goal_id)) return;
         if (action === "cancel" && !window.confirm("Cancel " + goal.goal_id + "? This cannot be resumed.")) return;
         const actionToken = token;
         const actionSession = sessionEpoch;
@@ -83,6 +154,12 @@
             }
           );
           if (actionToken !== token || actionSession !== sessionEpoch) return;
+          if (!outcome.control || !outcome.goal ||
+              outcome.goal.version !== goal.version + 1 ||
+              outcome.control.version !== goal.version + 1 ||
+              outcome.control.action !== action) {
+            throw Error("Control receipt incomplete; committed outcome must be read back.");
+          }
           const control = outcome.control;
           const signalState = control ? control.signal_state : "UNCONFIRMED";
           msg(goal.goal_id + ": " + action + " committed; Temporal " + signalState +
@@ -91,16 +168,32 @@
             (["UNKNOWN", "PENDING"].includes(signalState) ?
               " — Inspect task to reconcile the uncertain signal." : ""));
         } catch (error) {
-          if (actionToken === token && actionSession === sessionEpoch) msg(error.message);
+          if (actionToken === token && actionSession === sessionEpoch) {
+            // A definite 4xx rejection is different from a lost response or
+            // 5xx: in the latter case the server may already have committed.
+            if (!error.httpStatus || error.httpStatus >= 500) {
+              uncertainControls.set(goal.goal_id, {
+                action, expectedVersion: goal.version,
+              });
+              renderRecovery();
+              msg(goal.goal_id + ": " + action + " outcome UNKNOWN (" +
+                error.message + "). Do not retry. Check committed record.");
+            } else {
+              msg(goal.goal_id + ": rejected (" + error.message +
+                "). Reloading authoritative state; no automatic retry.");
+            }
+          }
         } finally {
           if (actionSession === sessionEpoch) pendingControls.delete(goal.goal_id);
           // Always re-read the authoritative version, including HTTP 409.
           // Never retry a rejected CAS action automatically.
           if (actionToken === token && actionSession === sessionEpoch) await refresh();
-          for (const controlButton of actions.querySelectorAll("button")) controlButton.disabled = false;
+          if (!uncertainControls.has(goal.goal_id) && actionSession === sessionEpoch) {
+            for (const controlButton of actions.querySelectorAll("button")) controlButton.disabled = false;
+          }
         }
       });
-      if (pendingControls.has(goal.goal_id)) button.disabled = true;
+      if (pendingControls.has(goal.goal_id) || uncertainControls.has(goal.goal_id)) button.disabled = true;
       actions.append(button);
     }
     const inspect = document.createElement("button");
@@ -295,6 +388,8 @@
     token = enteredToken;
     refreshHadError = false;
     pendingControls.clear();
+    uncertainControls.clear();
+    renderRecovery();
     selectedTask = "";
     el("goals").replaceChildren(label("Loading tasks…", "muted"));
     el("task-detail").replaceChildren(label("Select a task to inspect.", "muted"));
