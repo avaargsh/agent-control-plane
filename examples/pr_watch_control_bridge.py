@@ -57,11 +57,20 @@ class TemporalControlBridge:
 
     def signal_committed(
         self, store: GoalStore, *, user_id: str, goal_id: str, version: int,
+        unattempted_only: bool = False,
     ) -> dict:
-        """Dispatch once *after* SQLite commit. Errors become UNKNOWN."""
-        control = store.control(user_id=user_id, goal_id=goal_id, version=version)
-        if control["signal_state"] != "PENDING":
-            return control
+        """Fence this Signal in the durable journal BEFORE any RPC.
+
+        If the process dies after claiming but before calling Temporal, the
+        record stays UNKNOWN; absence in remote History is not proof of
+        non-delivery and can never authorize an automatic second Signal.
+        """
+        control = store.claim_control_signal(
+            user_id=user_id, goal_id=goal_id, version=version,
+            unattempted_only=unattempted_only,
+        )
+        if control is None:
+            return store.control(user_id=user_id, goal_id=goal_id, version=version)
         try:
             result = asyncio.run(self._signal(
                 user_id=user_id, goal_id=goal_id, version=version,
@@ -69,8 +78,8 @@ class TemporalControlBridge:
             ))
         except Exception:
             result = "UNKNOWN"
-        # Even if this DB write fails after an accepted Signal, the journal
-        # remains PENDING; explicit history reconciliation can prove acceptance.
+        # Claim already committed UNKNOWN: if ACK persistence fails, it
+        # remains UNKNOWN rather than a re-sendable PENDING state.
         return store.record_control_signal(
             user_id=user_id, goal_id=goal_id, version=version,
             state=result,
