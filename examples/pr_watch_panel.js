@@ -3,7 +3,6 @@
   let token = "";
   let selectedTask = "";
   let refreshEpoch = 0;
-  let refreshing = false;
   const el = (id) => document.getElementById(id);
   const msg = (text) => { el("message").textContent = text; };
   const label = (text, css = "") => {
@@ -155,6 +154,7 @@
         const response = await api("/api/tasks/" + encodeURIComponent(selectedTask));
         if (!isCurrent()) return;
         const task = response.task;
+        const detailTaskId = selectedTask;
         const title = document.createElement("strong");
         title.textContent = task.task_id + " · " + task.state;
         const description = document.createElement("p");
@@ -185,7 +185,7 @@
           launchVerify.disabled = true;
           try {
             const result = await api(
-              "/api/goals/" + encodeURIComponent(selectedTask) +
+              "/api/goals/" + encodeURIComponent(detailTaskId) +
                 "/launch/reconcile", { method: "POST", body: {} }
             );
             msg("Enrollment reconciliation: " + result.launch.state +
@@ -218,7 +218,7 @@
               reconcile.disabled = true;
               try {
                 const result = await api(
-                  "/api/goals/" + encodeURIComponent(selectedTask) +
+                  "/api/goals/" + encodeURIComponent(detailTaskId) +
                     "/controls/" + control.version + "/reconcile",
                   { method: "POST", body: {} }
                 );
