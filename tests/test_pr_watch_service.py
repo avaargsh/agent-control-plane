@@ -365,3 +365,27 @@ def test_panel_task_filters_are_served_and_api_remains_scoped(tmp_path):
         assert json.loads(request(
             api, "GET", "/api/tasks?limit=20", who="bob",
         )[1])["tasks"] == []
+
+
+def test_task_detail_and_activity_panel_uses_scoped_read_only_endpoints(tmp_path):
+    with server(tmp_path) as api:
+        create(api)
+        status, html, _ = request(api, "GET", "/")
+        assert status == 200
+        assert 'id="activity-goal"' in html
+        assert 'id="task-detail"' in html
+        status, script, _ = request(api, "GET", "/pr-watch-panel.js")
+        assert status == 200
+        assert 'api("/api/tasks/" + encodeURIComponent(selectedTask))' in script
+        assert "event.goal_id === selectedTask" in script
+        assert "textContent = task.task_id" in script
+        assert "innerHTML" not in script
+        assert "localStorage" not in script
+        status, data, _ = request(api, "GET", "/api/tasks/pr-1", who="alice")
+        assert status == 200
+        detail = json.loads(data)["task"]
+        assert detail["task_id"] == "pr-1"
+        assert detail["business_outcome_verified"] is False
+        assert detail["independent_proof_ref"] is None
+        assert request(api, "GET", "/api/tasks/pr-1", who="bob")[0] == 404
+        assert request(api, "GET", "/api/events?after=0", who="bob")[0] == 200

@@ -1,6 +1,7 @@
 (() => {
   "use strict";
   let token = "";
+  let selectedTask = "";
   const el = (id) => document.getElementById(id);
   const msg = (text) => { el("message").textContent = text; };
   const label = (text, css = "") => {
@@ -92,6 +93,16 @@
       });
       actions.append(button);
     }
+    const inspect = document.createElement("button");
+    inspect.type = "button";
+    inspect.className = "secondary";
+    inspect.textContent = "Inspect";
+    inspect.addEventListener("click", () => {
+      selectedTask = goal.goal_id;
+      el("activity-goal").value = selectedTask;
+      refresh();
+    });
+    actions.append(inspect);
     card.append(actions);
     return card;
   };
@@ -117,7 +128,40 @@
       );
       el("goals").replaceChildren(...cards);
       if (!cards.length) el("goals").append(label("No matching tasks in the current scoped snapshot.", "muted"));
-      const nodes = events.events.slice().reverse().map((event) => {
+      // Keep the selection owner-scoped. Never trust a URL/query supplied
+      // identity or display an old user's Task after token changes.
+      const choices = goals.goals.map((goal) => goal.goal_id);
+      if (selectedTask && !choices.includes(selectedTask)) selectedTask = "";
+      const activitySelect = el("activity-goal");
+      const options = [new Option("All tasks", "")];
+      for (const id of choices) options.push(new Option(id, id));
+      activitySelect.replaceChildren(...options);
+      activitySelect.value = selectedTask;
+      const detail = el("task-detail");
+      detail.replaceChildren();
+      if (selectedTask) {
+        // Fetch the single owner-scoped Task directly rather than treating
+        // the filtered list as authoritative for detail.
+        const response = await api("/api/tasks/" + encodeURIComponent(selectedTask));
+        const task = response.task;
+        const title = document.createElement("strong");
+        title.textContent = task.task_id + " · " + task.state;
+        const description = document.createElement("p");
+        description.textContent = task.repo + " #" + task.pull_number +
+          " · " + (task.observation_phase || "NOT_OBSERVED") +
+          " · launch " + task.launch_state +
+          " · workflow " + (task.workflow_status || "NOT_OBSERVED");
+        const warning = document.createElement("p");
+        warning.className = "muted";
+        warning.textContent = "Business outcome independently verified: NO";
+        detail.append(title, description, warning);
+      } else {
+        detail.append(label("Select Inspect on a task to see its details.", "muted"));
+      }
+      const scopedEvents = events.events.filter(
+        (event) => !selectedTask || event.goal_id === selectedTask
+      );
+      const nodes = scopedEvents.slice().reverse().map((event) => {
         const row = document.createElement("article");
         row.className = "event";
         row.append(label(event.kind, "event-type"));
@@ -134,6 +178,7 @@
   };
   el("connect").addEventListener("click", async () => {
     token = el("token").value;
+    selectedTask = "";
     el("token").value = "";
     msg("");
     await refresh();
@@ -142,6 +187,10 @@
   el("task-state").addEventListener("change", refresh);
   el("task-repo").addEventListener("change", refresh);
   el("task-limit").addEventListener("change", refresh);
+  el("activity-goal").addEventListener("change", () => {
+    selectedTask = el("activity-goal").value;
+    refresh();
+  });
   el("create").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {

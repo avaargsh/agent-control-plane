@@ -47,3 +47,9 @@ footer { margin-top:24px; }
 .task-toolbar select:focus-visible,.task-toolbar input:focus-visible { outline:2px solid #7b8caf; outline-offset:2px; }
 .task-status { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
 @media (max-width:500px) { .task-toolbar { grid-template-columns:1fr 1fr; } .task-toolbar label,.task-toolbar select,.task-toolbar input { grid-row:auto; } }
+
+.detail-filter { display:flex; align-items:center; gap:10px; margin:10px 0; }
+.detail-filter label { margin:0; }
+.detail-filter select { flex:1; min-width:0; padding:9px; border:1px solid var(--border); border-radius:9px; background:#fff; }
+.task-detail { padding:12px; border:1px solid var(--border); border-radius:10px; margin:12px 0; background:var(--bg); overflow-wrap:anywhere; }
+.task-detail p { margin-top:8px; }
