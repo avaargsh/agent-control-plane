@@ -133,3 +133,35 @@ database contention and the durable replay response, beyond direct store
 tests. The pilot runs with its local-only Temporal bridge disabled;
 thus this result **does not** prove an external Temporal Signal was
 delivered exactly once. External M6 webhook acceptance stays NO-GO.
+
+## Cross-process, real Temporal Signal boundary (PG16)
+
+`tests/test_pr_watch_pg_temporal_signal_process.py` connects two
+independent authenticated HTTP API **processes** to an isolated real
+PostgreSQL v3 schema and a real Temporal SDK test server. It starts a
+Workflow in the Temporal service without running a Worker (only Signal
+History acceptance, never business execution, is under test).
+
+- **Concurrent first sends:** two APIs simultaneously try
+  `dispatch-unattempted` for the same keyed committed Goal. A database
+  `PENDING -> UNKNOWN` claim permits only one sender. Temporal History
+  must contain **exactly one** matching wake Signal event, and a keyed
+  HTTP replay must not send another Signal.
+- **SIGKILL before RPC:** kill the test-owned API immediately after the
+  committed send claim, but before making a Temporal call. The journal
+  stays `UNKNOWN`, Temporal History has no matching Signal, and another
+  API cannot automatically or explicitly send it again.
+- **SIGKILL after RPC acceptance, before ACK journal update:** Temporal
+  History has exactly one matching Signal; local journal stays
+  `UNKNOWN`. A surviving API upgrades it to `ACKED/HISTORY_PROOF`
+  through the existing **read-only History reconciliation**. Retrying
+  the original client request returns the existing CAS receipt without
+  a second Signal.
+
+All tests operate on test-owned PIDs and a disposable schema. They are
+not tests of an actual remote Temporal cluster outage, Worker completion,
+exactly-once business operations or public GitHub webhooks. The zero-signal
+case explicitly documents **at-most-one send attempt can sacrifice
+immediate wake delivery**. The durable Goal is still read by periodic
+Workflow polling when a Worker eventually executes. M6 public webhook
+remains **NO-GO**.
