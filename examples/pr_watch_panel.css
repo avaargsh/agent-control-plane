@@ -85,3 +85,12 @@ button:focus-visible { outline:2px solid #4775b8; outline-offset:2px; }
 .recovery-entry p { font-size:12px; color:#7f4c12; }
 .recovery-entry button { font-size:12px; min-height:42px; border-color:#caa873; }
 @media (max-width:500px) { .recovery-entry button { width:100%; min-height:44px; white-space:normal; } }
+
+/* Read-only committed request history stays collapsed to avoid alert fatigue. */
+.committed-history { border:1px solid var(--line, #dde4ed); border-radius:10px; padding:10px 12px; margin:12px 0; }
+.committed-history > summary { cursor:pointer; font-size:13px; font-weight:650; }
+.committed-history > p { font-size:12px; line-height:1.5; }
+.committed-entry { border-top:1px solid var(--line, #dde4ed); padding:10px 0; overflow-wrap:anywhere; }
+.committed-entry p { font-size:12px; margin:0 0 8px; }
+.committed-entry button { font-size:12px; padding:8px 12px; }
+@media (max-width:500px) { .committed-entry button { width:100%; min-height:44px; } }
