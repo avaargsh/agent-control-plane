@@ -610,7 +610,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json(409, {"error": str(exc)})
         except ValueError as exc:
             reason = str(exc)
-            if "stale version" in reason or "invalid lifecycle transition" in reason:
+            if ("stale version" in reason or "invalid lifecycle transition" in reason
+                or "request ID already bound" in reason
+                or "prepare request before execution" in reason):
                 status = 409
             else:
                 status = 404 if "not found within user scope" in reason else 400
