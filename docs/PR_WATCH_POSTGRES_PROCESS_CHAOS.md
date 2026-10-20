@@ -165,3 +165,29 @@ case explicitly documents **at-most-one send attempt can sacrifice
 immediate wake delivery**. The durable Goal is still read by periodic
 Workflow polling when a Worker eventually executes. M6 public webhook
 remains **NO-GO**.
+
+## Temporal timer fallback with no Signal delivered (v3)
+
+`tests/test_pr_watch_pg_v3_timer_fallback.py` verifies the **real Workflow
+and Worker** against the Temporal SDK test server and a disposable
+PostgreSQL v3 schema. After the first Activity has read the Goal,
+the test commits a keyed `cancel` CAS **without** calling the Temporal
+Signal endpoint. Two crash-window variants are covered:
+
+- `PENDING + UNATTEMPTED_V3`: committed CAS, API process dies before
+  durable send claim.
+- `UNKNOWN + ACK_UNCERTAIN`: committed send claim, API process dies
+  before making the Temporal network call.
+
+In both cases the already-running Workflow's regular **30-second
+History timer** must fire. Its next Activity re-reads the scoped Goal,
+sees `CANCELLED`, and completes without another GitHub provider read.
+No `WorkflowExecutionSignaled` event is allowed in History. The Goal
+version and original COMMITTED request ID remain unchanged.
+
+This proves that **the periodic timer is a liveness fallback when
+the wake is lost**, provided a healthy Temporal server and Worker remain
+available. It does **not** prove a production latency SLO, absence of
+remote delivery in ambiguous real-network situations, or exactly-once
+remote Signal delivery. A durable `UNKNOWN` is never silently resent.
+Public GitHub Webhook M6 remains NO-GO.
