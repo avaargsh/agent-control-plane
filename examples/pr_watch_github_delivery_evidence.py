@@ -237,6 +237,7 @@ def verify_delivery_record(
         raise EvidenceAuditError("GitHub redelivery metadata absent")
     return {
         "provider": "GITHUB_REPOSITORY_WEBHOOK_API",
+        "github_event": event,
         "github_delivery_record": "MATCHED",
         "repository_id": "GITHUB_ID_CORROBORATED",
         "delivery_guid": "GITHUB_GUID_MATCHED",
