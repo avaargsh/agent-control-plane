@@ -81,16 +81,27 @@ def evidence():
     return store, user, goal_id, guid, signals[0], repository, record
 
 
-def invoke(evidence, *, record=None, repository=None, prove=None):
+def invoke(evidence, *, record=None, repository=None, hook=None, prove=None, prove_once=None):
     _, user, goal, guid, _, canonical_repo, canonical_record = evidence
     repository = canonical_repo if repository is None else repository
     record = canonical_record if record is None else record
+    canonical_hook = {
+        "type": "Repository", "id": HOOK, "name": "web",
+        "active": True, "events": ["pull_request", "check_run", "check_suite"],
+        "config": {
+            "url": ENDPOINT, "content_type": "json",
+            "insecure_ssl": "0",
+        },
+    }
+    hook = canonical_hook if hook is None else hook
     paths = []
 
     def get(path):
         paths.append(path)
         if path == "":
             return repository
+        if path == "/hooks/124":
+            return hook
         if path == "/hooks/124/deliveries/987654":
             return record
         pytest.fail("unexpected network path")
@@ -99,9 +110,9 @@ def invoke(evidence, *, record=None, repository=None, prove=None):
         dsn=DSN, user_id=user, goal_id=goal, guid=guid,
         hook_id=HOOK, delivery_id=DELIVERY_ID,
         expected_endpoint=ENDPOINT, token="not-used-by-injected-fixture",
-        prove=prove, fetch_json=get,
+        prove=prove, prove_once=prove_once, fetch_json=get,
     )
-    assert paths == ["", "/hooks/124/deliveries/987654"]
+    assert paths == ["", "/hooks/124", "/hooks/124/deliveries/987654"]
     return result
 
 
@@ -112,6 +123,11 @@ def test_provider_record_plus_pg_claim_corroborates_real_identity_only(evidence)
     assert output["temporal_history"] == "PROVEN"
     assert output["inbox_state"] == "ACKED"
     assert output["raw_hmac_body_equivalence"] == "NOT_ATTESTED_BY_API"
+    assert output["github_webhook_configuration"] == "CURRENT_ACTIVE_CONFIG_MATCHED"
+    assert output["github_webhook_tls_verification"] == "CURRENTLY_REQUIRED"
+    assert output["github_webhook_event_scope"] == "EXACT_PR_CHECK_ALLOWLIST"
+    assert output["github_webhook_secret_provisioning"] == "NOT_ATTESTED_BY_API"
+    assert output["temporal_signal_cardinality"] == "NOT_PROVEN"
     assert output["release_decision"] == "NO_GO"
     text = json.dumps(output)
     assert REPO not in text and ENDPOINT not in text
@@ -247,3 +263,91 @@ def test_only_fixed_github_api_get_allowed_with_read_token(monkeypatch):
         "https://api.github.com/repos/avaargsh/agent-control-plane"
         "/hooks/124/deliveries/987654", "GET", 10,
     )]
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda h: {**h, "id": HOOK + 1},
+    lambda h: {**h, "active": False},
+    lambda h: {**h, "active": 1},
+    lambda h: {**h, "type": "Organization"},
+    lambda h: {**h, "name": "push"},
+    lambda h: {**h, "events": ["push", "pull_request", "check_run"]},
+    lambda h: {**h, "events": ["*"]},
+    lambda h: {**h, "events": ["pull_request"]},
+    lambda h: {**h, "events": ["check_run"]},
+    lambda h: {**h, "events": ["pull_request", "check_run", "check_run"]},
+    lambda h: {**h, "events": "pull_request"},
+    lambda h: {**h, "config": {
+        **h["config"], "url": "https://unexpected.example/webhooks/github",
+    }},
+    lambda h: {**h, "config": {**h["config"], "insecure_ssl": "1"}},
+    lambda h: {**h, "config": {**h["config"], "insecure_ssl": True}},
+    lambda h: {**h, "config": {**h["config"], "content_type": "form"}},
+    lambda h: {**h, "config": {}},
+])
+def test_unsafe_or_incomplete_current_github_hook_denies_corroboration(
+    evidence, mutate,
+):
+    hook = {
+        "type": "Repository", "id": HOOK, "name": "web", "active": True,
+        "events": ["pull_request", "check_run", "check_suite"],
+        "config": {
+            "url": ENDPOINT, "content_type": "json", "insecure_ssl": "0",
+        },
+    }
+    with pytest.raises(EvidenceAuditError):
+        invoke(evidence, hook=mutate(hook))
+
+
+def test_non_subscribed_delivery_event_is_rejected_even_if_record_exists(evidence):
+    hook = {
+        "type": "Repository", "id": HOOK, "name": "web", "active": True,
+        "events": ["pull_request", "check_run"],
+        "config": {
+            "url": ENDPOINT, "content_type": "json", "insecure_ssl": "0",
+        },
+    }
+    item = evidence[6]
+    record = {
+        **item, "event": "check_suite", "action": "completed",
+        "request": {
+            **item["request"],
+            "headers": {
+                **item["request"]["headers"], "X-GitHub-Event": "check_suite",
+            },
+            "payload": {
+                "action": "completed",
+                "repository": {"full_name": REPO, "id": REPO_ID},
+                "check_suite": {"pull_requests": [{"number": NUMBER}]},
+            },
+        },
+    }
+    with pytest.raises(EvidenceAuditError, match="events"):
+        invoke(evidence, hook=hook, record=record)
+
+
+def test_temporal_exactly_one_signal_requires_independent_strict_witness(evidence):
+    result = invoke(
+        evidence, prove_once=lambda signal: signal == evidence[4],
+    )
+    assert result["temporal_history"] == "PROVEN"
+    assert result["temporal_signal_cardinality"] == "EXACTLY_ONE_PROVEN"
+    assert result["release_decision"] == "NO_GO"
+    for witness in (lambda _: False, lambda _: 1, lambda _: None):
+        denied = invoke(evidence, prove_once=witness)
+        assert denied["temporal_history"] == "NOT_PROVEN"
+        assert denied["temporal_signal_cardinality"] == "NOT_PROVEN"
+        assert denied["release_decision"] == "NO_GO"
+
+
+def test_operator_audit_get_paths_are_strict_allowlist():
+    import pr_watch_github_delivery_evidence as api
+
+    for path in (
+        "/hooks", "/hooks/0", "/hooks/124/config", "/hooks/124/pings",
+        "/pulls/185", "/hooks/-1/deliveries/987654", "/hooks/124/deliveries/0",
+        "/hooks/124/deliveries/987654?per_page=100",
+        "//evil.example", "/../../../user", "/hooks/124/../secrets",
+    ):
+        with pytest.raises(EvidenceAuditError, match="unsupported"):
+            api._read_json(repo=REPO, path=path, token="x" * 40)
