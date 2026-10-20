@@ -259,7 +259,7 @@ class PostgresMigrations:
         state = self.status()
         if state.version < version:
             raise MigrationError(
-                f"PostgreSQL schema version {version}+ required; found {state.version}"
+                f"PostgreSQL schema version {version} required; found {state.version}"
             )
 
     def upgrade(self, target: int = 2, *, adopt_legacy: bool = False) -> MigrationState:
