@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Callable, Protocol
+from typing import Callable, Protocol, TypeVar
 
 from .state_transition_protocol import (
     ActionIntent,
@@ -20,6 +20,8 @@ from .state_transition_protocol import (
 )
 
 Clock = Callable[[], datetime]
+_Result = TypeVar("_Result")
+_UNSET = object()
 
 
 class LiveEffectAdmissionDenied(ProtocolViolation):
@@ -110,6 +112,7 @@ class LiveEffectBoundaryGate:
         policy_input_hash: str,
         active_lease: ExecutionLease,
         caller: Principal,
+        _locked_observation: object = _UNSET,
     ) -> None:
         if not isinstance(self.scope, EffectScope) or not all(
             isinstance(v, str) and v.strip()
@@ -125,12 +128,16 @@ class LiveEffectBoundaryGate:
             raise ProtocolViolation("invalid live authority freshness bound")
         try:
             now = self.clock()
-            observed = self.reader.read_current(
-                tenant_id=self.scope.tenant_id,
-                project_id=self.scope.project_id,
-                cluster_id=self.scope.cluster_id,
-                work_id=work_id,
-                operation_id=operation_id,
+            observed = (
+                self.reader.read_current(
+                    tenant_id=self.scope.tenant_id,
+                    project_id=self.scope.project_id,
+                    cluster_id=self.scope.cluster_id,
+                    work_id=work_id,
+                    operation_id=operation_id,
+                )
+                if _locked_observation is _UNSET
+                else _locked_observation
             )
         except Exception as exc:
             raise ProtocolViolation("live effect authority read unavailable") from exc
@@ -193,3 +200,71 @@ class LiveEffectBoundaryGate:
         if (now >= authorization.expires_at
                 or now >= active_lease.expires_at):
             raise ProtocolViolation("live effect execution authorization expired")
+
+
+    def patch_with_current(
+        self,
+        *,
+        patch: Callable[[], _Result],
+        work_id: str,
+        operation_id: str,
+        subject: ResourceIdentity,
+        resource_generation: int,
+        action: ActionIntent,
+        authorization: AuthorizationBinding,
+        approval_hash: str,
+        policy_input_hash: str,
+        active_lease: ExecutionLease,
+        caller: Principal,
+    ) -> _Result:
+        """Admission in the final provider call path, optionally row-locked.
+
+        If the reader exposes hold_current(), keep its exact DB row locks
+        across the provider PATCH. If the reader only implements read_current()
+        retain the PR #199 read-before-patch semantics (NO race guarantee).
+        A database failure after PATCH entry is never converted to NOT_APPLIED.
+        """
+        scope_keys = (
+            self.scope.tenant_id, self.scope.project_id, self.scope.cluster_id,
+            work_id, operation_id,
+        ) if isinstance(self.scope, EffectScope) else ()
+        args = {
+            "work_id": work_id,
+            "operation_id": operation_id,
+            "subject": subject,
+            "resource_generation": resource_generation,
+            "action": action,
+            "authorization": authorization,
+            "approval_hash": approval_hash,
+            "policy_input_hash": policy_input_hash,
+            "active_lease": active_lease,
+            "caller": caller,
+        }
+        hold = getattr(self.reader, "hold_current", None)
+        if not callable(hold):
+            try:
+                self.assert_current(**args)
+            except Exception as exc:
+                raise LiveEffectAdmissionDenied(str(exc)) from exc
+            return patch()
+
+        entered_patch = False
+        try:
+            with hold(
+                tenant_id=scope_keys[0] if scope_keys else "",
+                project_id=scope_keys[1] if scope_keys else "",
+                cluster_id=scope_keys[2] if scope_keys else "",
+                work_id=work_id,
+                operation_id=operation_id,
+            ) as snapshot:
+                # IMPORTANT: validate the exact already-locked row. A second
+                # unprotected read would reintroduce a revocation race.
+                self.assert_current(**args, _locked_observation=snapshot)
+                entered_patch = True
+                return patch()
+        except Exception as exc:
+            if not entered_patch:
+                raise LiveEffectAdmissionDenied(str(exc)) from exc
+            # This may be an ambiguous provider effect or a DB commit failure
+            # AFTER an actual PATCH; do not claim NOT_APPLIED.
+            raise

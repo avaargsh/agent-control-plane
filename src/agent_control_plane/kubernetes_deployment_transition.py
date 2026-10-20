@@ -23,10 +23,7 @@ from .kubernetes_transition_plan import (
     validate_deployment_scale_plan_precondition,
 )
 from .policy_replay import TransitionPolicyInput
-from .live_effect_boundary import (
-    LiveEffectBoundaryGate,
-    LiveEffectAdmissionDenied,
-)
+from .live_effect_boundary import LiveEffectBoundaryGate
 from .provable_execution import (
     ObservationSnapshot,
     TransitionPlan,
@@ -782,16 +779,22 @@ class KubernetesDeploymentScaleProvider:
             },
         }
 
-        # Opt-in: read *current* external policy, principal, approval and
-        # operation authority at the final provider boundary, after K8s UID,
-        # generation and resourceVersion preconditions were resolved.
-        # Historical DSSE outcome proofs are deliberately NOT accepted here.
-        if (
-            context_binding is not None
-            and context_binding.live_effect_gate is not None
-        ):
-            try:
-                context_binding.live_effect_gate.assert_current(
+        # Scope and operation are validated against an independently
+        # governed current record, never a historical signed proof.
+        # A PostgreSQL reader can hold both scope/authority locks across this
+        # exact side effect; a read-only reader preserves legacy opt-in mode.
+        verified_after_uncertain = False
+        try:
+            if (
+                context_binding is not None
+                and context_binding.live_effect_gate is not None
+            ):
+                changed = context_binding.live_effect_gate.patch_with_current(
+                    patch=lambda: self.api.patch_deployment(
+                        namespace=transition.subject.namespace,
+                        name=transition.subject.name,
+                        patch=patch,
+                    ),
                     work_id=context_binding.proposal.work_id,
                     operation_id=operation_id,
                     subject=transition.subject,
@@ -805,19 +808,12 @@ class KubernetesDeploymentScaleProvider:
                     active_lease=active_lease,
                     caller=caller,
                 )
-            except ProtocolViolation as exc:
-                # This is unambiguously before the first provider PATCH.
-                # The coordinator may safely journal NOT_APPLIED and release
-                # its authority reservation without blind side-effect retry.
-                raise LiveEffectAdmissionDenied(str(exc)) from exc
-
-        verified_after_uncertain = False
-        try:
-            changed = self.api.patch_deployment(
-                namespace=transition.subject.namespace,
-                name=transition.subject.name,
-                patch=patch,
-            )
+            else:
+                changed = self.api.patch_deployment(
+                    namespace=transition.subject.namespace,
+                    name=transition.subject.name,
+                    patch=patch,
+                )
         except RuntimeMutationUncertain as exc:
             observed = self.api.get_deployment(
                 namespace=transition.subject.namespace,
