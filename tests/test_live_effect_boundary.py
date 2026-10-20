@@ -97,19 +97,20 @@ def _scenario(tmp_path):
     )
 
 
-def _assert_not_applied(scenario):
+def _assert_not_applied(scenario, *, expected_reads=1):
     fixture, _, _, context, coordinator, journal, reservations, prepared, reader = scenario
     with pytest.raises(LiveEffectAdmissionDenied):
         _execute(coordinator, fixture, context)
     assert fixture["api"].patch_calls == 0
-    assert len(reader.calls) == 1
-    assert reader.calls[0] == {
-        "tenant_id": SCOPE.tenant_id,
-        "project_id": SCOPE.project_id,
-        "cluster_id": SCOPE.cluster_id,
-        "work_id": context.proposal.work_id,
-        "operation_id": prepared.attempt.operation_id,
-    }
+    assert len(reader.calls) == expected_reads
+    if expected_reads:
+        assert reader.calls[0] == {
+            "tenant_id": SCOPE.tenant_id,
+            "project_id": SCOPE.project_id,
+            "cluster_id": SCOPE.cluster_id,
+            "work_id": context.proposal.work_id,
+            "operation_id": prepared.attempt.operation_id,
+        }
     aborted = journal.get(prepared.attempt.attempt_id)
     assert aborted is not None
     assert aborted.state is ExecutionAttemptState.ABORTED
@@ -205,7 +206,8 @@ def test_effect_gate_clock_failure_denies_patch(tmp_path):
     ))
     changed = list(scenario)
     changed[3] = altered
-    _assert_not_applied(tuple(changed))
+    # Trusted clock failure aborts before contacting the authority reader.
+    _assert_not_applied(tuple(changed), expected_reads=0)
 
 
 def test_operator_scope_is_not_taken_from_request_or_dsse(tmp_path):
