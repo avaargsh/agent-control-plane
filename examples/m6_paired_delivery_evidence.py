@@ -36,6 +36,18 @@ _DIGEST_KEYS = (
     "scope_digest", "workflow_digest", "delivery_digest",
 )
 _CHECK_EVENTS = frozenset(("check_run", "check_suite"))
+_MAX_REPORT_BYTES = 4_000_000
+
+
+def _read_json(path: Path) -> object:
+    """Read a bounded regular evidence file; reject leaf symlinks."""
+    if path.is_symlink():
+        raise ValueError("evidence report must not be a symbolic link")
+    with path.open("rb") as stream:
+        payload = stream.read(_MAX_REPORT_BYTES + 1)
+    if not payload or len(payload) > _MAX_REPORT_BYTES:
+        raise ValueError("evidence report empty or exceeds byte limit")
+    return json.loads(payload.decode("utf-8"))
 
 
 def correlate(pr: object, check: object) -> dict:
@@ -90,8 +102,8 @@ def main() -> int:
     parser.add_argument("check_report", type=Path)
     args = parser.parse_args()
     try:
-        pr = json.loads(args.pr_report.read_text(encoding="utf-8"))
-        check = json.loads(args.check_report.read_text(encoding="utf-8"))
+        pr = _read_json(args.pr_report)
+        check = _read_json(args.check_report)
         result = correlate(pr, check)
     except (OSError, ValueError):
         result = {
