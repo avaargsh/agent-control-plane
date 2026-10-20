@@ -22,6 +22,10 @@ from .state_transition_protocol import (
 Clock = Callable[[], datetime]
 
 
+class LiveEffectAdmissionDenied(ProtocolViolation):
+    """The provider has not yet sent a PATCH; denial is definitely NOT_APPLIED."""
+
+
 @dataclass(frozen=True)
 class EffectScope:
     """Out-of-band operator scope; never derived from provider or DSSE input."""
