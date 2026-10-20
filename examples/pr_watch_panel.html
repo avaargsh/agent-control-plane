@@ -29,7 +29,7 @@
     <div id="message" role="status" aria-live="polite"></div>
     <div class="columns">
       <section class="section">
-        <div class="section-head"><h2>Goals</h2><button id="refresh" type="button" class="secondary">Refresh</button></div>
+        <div class="section-head"><h2>Goals</h2><div class="sync-controls"><span id="sync-state" class="sync-state" data-state="idle" role="status" aria-live="polite">Not connected</span><button id="refresh" type="button" class="secondary">Refresh</button></div></div>
         <form id="create" class="create">
           <label for="goal-id">Goal identifier</label>
           <input id="goal-id" required maxlength="96" placeholder="monitor-my-pr">
@@ -40,24 +40,30 @@
           <button type="submit">Create goal</button>
         </form>
         <div class="task-toolbar" role="group" aria-label="Task filters">
-          <label for="task-state">Task state</label>
-          <select id="task-state">
-            <option value="">All states</option>
-            <option value="WAITING">Waiting</option>
-            <option value="ACTIVE">Active</option>
-            <option value="UNKNOWN">Unknown</option>
-            <option value="PAUSED">Paused</option>
-            <option value="CANCEL_REQUESTED">Cancel requested</option>
-            <option value="OBSERVED_TERMINAL">Observed terminal</option>
-          </select>
-          <label for="task-repo">Repository</label>
-          <input id="task-repo" placeholder="owner/repo" autocomplete="off" spellcheck="false">
-          <label for="task-limit">Show</label>
-          <select id="task-limit">
-            <option value="20">20</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-          </select>
+          <div class="task-field">
+            <label for="task-state">Task state</label>
+            <select id="task-state">
+              <option value="">All states</option>
+              <option value="WAITING">Waiting</option>
+              <option value="ACTIVE">Active</option>
+              <option value="UNKNOWN">Unknown</option>
+              <option value="PAUSED">Paused</option>
+              <option value="CANCEL_REQUESTED">Cancel requested</option>
+              <option value="OBSERVED_TERMINAL">Observed terminal</option>
+            </select>
+          </div>
+          <div class="task-field">
+            <label for="task-repo">Repository</label>
+            <input id="task-repo" placeholder="owner/repo" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="task-field">
+            <label for="task-limit">Show</label>
+            <select id="task-limit">
+              <option value="20">20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
         </div>
         <p class="muted">Observed terminal is not independently verified success.</p>
         <div id="goals" class="goal-list"><p class="muted">Connect to see your goals.</p></div>

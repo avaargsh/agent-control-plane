@@ -155,6 +155,12 @@ def test_chromium_refresh_error_does_not_display_stale_task(page, pilot):
     expect(page.locator("#message")).to_contain_text(
         "HTTP 503: temporary backend outage",
     )
+    expect(page.locator("#sync-state")).to_have_attribute("data-state", "error")
+    page.unroute("**/api/goals")
+    page.get_by_role("button", name="Refresh").click()
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    expect(page.locator("#sync-state")).to_have_text("Up to date")
+    expect(page.locator("#message")).to_be_empty()
 
 
 def test_chromium_pause_resume_and_cancel_confirmation(page, pilot):
@@ -177,3 +183,62 @@ def test_chromium_pause_resume_and_cancel_confirmation(page, pilot):
     assert [control["action"] for control in reversed(controls)] == [
         "pause", "resume", "cancel",
     ]
+
+
+def test_chromium_loading_state_and_single_refresh(page, pilot):
+    base, _ = pilot
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    held = []
+    page.route("**/api/goals", lambda route: held.append(route))
+    with page.expect_request("**/api/goals"):
+        page.get_by_role("button", name="Refresh").click()
+    assert held, "the request should be intercepted before it is released"
+    expect(page.locator("#sync-state")).to_have_attribute("data-state", "loading")
+    expect(page.get_by_role("button", name="Refresh")).to_be_disabled()
+    held[0].continue_()
+    expect(page.locator("#sync-state")).to_have_text("Up to date")
+    expect(page.get_by_role("button", name="Refresh")).to_be_enabled()
+
+
+def test_chromium_prevents_duplicate_controls_during_pending_post(page, pilot):
+    base, service = pilot
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    held = []
+    page.route("**/api/goals/pr-a/pause", lambda route: held.append(route))
+    card = page.locator("#goals .goal").filter(has_text="pr-a")
+    with page.expect_request("**/api/goals/pr-a/pause"):
+        card.get_by_role("button", name="Pause").click()
+    assert held
+    expect(card.get_by_role("button", name="Pause")).to_be_disabled()
+    expect(card.get_by_role("button", name="Cancel")).to_be_disabled()
+    held[0].continue_()
+    expect(card).to_contain_text("PAUSED")
+    controls = service.service.goals.controls(user_id="alice", goal_id="pr-a")
+    assert [item["action"] for item in controls] == ["pause"]
+
+
+def test_chromium_mobile_filters_and_controls_fit_viewport(page, pilot):
+    base, _ = pilot
+    page.set_viewport_size({"width": 390, "height": 844})
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    state = page.locator("#task-state").bounding_box()
+    repo = page.locator("#task-repo").bounding_box()
+    limit = page.locator("#task-limit").bounding_box()
+    assert state and repo and limit
+    assert state["y"] < repo["y"] < limit["y"], (
+        "paired mobile filters must stack in reading order"
+    )
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= window.innerWidth"
+    ), "mobile view must not require horizontal scrolling"
+    page.locator("#activity-goal").select_option("pr-a")
+    expect(page.locator("#task-detail strong").first).to_contain_text("pr-a")
+    card = page.locator("#goals .goal").filter(has_text="pr-a")
+    pause = card.get_by_role("button", name="Pause").bounding_box()
+    assert pause and pause["height"] >= 44, "mobile actions need a touch target"
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= window.innerWidth"
+    )

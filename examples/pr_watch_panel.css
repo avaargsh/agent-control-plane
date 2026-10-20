@@ -42,11 +42,11 @@ footer { margin-top:24px; }
 @media (max-width:750px) { .columns { grid-template-columns:1fr; } .shell { padding:12px 14px 35px; } .auth,.section { padding:16px; } }
 
 .task-toolbar { display:grid; grid-template-columns:1fr 1.5fr .65fr; gap:7px 10px; margin:0 0 10px; align-items:end; }
-.task-toolbar label { grid-row:1; margin:0; }
-.task-toolbar select,.task-toolbar input { grid-row:2; width:100%; min-width:0; height:39px; border:1px solid #d9dce2; border-radius:9px; padding:8px; background:#fff; font:inherit; }
+.task-toolbar label { margin:0 0 7px; }
+.task-toolbar select,.task-toolbar input { width:100%; min-width:0; height:39px; border:1px solid #d9dce2; border-radius:9px; padding:8px; background:#fff; font:inherit; }
 .task-toolbar select:focus-visible,.task-toolbar input:focus-visible { outline:2px solid #7b8caf; outline-offset:2px; }
 .task-status { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
-@media (max-width:500px) { .task-toolbar { grid-template-columns:1fr 1fr; } .task-toolbar label,.task-toolbar select,.task-toolbar input { grid-row:auto; } }
+@media (max-width:500px) { .task-toolbar { grid-template-columns:1fr; } }
 
 .detail-filter { display:flex; align-items:center; gap:10px; margin:10px 0; }
 .detail-filter label { margin:0; }
@@ -57,3 +57,24 @@ footer { margin-top:24px; }
 .control-entry { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:9px 0; border-bottom:1px solid var(--border); font-size:12px; }
 .control-entry:last-child { border-bottom:0; }
 .control-entry button,.task-detail > button { font-size:12px; padding:7px 10px; }
+
+/* Keep explicit status separate from the last control/action outcome. */
+.sync-controls { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.sync-state { font-size:12px; color:var(--sub); }
+.sync-state[data-state="error"] { color:#a12e3d; }
+.sync-state[data-state="loading"] { color:#3b5978; }
+.section-head { flex-wrap:wrap; }
+.task-field { min-width:0; }
+.actions { flex-wrap:wrap; }
+.goal-top { min-width:0; }
+.goal-name { overflow-wrap:anywhere; min-width:0; }
+button:focus-visible { outline:2px solid #4775b8; outline-offset:2px; }
+@media (max-width:500px) {
+  .inline { flex-wrap:wrap; }
+  .inline button { width:100%; }
+  .detail-filter { flex-wrap:wrap; }
+  .detail-filter select { flex-basis:100%; width:100%; }
+  .actions button,.task-detail button { min-height:44px; }
+  .task-toolbar select,.task-toolbar input { min-height:44px; }
+  .shell { max-width:100%; }
+}
