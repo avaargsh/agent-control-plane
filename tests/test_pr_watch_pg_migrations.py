@@ -256,3 +256,43 @@ def test_startup_v2_requires_versioned_history_not_legacy_db(isolated):
         conn.execute(SCHEMA_V2)
     with pytest.raises(MigrationError, match="unversioned"):
         PostgresWatchStore(isolated).validate_v2()
+
+
+def test_v3_prepared_control_requests_have_atomic_cas_and_no_replay_write(isolated):
+    migrations = PostgresMigrations(isolated)
+    assert migrations.upgrade(2).version == 2
+    original = _rows(isolated)
+    assert migrations.upgrade(3).version == 3
+    assert _rows(isolated)[:2] == original  # V1/V2 digests remain untouched.
+    store = PostgresWatchStore(isolated)
+    store.validate_v2()  # The existing runtime must accept additive V3.
+    store.register(user_id="alice", goal_id="g1", repo="o/r", number=12)
+    request_id = "3" * 32
+    prepared = dict(
+        user_id="alice", goal_id="g1", request_id=request_id,
+        action="pause", expected_version=0,
+    )
+    assert store.prepare_control(**prepared)["state"] == "PREPARED"
+    assert store.prepare_control(**prepared)["state"] == "PREPARED"
+    assert store.goal(user_id="alice", goal_id="g1")["version"] == 0
+    assert store.list_control_requests(user_id="bob") == []
+    with pytest.raises(AdmissionError, match="not found"):
+        store.control_request(user_id="bob", request_id=request_id)
+    with pytest.raises(AdmissionError, match="already bound"):
+        store.prepare_control(**{**prepared, "action": "cancel"})
+    with pytest.raises(AdmissionError, match="prepare request"):
+        store.transition_with_request(**{**prepared, "request_id": "4" * 32})
+    goal, replayed = store.transition_with_request(**prepared)
+    assert goal["version"] == 1 and goal["state"] == "PAUSED" and not replayed
+    assert store.control_request(user_id="alice", request_id=request_id)[
+        "committed_version"
+    ] == 1
+    goal, replayed = store.transition_with_request(**prepared)
+    assert goal["version"] == 1 and replayed
+    assert store.controls(user_id="alice", goal_id="g1")[0]["version"] == 1
+    assert len(store.list_control_requests(user_id="alice")) == 1
+    assert migrations.status().version == 3
+    assert migrations.upgrade(2).version == 3  # Never downgrade on install_v2.
+    assert store.control_request(user_id="alice", request_id=request_id)[
+        "state"
+    ] == "COMMITTED"
