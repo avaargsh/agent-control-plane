@@ -110,3 +110,26 @@ attempt causes a signal to be sent later. A durable PENDING control still
 requires explicit trusted readback/reconciliation. A PREPARED request that
 lost its original response must never be automatically executed on reload.
 Public GitHub Webhook M6 remains NO-GO.
+
+## V3 two-API-process HTTP idempotency
+
+`tests/test_pr_watch_pg_v3_http.py` runs the **real loopback HTTP handler**
+in two independent Python OS processes, both connected to one isolated
+PostgreSQL v3 schema. It verifies two distinct network-level conditions:
+
+- The identical prepared request is received by two API processes at the
+  same time. Both return a valid receipt, but only one reports
+  `replayed:false` and commits the Goal CAS; the other returns
+  `replayed:true`, without another control entry. A surviving API can
+  serve the same replay after its peer is killed.
+- Two different prepared request IDs race to commit the same Goal version.
+  Only one gets HTTP 202; the other gets HTTP 409. Its durable request
+  stays PREPARED (stale) and is never automatically advanced to a newer
+  Goal version. Cross-user readbacks are denied, and a request ID cannot
+  be rebound to another command by the same owner.
+
+This covers two independent HTTP listeners, authentication, routing,
+database contention and the durable replay response, beyond direct store
+tests. The pilot runs with its local-only Temporal bridge disabled;
+thus this result **does not** prove an external Temporal Signal was
+delivered exactly once. External M6 webhook acceptance stays NO-GO.
