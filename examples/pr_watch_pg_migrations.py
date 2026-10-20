@@ -22,16 +22,34 @@ from pr_watch_pg_store import SCHEMA_V2
 # Existing published DDL is pinned by its audit digest on first installation.
 # Modifying a previously recorded version will fail closed on next read.
 SCHEMA_V3 = """
--- Version 1/2 ledgers restricted the primary key to (1,2). Extend that
--- guard transactionally, without changing any recorded migration checksum.
+-- Extend the V1/V2 ledger check without modifying recorded checksums.
 ALTER TABLE pr_watch_pg_schema_migrations
   DROP CONSTRAINT IF EXISTS pr_watch_pg_schema_migrations_version_check;
 ALTER TABLE pr_watch_pg_schema_migrations
   ADD CONSTRAINT pr_watch_pg_schema_migrations_version_check
     CHECK(version IN (1,2,3));
 CREATE TABLE IF NOT EXISTS pr_watch_pg_control_requests (
-  user_id TEXT NOT NULL, goal_id TEXT NOT NULL,
-  request_id CHAR(32) NOT NULL CHECK(request_id ~ '^[0-9a-f]{32}
+  user_id TEXT NOT NULL,
+  goal_id TEXT NOT NULL,
+  request_id TEXT NOT NULL CHECK(
+    length(request_id)=32 AND request_id !~ '[^0-9a-f]'
+  ),
+  action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel')),
+  expected_version BIGINT NOT NULL CHECK(expected_version >= 0),
+  state TEXT NOT NULL DEFAULT 'PREPARED'
+    CHECK(state IN ('PREPARED','COMMITTED')),
+  committed_version BIGINT,
+  PRIMARY KEY(user_id,request_id),
+  FOREIGN KEY(user_id,goal_id) REFERENCES pr_watch_pg_goals(user_id,goal_id),
+  CHECK(
+    (state='PREPARED' AND committed_version IS NULL)
+    OR (state='COMMITTED' AND committed_version=expected_version+1)
+  )
+);
+CREATE INDEX IF NOT EXISTS pr_watch_pg_control_requests_user
+  ON pr_watch_pg_control_requests(user_id,goal_id,expected_version);
+"""
+SCRIPTS = {1: SCHEMA_V1, 2: SCHEMA_V2, 3: SCHEMA_V3}
 LEDGER = "pr_watch_pg_schema_migrations"
 LOCK_ID = 657805283175221
 V1 = {
