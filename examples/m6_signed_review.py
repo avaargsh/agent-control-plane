@@ -12,6 +12,7 @@ import base64
 import binascii
 import hashlib
 import json
+import os
 import re
 import stat
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from m6_acceptance_validator import validate
+from m6_materialized_evidence import verify_materialized
 
 PAYLOAD_TYPE = "application/vnd.in-toto+json"
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
@@ -51,7 +53,7 @@ def _read_regular(path: Path, limit: int) -> bytes:
         raise SignedReviewError("symlink input denied")
     try:
         with path.open("rb") as stream:
-            if not stat.S_ISREG(__import__("os").fstat(stream.fileno()).st_mode):
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
                 raise SignedReviewError("regular file required")
             data = stream.read(limit + 1)
     except OSError as exc:
@@ -130,6 +132,7 @@ def verify_signed_review(
     envelope: Mapping[str, Any],
     trusted_reviewer: TrustedReviewer,
     expected_source_commit: str,
+    evidence_root: Path,
     now: datetime,
 ) -> dict:
     """Verify signed review bytes against a separately pinned reviewer trust root.
@@ -215,9 +218,9 @@ def verify_signed_review(
     if not isinstance(predicate, dict) or set(predicate) != required:
         raise SignedReviewError("invalid signed review predicate")
     decision = predicate.get("decision")
-    if predicate.get("schema") != "m6-signed-review/v1" or decision not in {
-        "GO", "NO_GO",
-    }:
+    if predicate.get("schema") != "m6-signed-review/v1" or (
+        not isinstance(decision, str) or decision not in {"GO", "NO_GO"}
+    ):
         raise SignedReviewError("unsupported signed review decision")
     if predicate.get("manifest_sha256") != digest:
         raise SignedReviewError("signed manifest digest mismatch")
@@ -247,6 +250,11 @@ def verify_signed_review(
         verdict = validate(report)
         if verdict.get("decision") != "ELIGIBLE_FOR_INDEPENDENT_REVIEW":
             raise SignedReviewError("signed GO has incomplete or failed evidence gates")
+        materialized = verify_materialized(report, evidence_root)
+        if materialized.get("decision") != "FILES_MATCHED_NOT_RELEASED":
+            raise SignedReviewError(
+                "signed GO evidence files are missing, unsafe or mismatched"
+            )
         outcome = "SIGNED_GO_VERIFIED_NOT_RELEASED"
     else:
         outcome = "SIGNED_NO_GO_VERIFIED"
@@ -269,6 +277,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path)
     parser.add_argument("envelope", type=Path)
+    parser.add_argument("--evidence-root", type=Path, required=True,
+                        help="directory containing the exact manifest evidence files")
     parser.add_argument("--trusted-public-key", type=Path, required=True,
                         help="32 raw Ed25519 public-key bytes from out-of-band trust")
     parser.add_argument("--trusted-keyid", required=True)
@@ -291,9 +301,10 @@ def main() -> int:
                 ed25519_public_key=public_key,
             ),
             expected_source_commit=args.expected_source_commit,
+            evidence_root=args.evidence_root,
             now=datetime.now(timezone.utc),
         )
-    except (OSError, SignedReviewError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         result = {
             "schema": "m6-signed-review-verdict/v1",
             "decision": "NO_GO",
