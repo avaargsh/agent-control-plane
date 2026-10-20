@@ -3,8 +3,15 @@
   let token = "";
   let selectedTask = "";
   let refreshEpoch = 0;
+  let refreshBusy = false;
+  let refreshHadError = false;
+  const pendingControls = new Set();
   const el = (id) => document.getElementById(id);
   const msg = (text) => { el("message").textContent = String(text); };
+  const setSync = (text, state) => {
+    el("sync-state").textContent = text;
+    el("sync-state").dataset.state = state;
+  };
   const label = (text, css = "") => {
     const node = document.createElement("span");
     node.textContent = String(text);
@@ -62,42 +69,36 @@
       button.className = action === "cancel" ? "danger" : "secondary";
       button.textContent = action[0].toUpperCase() + action.slice(1);
       button.addEventListener("click", async () => {
+        if (pendingControls.has(goal.goal_id)) return;
         if (action === "cancel" && !window.confirm("Cancel " + goal.goal_id + "? This cannot be resumed.")) return;
-        button.disabled = true;
+        const actionToken = token;
+        pendingControls.add(goal.goal_id);
+        for (const controlButton of actions.querySelectorAll("button")) controlButton.disabled = true;
         try {
           const outcome = await api(
             "/api/goals/" + encodeURIComponent(goal.goal_id) + "/" + action, {
               method: "POST", body: { expected_version: goal.version }
             }
           );
+          if (actionToken !== token) return;
           const control = outcome.control;
           const signalState = control ? control.signal_state : "UNCONFIRMED";
           msg(goal.goal_id + ": " + action + " committed; Temporal " + signalState +
             (signalState === "ACKED" ? " (wake accepted, not execution proof)" :
-              " (durable action; poll fallback remains active)"));
-          await refresh();
-          if (control && (signalState === "UNKNOWN" || signalState === "PENDING")) {
-            const verify = document.createElement("button");
-            verify.type = "button";
-            verify.className = "secondary";
-            verify.textContent = "Verify signal";
-            verify.addEventListener("click", async () => {
-              verify.disabled = true;
-              try {
-                const status = await api(
-                  "/api/goals/" + encodeURIComponent(goal.goal_id) +
-                    "/controls/" + control.version + "/reconcile",
-                  { method: "POST", body: {} }
-                );
-                msg("Temporal signal history: " + status.control.signal_state +
-                  " (missing proof never permits blind resend)");
-              } catch (error) { msg(error.message); }
-              finally { verify.disabled = false; }
-            });
-            el("message").after(verify);
-          }
-        } catch (error) { msg(error.message); button.disabled = false; }
+              " (durable action; poll fallback remains active)") +
+            (["UNKNOWN", "PENDING"].includes(signalState) ?
+              " — Inspect task to reconcile the uncertain signal." : ""));
+        } catch (error) {
+          if (actionToken === token) msg(error.message);
+        } finally {
+          pendingControls.delete(goal.goal_id);
+          // Always re-read the authoritative version, including HTTP 409.
+          // Never retry a rejected CAS action automatically.
+          if (actionToken === token) await refresh();
+          for (const controlButton of actions.querySelectorAll("button")) controlButton.disabled = false;
+        }
       });
+      if (pendingControls.has(goal.goal_id)) button.disabled = true;
       actions.append(button);
     }
     const inspect = document.createElement("button");
@@ -107,6 +108,7 @@
     inspect.addEventListener("click", () => {
       selectedTask = goal.goal_id;
       el("activity-goal").value = selectedTask;
+      el("task-detail").replaceChildren(label("Loading task details…", "muted"));
       refresh();
     });
     actions.append(inspect);
@@ -118,7 +120,11 @@
     const epoch = ++refreshEpoch;
     const currentToken = token;
     const currentTask = selectedTask;
-    const isCurrent = () => epoch === refreshEpoch && currentToken === token && currentTask === selectedTask;
+    const isRefreshCurrent = () => epoch === refreshEpoch && currentToken === token;
+    const isCurrent = () => isRefreshCurrent() && currentTask === selectedTask;
+    refreshBusy = true;
+    el("refresh").disabled = true;
+    setSync("Refreshing…", "loading");
     try {
       const params = new URLSearchParams();
       const state = el("task-state").value;
@@ -149,9 +155,26 @@
       for (const id of choices) options.push(new Option(id, id));
       activitySelect.replaceChildren(...options);
       activitySelect.value = selectedTask;
+      const scopedEvents = events.events.filter(
+        (event) => !selectedTask || event.goal_id === selectedTask
+      );
+      const nodes = scopedEvents.slice().reverse().map((event) => {
+        const row = document.createElement("article");
+        row.className = "event";
+        row.append(label(event.kind, "event-type"));
+        const body = document.createElement("p");
+        body.textContent = event.summary;
+        row.append(body);
+        row.append(label(event.goal_id + " · " + event.occurred_at + " · " +
+          (event.emitted ? "outbox processed" : "pending outbox"), "muted"));
+        return row;
+      });
+      el("events").replaceChildren(...nodes);
+      if (!nodes.length) el("events").append(label("No events yet.", "muted"));
       const detail = el("task-detail");
       detail.replaceChildren();
       if (selectedTask) {
+        detail.append(label("Loading task details…", "muted"));
         // Fetch the single owner-scoped Task directly rather than treating
         // the filtered list as authoritative for detail.
         const response = await api("/api/tasks/" + encodeURIComponent(selectedTask));
@@ -168,12 +191,15 @@
         const warning = document.createElement("p");
         warning.className = "muted";
         warning.textContent = "Business outcome independently verified: NO";
-        detail.append(title, description, warning);
+        detail.replaceChildren(title, description, warning);
+        const loadingControls = label("Loading enrollment and controls…", "muted");
+        detail.append(loadingControls);
         const [launchResponse, controlResponse] = await Promise.all([
           api("/api/goals/" + encodeURIComponent(selectedTask) + "/launch"),
           api("/api/goals/" + encodeURIComponent(selectedTask) + "/controls"),
         ]);
         if (!isCurrent()) return;
+        loadingControls.remove();
         const launch = launchResponse.launch;
         const launchLine = document.createElement("p");
         launchLine.textContent = "Enrollment: " + launch.state +
@@ -238,38 +264,34 @@
       } else {
         detail.append(label("Select Inspect on a task to see its details.", "muted"));
       }
-      const scopedEvents = events.events.filter(
-        (event) => !selectedTask || event.goal_id === selectedTask
-      );
-      const nodes = scopedEvents.slice().reverse().map((event) => {
-        const row = document.createElement("article");
-        row.className = "event";
-        row.append(label(event.kind, "event-type"));
-        const body = document.createElement("p");
-        body.textContent = event.summary;
-        row.append(body);
-        row.append(label(event.goal_id + " · " + event.occurred_at + " · " +
-          (event.emitted ? "outbox processed" : "pending outbox"), "muted"));
-        return row;
-      });
-      el("events").replaceChildren(...nodes);
-      if (!nodes.length) el("events").append(label("No events yet.", "muted"));
+      if (refreshHadError) { msg(""); refreshHadError = false; }
+      setSync("Up to date", "ready");
     } catch (error) {
       if (isCurrent()) {
+        refreshHadError = true;
+        setSync("Update failed", "error");
         el("goals").replaceChildren(label("Unable to load tasks; retry Refresh.", "muted"));
         el("task-detail").replaceChildren(label("Task details unavailable.", "muted"));
         el("events").replaceChildren(label("Activity unavailable.", "muted"));
         msg(error.message);
+      }
+    } finally {
+      if (isRefreshCurrent()) {
+        refreshBusy = false;
+        el("refresh").disabled = false;
       }
     }
   };
   el("connect").addEventListener("click", async () => {
     ++refreshEpoch;
     token = el("token").value;
+    refreshHadError = false;
+    pendingControls.clear();
     selectedTask = "";
     el("goals").replaceChildren(label("Loading tasks…", "muted"));
     el("task-detail").replaceChildren(label("Select a task to inspect.", "muted"));
     el("events").replaceChildren(label("Loading activity…", "muted"));
+    setSync("Connecting…", "loading");
     el("token").value = "";
     msg("");
     await refresh();
@@ -280,6 +302,7 @@
   el("task-limit").addEventListener("change", refresh);
   el("activity-goal").addEventListener("change", () => {
     selectedTask = el("activity-goal").value;
+    el("task-detail").replaceChildren(label("Loading task details…", "muted"));
     refresh();
   });
   el("create").addEventListener("submit", async (event) => {
@@ -301,5 +324,5 @@
       await refresh();
     } catch (error) { msg(error.message); }
   });
-  setInterval(() => { if (token) refresh(); }, 5000);
+  setInterval(() => { if (token && !refreshBusy) refresh(); }, 5000);
 })();
