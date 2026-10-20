@@ -1,6 +1,7 @@
 (() => {
   "use strict";
   let token = "";
+  let sessionEpoch = 0;
   let selectedTask = "";
   let refreshEpoch = 0;
   let refreshBusy = false;
@@ -72,6 +73,7 @@
         if (pendingControls.has(goal.goal_id)) return;
         if (action === "cancel" && !window.confirm("Cancel " + goal.goal_id + "? This cannot be resumed.")) return;
         const actionToken = token;
+        const actionSession = sessionEpoch;
         pendingControls.add(goal.goal_id);
         for (const controlButton of actions.querySelectorAll("button")) controlButton.disabled = true;
         try {
@@ -80,7 +82,7 @@
               method: "POST", body: { expected_version: goal.version }
             }
           );
-          if (actionToken !== token) return;
+          if (actionToken !== token || actionSession !== sessionEpoch) return;
           const control = outcome.control;
           const signalState = control ? control.signal_state : "UNCONFIRMED";
           msg(goal.goal_id + ": " + action + " committed; Temporal " + signalState +
@@ -89,12 +91,12 @@
             (["UNKNOWN", "PENDING"].includes(signalState) ?
               " — Inspect task to reconcile the uncertain signal." : ""));
         } catch (error) {
-          if (actionToken === token) msg(error.message);
+          if (actionToken === token && actionSession === sessionEpoch) msg(error.message);
         } finally {
-          pendingControls.delete(goal.goal_id);
+          if (actionSession === sessionEpoch) pendingControls.delete(goal.goal_id);
           // Always re-read the authoritative version, including HTTP 409.
           // Never retry a rejected CAS action automatically.
-          if (actionToken === token) await refresh();
+          if (actionToken === token && actionSession === sessionEpoch) await refresh();
           for (const controlButton of actions.querySelectorAll("button")) controlButton.disabled = false;
         }
       });
@@ -181,6 +183,7 @@
         if (!isCurrent()) return;
         const task = response.task;
         const detailTaskId = selectedTask;
+        const detailSession = sessionEpoch;
         const title = document.createElement("strong");
         title.textContent = task.task_id + " · " + task.state;
         const description = document.createElement("p");
@@ -217,10 +220,11 @@
               "/api/goals/" + encodeURIComponent(detailTaskId) +
                 "/launch/reconcile", { method: "POST", body: {} }
             );
+            if (detailSession !== sessionEpoch) return;
             msg("Enrollment reconciliation: " + result.launch.state +
               " (does not prove workflow completion)");
             await refresh();
-          } catch (error) { msg(error.message); }
+          } catch (error) { if (detailSession === sessionEpoch) msg(error.message); }
           finally { launchVerify.disabled = false; }
         });
         if (["UNKNOWN", "IN_FLIGHT", "PENDING"].includes(launch.state)) {
@@ -251,10 +255,11 @@
                     "/controls/" + control.version + "/reconcile",
                   { method: "POST", body: {} }
                 );
+                if (detailSession !== sessionEpoch) return;
                 msg("Control signal reconciliation: " +
                   result.control.signal_state + " (not execution proof)");
                 await refresh();
-              } catch (error) { msg(error.message); }
+              } catch (error) { if (detailSession === sessionEpoch) msg(error.message); }
               finally { reconcile.disabled = false; }
             });
             line.append(reconcile);
@@ -283,8 +288,11 @@
     }
   };
   el("connect").addEventListener("click", async () => {
+    const enteredToken = el("token").value;
+    if (!enteredToken) { msg("Enter a local token to connect."); return; }
     ++refreshEpoch;
-    token = el("token").value;
+    ++sessionEpoch;
+    token = enteredToken;
     refreshHadError = false;
     pendingControls.clear();
     selectedTask = "";
@@ -307,11 +315,16 @@
   });
   el("create").addEventListener("submit", async (event) => {
     event.preventDefault();
+    const createSession = sessionEpoch;
+    const submit = el("create").querySelector('button[type="submit"]');
+    if (submit.disabled) return;
+    submit.disabled = true;
     try {
       const outcome = await api("/api/goals", { method: "POST", body: {
         goal_id: el("goal-id").value, repo: el("repo").value,
         number: Number(el("number").value),
       }});
+      if (createSession !== sessionEpoch) return;
       const launch = outcome.launch;
       const detail = launch && launch.mode === "LOCAL_ONLY"
         ? "Local-only: configure the trusted Temporal bridge to auto-enroll."
@@ -322,7 +335,8 @@
       msg("Goal registered. " + detail);
       el("create").reset();
       await refresh();
-    } catch (error) { msg(error.message); }
+    } catch (error) { if (createSession === sessionEpoch) msg(error.message); }
+    finally { submit.disabled = false; }
   });
   setInterval(() => { if (token && !refreshBusy) refresh(); }, 5000);
 })();
