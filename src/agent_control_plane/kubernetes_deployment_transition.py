@@ -23,6 +23,10 @@ from .kubernetes_transition_plan import (
     validate_deployment_scale_plan_precondition,
 )
 from .policy_replay import TransitionPolicyInput
+from .live_effect_boundary import (
+    LiveEffectBoundaryGate,
+    LiveEffectAdmissionDenied,
+)
 from .provable_execution import (
     ObservationSnapshot,
     TransitionPlan,
@@ -139,6 +143,7 @@ class ContextBoundExecutionContext:
     approval_verifier: HMACApprovalVerifier
     authority_reservation: AuthorityReservation | None = None
     authority_reservation_store: SQLiteAuthorityReservationStore | None = None
+    live_effect_gate: LiveEffectBoundaryGate | None = None
 
 
 def _authority_reservation_for_execution(
@@ -776,6 +781,35 @@ class KubernetesDeploymentScaleProvider:
                 "replicas": desired_replicas,
             },
         }
+
+        # Opt-in: read *current* external policy, principal, approval and
+        # operation authority at the final provider boundary, after K8s UID,
+        # generation and resourceVersion preconditions were resolved.
+        # Historical DSSE outcome proofs are deliberately NOT accepted here.
+        if (
+            context_binding is not None
+            and context_binding.live_effect_gate is not None
+        ):
+            try:
+                context_binding.live_effect_gate.assert_current(
+                    work_id=context_binding.proposal.work_id,
+                    operation_id=operation_id,
+                    subject=transition.subject,
+                    resource_generation=generation,
+                    action=action,
+                    authorization=authorization,
+                    approval_hash=(
+                        context_binding.signed_approval.approval.approval_hash
+                    ),
+                    policy_input_hash=context_binding.policy_input.input_hash,
+                    active_lease=active_lease,
+                    caller=caller,
+                )
+            except ProtocolViolation as exc:
+                # This is unambiguously before the first provider PATCH.
+                # The coordinator may safely journal NOT_APPLIED and release
+                # its authority reservation without blind side-effect retry.
+                raise LiveEffectAdmissionDenied(str(exc)) from exc
 
         verified_after_uncertain = False
         try:
