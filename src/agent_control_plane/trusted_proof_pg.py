@@ -16,6 +16,12 @@ from psycopg.errors import UniqueViolation
 from psycopg.rows import dict_row
 
 from .state_transition_protocol import ProtocolViolation
+from .trusted_proof_pg_security import (
+    grant_runtime_access,
+    install_security_boundary,
+    require_schema_operator,
+    validate_security_boundary,
+)
 from .trusted_proof_envelope import (
     CONTEXT_KEYS,
     TrustedSigner,
@@ -148,10 +154,12 @@ class TrustedProofPostgres:
                         or len(defs.get("f", [])) != 1
                         or "ON DELETE RESTRICT" not in defs["f"][0]):
                     raise ProtocolViolation("trusted receipt uniqueness or FK drift")
+        validate_security_boundary(conn)
 
     def install(self) -> None:
         """Explicit operator action only; never invoked during verification."""
         with self._connection() as conn:
+            require_schema_operator(conn)
             conn.execute("SET LOCAL lock_timeout = '8s'")
             conn.execute("SELECT pg_advisory_xact_lock(%s)", (ADVISORY_LOCK,))
             names = (
@@ -175,7 +183,17 @@ class TrustedProofPostgres:
                 )
             elif not all(present):
                 raise ProtocolViolation("partial trusted proof schema; review required")
+            # Existing SQL v1 and its pinned checksum stay untouched. This
+            # separately versioned function is an explicit operator upgrade.
+            install_security_boundary(conn)
             self._verify_schema(conn)
+
+    def grant_runtime(self, role: str) -> None:
+        """Operator-only GRANT with postcondition denying signer/receipt writes."""
+        with self._connection() as conn:
+            require_schema_operator(conn)
+            self._verify_schema(conn)
+            grant_runtime_access(conn, role)
 
     def validate(self) -> None:
         """Read-only validation; no implicit schema creation."""
@@ -225,7 +243,7 @@ class TrustedProofPostgres:
         nonce = expected_context["nonce"]
         with self._connection() as conn:
             self._verify_schema(conn)
-            # Row lock serializes *participating* revocations and acceptance.
+            # SECURITY DEFINER row lock serializes revocations and acceptance.
             # A revoked or rotated signer is denied even on exact redelivery.
             # No network request is made while holding the lock.
             keyid = None
@@ -235,11 +253,11 @@ class TrustedProofPostgres:
                 keyid = envelope["signatures"][0].get("keyid")
             if not isinstance(keyid, str) or not keyid:
                 raise ProtocolViolation("missing signed key identifier")
+            # SECURITY DEFINER locks the exact signer row as the table owner.
+            # Runtime requires EXECUTE, not signer-table UPDATE privilege.
             signer_row = conn.execute(
                 """SELECT public_key, policy_revision, max_age_seconds, enabled
-                   FROM public.acp_trusted_proof_signers
-                   WHERE tenant_id=%s AND project_id=%s AND keyid=%s
-                   FOR SHARE""",
+                   FROM public.acp_trusted_proof_read_signer(%s,%s,%s)""",
                 (tenant, project, keyid),
             ).fetchone()
             if signer_row is None or signer_row["enabled"] is not True:
@@ -283,7 +301,7 @@ class TrustedProofPostgres:
             row = conn.execute(
                 """SELECT * FROM public.acp_trusted_proof_receipts
                    WHERE tenant_id=%s AND project_id=%s
-                     AND cluster_id=%s AND operation_id=%s FOR UPDATE""",
+                     AND cluster_id=%s AND operation_id=%s""",
                 (tenant, project, cluster, operation),
             ).fetchone()
             if row is None:
