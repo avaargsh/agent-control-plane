@@ -15,11 +15,11 @@ import pytest
 
 psycopg = pytest.importorskip("psycopg")
 pytest.importorskip("cryptography")
-from psycopg import conninfo, sql
+from psycopg import conninfo, sql  # noqa: E402
 
-from agent_control_plane.state_transition_protocol import ProtocolViolation
-from agent_control_plane.trusted_proof_pg import TrustedProofPostgres
-from test_trusted_proof_envelope import _case, _signed
+from agent_control_plane.state_transition_protocol import ProtocolViolation  # noqa: E402
+from agent_control_plane.trusted_proof_pg import TrustedProofPostgres  # noqa: E402
+from test_trusted_proof_envelope import _case, _signed  # noqa: E402
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def store():
     scoped = conninfo.make_conninfo(admin, dbname=dbname)
     try:
         client = TrustedProofPostgres(scoped)
-        with pytest.raises(Exception):
+        with pytest.raises(psycopg.errors.UndefinedTable):
             client.validate()  # no implicit request-time migrations
         client.install()
         client.install()  # operator idempotence
