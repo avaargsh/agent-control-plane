@@ -124,6 +124,25 @@ def _runtime_privileges(conn: Any, role: str) -> dict[str, bool]:
     ).fetchone()
 
 
+def require_schema_operator(conn: Any) -> None:
+    """Do not let an application credential invoke operator-only upgrade APIs."""
+    row = conn.execute(
+        """SELECT c.oid AS table_oid,
+                  pg_has_role(r.oid, c.relowner, 'MEMBER') AS is_owner
+           FROM pg_class c CROSS JOIN pg_roles r
+           WHERE c.oid=to_regclass('public.acp_trusted_proof_signers')
+             AND r.rolname=current_user"""
+    ).fetchone()
+    if row is not None:
+        if row["is_owner"] is not True:
+            raise ProtocolViolation("trusted proof schema owner required")
+    elif conn.execute(
+        "SELECT has_schema_privilege(current_user, 'public', 'CREATE') "
+        "AS can_create"
+    ).fetchone()["can_create"] is not True:
+        raise ProtocolViolation("trusted proof operator CREATE privilege required")
+
+
 def grant_runtime_access(conn: Any, role: str) -> None:
     """Operator action: grant only what signed-proof verification needs.
 
@@ -133,6 +152,7 @@ def grant_runtime_access(conn: Any, role: str) -> None:
     if not isinstance(role, str) or not role or len(role) > 63:
         raise ProtocolViolation("explicit existing runtime role required")
     validate_security_boundary(conn)
+    require_schema_operator(conn)
     owner = conn.execute(
         "SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, "
         "rolreplication, rolbypassrls "
