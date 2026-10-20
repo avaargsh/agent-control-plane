@@ -19,7 +19,7 @@ from psycopg import conninfo, sql  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 
 import pr_watch_pg_migrations as migration_module  # noqa: E402
-from pr_watch_pg_admission import SCHEMA_V1, PostgresAdmission  # noqa: E402
+from pr_watch_pg_admission import AdmissionError, SCHEMA_V1, PostgresAdmission  # noqa: E402
 from pr_watch_pg_migrations import (  # noqa: E402
     MigrationError, PostgresMigrations,
 )
