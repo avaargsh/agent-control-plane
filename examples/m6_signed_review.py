@@ -86,7 +86,7 @@ def _unique_json(raw: bytes, limit: int) -> dict:
         )
     except SignedReviewError:
         raise
-    except (ValueError, UnicodeError, TypeError) as exc:
+    except (ValueError, TypeError) as exc:
         raise SignedReviewError("invalid JSON") from exc
     if not isinstance(value, dict):
         raise SignedReviewError("JSON object required")
