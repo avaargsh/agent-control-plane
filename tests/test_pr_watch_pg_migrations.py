@@ -280,6 +280,9 @@ def test_v3_prepared_control_requests_have_atomic_cas_and_no_replay_write(isolat
         store.control_request(user_id="bob", request_id=request_id)
     with pytest.raises(AdmissionError, match="already bound"):
         store.prepare_control(**{**prepared, "action": "cancel"})
+    store.register(user_id="alice", goal_id="g2", repo="o/r", number=13)
+    with pytest.raises(AdmissionError, match="already bound"):
+        store.prepare_control(**{**prepared, "goal_id": "g2"})
     with pytest.raises(AdmissionError, match="prepare request"):
         store.transition_with_request(**{**prepared, "request_id": "4" * 32})
     goal, replayed = store.transition_with_request(**prepared)
