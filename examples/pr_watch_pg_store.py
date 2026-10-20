@@ -6,6 +6,7 @@ Install explicitly with install_v2(); no request-time DDL or silent mixed mode.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import uuid4
@@ -102,7 +103,7 @@ class PostgresWatchStore(PostgresAdmission):
         """Fail closed on old, unversioned or drifted schemas, without DDL."""
         from pr_watch_pg_migrations import PostgresMigrations
 
-        PostgresMigrations(self._dsn).require_version(2)
+        PostgresMigrations(self._dsn).require_minimum_version(2)
         with self._connection() as conn:
             for table in (
                 "pr_watch_pg_goals", "pr_watch_pg_launches",
@@ -159,6 +160,144 @@ class PostgresWatchStore(PostgresAdmission):
                 (user_id, goal_id, version, action),
             )
         return self.goal(user_id=user_id, goal_id=goal_id)
+
+    @staticmethod
+    def _check_request_id(request_id: str) -> None:
+        if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f]{32}", request_id):
+            raise AdmissionError("invalid client request ID")
+
+    def prepare_control(
+        self, *, user_id: str, goal_id: str, request_id: str,
+        action: str, expected_version: int,
+    ) -> dict:
+        """Persist a request before performing its Goal state transition."""
+        self._check_request_id(request_id)
+        if action not in ("pause", "resume", "cancel") or (
+            type(expected_version) is not int or expected_version < 0
+        ):
+            raise AdmissionError("invalid control preparation")
+        from pr_watch_pg_migrations import PostgresMigrations
+        PostgresMigrations(self._dsn).require_version(3)
+        with self._connection() as conn:
+            goal = conn.execute(
+                """SELECT state,version FROM pr_watch_pg_goals
+                   WHERE user_id=%s AND goal_id=%s FOR UPDATE""",
+                (user_id, goal_id),
+            ).fetchone()
+            if goal is None:
+                raise AdmissionError("goal not found within user scope")
+            existing = conn.execute(
+                """SELECT * FROM pr_watch_pg_control_requests
+                   WHERE user_id=%s AND request_id=%s FOR UPDATE""",
+                (user_id, request_id),
+            ).fetchone()
+            if existing:
+                if (existing["goal_id"], existing["action"], existing["expected_version"]) != (
+                    goal_id, action, expected_version
+                ):
+                    raise AdmissionError("request ID already bound to another command")
+                return dict(existing)
+            valid = {
+                "pause": ("RUNNING",),
+                "resume": ("PAUSED",),
+                "cancel": ("RUNNING", "PAUSED"),
+            }
+            if goal["version"] != expected_version or goal["state"] not in valid[action]:
+                raise AdmissionError("stale goal version or illegal lifecycle transition")
+            conn.execute(
+                """INSERT INTO pr_watch_pg_control_requests
+                   (user_id,goal_id,request_id,action,expected_version)
+                   VALUES (%s,%s,%s,%s,%s)""",
+                (user_id, goal_id, request_id, action, expected_version),
+            )
+            record = conn.execute(
+                """SELECT * FROM pr_watch_pg_control_requests
+                   WHERE user_id=%s AND request_id=%s""",
+                (user_id, request_id),
+            ).fetchone()
+            return dict(record)
+
+    def control_request(self, *, user_id: str, request_id: str) -> dict:
+        self._check_request_id(request_id)
+        with self._connection() as conn:
+            row = conn.execute(
+                """SELECT * FROM pr_watch_pg_control_requests
+                   WHERE user_id=%s AND request_id=%s""",
+                (user_id, request_id),
+            ).fetchone()
+        if row is None:
+            raise AdmissionError("control request not found within user scope")
+        return dict(row)
+
+    def list_control_requests(self, *, user_id: str, limit: int = 100) -> list[dict]:
+        if not _id(user_id) or type(limit) is not int or not 1 <= limit <= 100:
+            raise AdmissionError("invalid scoped control request limit")
+        with self._connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM pr_watch_pg_control_requests
+                   WHERE user_id=%s ORDER BY goal_id,expected_version DESC LIMIT %s""",
+                (user_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def transition_with_request(
+        self, *, user_id: str, goal_id: str, action: str,
+        expected_version: int, request_id: str,
+    ) -> tuple[dict, bool]:
+        """CAS + journal + request receipt in one PG transaction; no signal on replay."""
+        self._check_request_id(request_id)
+        valid = {
+            "pause": (("RUNNING",), "PAUSED"),
+            "resume": (("PAUSED",), "RUNNING"),
+            "cancel": (("RUNNING", "PAUSED"), "CANCELLED"),
+        }
+        if action not in valid or type(expected_version) is not int or expected_version < 0:
+            raise AdmissionError("invalid action or expected version")
+        from pr_watch_pg_migrations import PostgresMigrations
+        PostgresMigrations(self._dsn).require_version(3)
+        with self._connection() as conn:
+            goal = conn.execute(
+                """SELECT state,version FROM pr_watch_pg_goals
+                   WHERE user_id=%s AND goal_id=%s FOR UPDATE""",
+                (user_id, goal_id),
+            ).fetchone()
+            if goal is None:
+                raise AdmissionError("goal not found within user scope")
+            req = conn.execute(
+                """SELECT * FROM pr_watch_pg_control_requests
+                   WHERE user_id=%s AND request_id=%s FOR UPDATE""",
+                (user_id, request_id),
+            ).fetchone()
+            if req is None:
+                raise AdmissionError("prepare request before execution")
+            if (req["goal_id"], req["action"], req["expected_version"]) != (
+                goal_id, action, expected_version
+            ):
+                raise AdmissionError("request ID already bound to another command")
+            if req["state"] == "COMMITTED":
+                replayed = True
+            else:
+                sources, target = valid[action]
+                if goal["state"] not in sources or goal["version"] != expected_version:
+                    raise AdmissionError("stale version or invalid lifecycle transition")
+                conn.execute(
+                    """UPDATE pr_watch_pg_goals SET state=%s,version=%s
+                       WHERE user_id=%s AND goal_id=%s""",
+                    (target, expected_version + 1, user_id, goal_id),
+                )
+                conn.execute(
+                    """INSERT INTO pr_watch_pg_controls
+                       (user_id,goal_id,version,action) VALUES (%s,%s,%s,%s)""",
+                    (user_id, goal_id, expected_version + 1, action),
+                )
+                conn.execute(
+                    """UPDATE pr_watch_pg_control_requests
+                       SET state='COMMITTED',committed_version=%s
+                       WHERE user_id=%s AND request_id=%s""",
+                    (expected_version + 1, user_id, request_id),
+                )
+                replayed = False
+        return self.goal(user_id=user_id, goal_id=goal_id), replayed
 
     def control(self, *, user_id: str, goal_id: str, version: int) -> dict:
         if not _id(user_id) or not _id(goal_id) or type(version) is not int or version < 1:
