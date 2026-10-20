@@ -23,6 +23,7 @@ from .kubernetes_deployment_transition import (
     DeploymentScaleReceipt,
     KubernetesDeploymentScaleProvider,
 )
+from .live_effect_boundary import LiveEffectAdmissionDenied
 from .provable_execution import (
     PlanAuthorizationBinding,
     PlanExecutionFence,
@@ -291,20 +292,40 @@ class KubernetesDeploymentExecutionCoordinator:
                 "PREPARED attempt lost plan execution admission binding"
             )
 
-        receipt = self.provider.execute_context_bound(
-            transition=transition,
-            evidence=evidence,
-            outcome_contract=outcome_contract,
-            action=action,
-            authorization=authorization,
-            fence=fence,
-            active_lease=active_lease,
-            caller=caller,
-            now=self.clock(),
-            operation_id=attempt.operation_id,
-            execution_plan=prepared.plan,
-            context_binding=prepared.context_binding,
-        )
+        try:
+            receipt = self.provider.execute_context_bound(
+                transition=transition,
+                evidence=evidence,
+                outcome_contract=outcome_contract,
+                action=action,
+                authorization=authorization,
+                fence=fence,
+                active_lease=active_lease,
+                caller=caller,
+                now=self.clock(),
+                operation_id=attempt.operation_id,
+                execution_plan=prepared.plan,
+                context_binding=prepared.context_binding,
+            )
+        except LiveEffectAdmissionDenied:
+            # The gate executes strictly before patch_deployment. Unlike a
+            # provider timeout, this proves no write RPC was attempted.
+            completed_at = self.clock()
+            aborted = self.journal.abort_not_applied(
+                attempt,
+                completed_at=completed_at,
+                result={
+                    "status": "NOT_APPLIED",
+                    "reason": "live authority denied before provider PATCH",
+                    "plan_hash": prepared.plan.plan_hash,
+                },
+            )
+            if aborted.authority_reservation is not None:
+                self.reservation_store.release_after_terminal(
+                    aborted.authority_reservation,
+                    now=completed_at,
+                )
+            raise
         if receipt.plan_hash != attempt.transition_plan_hash:
             raise ProtocolViolation(
                 "provider receipt transition plan does not match PREPARED"
