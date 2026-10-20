@@ -155,6 +155,71 @@
         warning.className = "muted";
         warning.textContent = "Business outcome independently verified: NO";
         detail.append(title, description, warning);
+        const [launchResponse, controlResponse] = await Promise.all([
+          api("/api/goals/" + encodeURIComponent(selectedTask) + "/launch"),
+          api("/api/goals/" + encodeURIComponent(selectedTask) + "/controls"),
+        ]);
+        const launch = launchResponse.launch;
+        const launchLine = document.createElement("p");
+        launchLine.textContent = "Enrollment: " + launch.state +
+          " · " + (launch.mode || "UNSPECIFIED") +
+          " · workflow " + (launch.workflow_status || "NOT_OBSERVED");
+        detail.append(launchLine);
+        const launchVerify = document.createElement("button");
+        launchVerify.type = "button";
+        launchVerify.className = "secondary";
+        launchVerify.textContent = "Reconcile enrollment";
+        launchVerify.addEventListener("click", async () => {
+          launchVerify.disabled = true;
+          try {
+            const result = await api(
+              "/api/goals/" + encodeURIComponent(selectedTask) +
+                "/launch/reconcile", { method: "POST", body: {} }
+            );
+            msg("Enrollment reconciliation: " + result.launch.state +
+              " (does not prove workflow completion)");
+            await refresh();
+          } catch (error) { msg(error.message); }
+          finally { launchVerify.disabled = false; }
+        });
+        if (["UNKNOWN", "IN_FLIGHT", "PENDING"].includes(launch.state)) {
+          detail.append(launchVerify);
+        }
+        const controlsTitle = document.createElement("strong");
+        controlsTitle.textContent = "Control journal";
+        detail.append(controlsTitle);
+        const controls = controlResponse.controls.slice().reverse();
+        if (!controls.length) {
+          detail.append(label("No control actions recorded.", "muted"));
+        }
+        for (const control of controls) {
+          const line = document.createElement("div");
+          line.className = "control-entry";
+          line.append(label(control.action + " · v" + control.version +
+            " · Temporal signal " + control.signal_state));
+          if (["UNKNOWN", "PENDING"].includes(control.signal_state)) {
+            const reconcile = document.createElement("button");
+            reconcile.type = "button";
+            reconcile.className = "secondary";
+            reconcile.textContent = "Reconcile signal";
+            reconcile.addEventListener("click", async () => {
+              reconcile.disabled = true;
+              try {
+                const result = await api(
+                  "/api/goals/" + encodeURIComponent(selectedTask) +
+                    "/controls/" + control.version + "/reconcile",
+                  { method: "POST", body: {} }
+                );
+                msg("Control signal reconciliation: " +
+                  result.control.signal_state + " (not execution proof)");
+                await refresh();
+              } catch (error) { msg(error.message); }
+              finally { reconcile.disabled = false; }
+            });
+            line.append(reconcile);
+          }
+          detail.append(line);
+        }
       } else {
         detail.append(label("Select Inspect on a task to see its details.", "muted"));
       }
