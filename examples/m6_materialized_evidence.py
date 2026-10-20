@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path, PurePosixPath
 
 from m6_acceptance_validator import GATES, validate
@@ -26,7 +28,7 @@ _PAIR = (
 
 
 def _read_evidence(root: Path, relative: object) -> bytes:
-    """Reject absolute/traversal/links and bound reads to 4 MiB per gate."""
+    """Open bounded evidence through pinned directory descriptors, no symlinks."""
     if not isinstance(relative, str) or len(relative) > 512 or not relative:
         raise ValueError("invalid evidence path")
     if "\\" in relative:
@@ -37,15 +39,44 @@ def _read_evidence(root: Path, relative: object) -> bytes:
         for part in path.parts
     ):
         raise ValueError("invalid evidence path")
-    candidate = root
-    for component in path.parts:
-        candidate = candidate / component
-        if candidate.is_symlink():
-            raise ValueError("symbolic link in evidence path")
-    if not candidate.is_file():
-        raise ValueError("evidence file not found")
-    with candidate.open("rb") as stream:
-        data = stream.read(_MAX_BYTES + 1)
+    if root.is_symlink():
+        raise ValueError("symbolic link in evidence path")
+    directory_flags = (
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    )
+    file_flags = (
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    )
+    root_fd = current_fd = -1
+    opened_dirs: list[int] = []
+    try:
+        # Resolve the selected root once, then pin it with O_NOFOLLOW.
+        resolved_root = root.resolve(strict=True)
+        root_fd = os.open(resolved_root, directory_flags)
+        current_fd = root_fd
+        for component in path.parts[:-1]:
+            next_fd = os.open(
+                component, directory_flags, dir_fd=current_fd,
+            )
+            opened_dirs.append(next_fd)
+            current_fd = next_fd
+        descriptor = os.open(path.parts[-1], file_flags, dir_fd=current_fd)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ValueError("regular evidence file required")
+            with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                data = stream.read(_MAX_BYTES + 1)
+        finally:
+            os.close(descriptor)
+    except OSError as exc:
+        raise ValueError("evidence file missing or unsafe") from exc
+    finally:
+        for descriptor in reversed(opened_dirs):
+            os.close(descriptor)
+        if root_fd >= 0:
+            os.close(root_fd)
     if not data or len(data) > _MAX_BYTES:
         raise ValueError("evidence file empty or exceeds byte limit")
     return data
