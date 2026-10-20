@@ -86,6 +86,7 @@ def test_restricted_role_verifies_and_deduplicates_without_table_update(
 @pytest.mark.parametrize("statement", [
     "SELECT * FROM public.acp_trusted_proof_signers",
     "UPDATE public.acp_trusted_proof_signers SET enabled=TRUE",
+    "DELETE FROM public.acp_trusted_proof_signers",
     "INSERT INTO public.acp_trusted_proof_signers "
     "(tenant_id,project_id,keyid,public_key,policy_revision,max_age_seconds) "
     "VALUES ('t','p','k',decode(repeat('ab',32),'hex'),'v1',10)",
@@ -196,3 +197,19 @@ def test_restricted_role_fails_if_policy_changes(tmp_path, store, verifier_role)
             proof_mapping=case[0], expected_context=case[1],
             envelope=_signed(case[3], case[4]),
         )
+
+
+@pytest.mark.parametrize("privilege", ["DELETE", "TRUNCATE"])
+def test_operator_refuses_roles_with_preexisting_signer_write_privileges(
+    store, verifier_role, privilege,
+):
+    _, role = verifier_role
+    with store._connection() as conn:
+        conn.execute(
+            sql.SQL("GRANT " + privilege + " ON "
+                    "public.acp_trusted_proof_signers TO {}").format(
+                sql.Identifier(role)
+            )
+        )
+    with pytest.raises(ProtocolViolation, match="exceed least-privilege"):
+        store.grant_runtime(role)
