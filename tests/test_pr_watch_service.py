@@ -422,3 +422,17 @@ def test_panel_exposes_scoped_launch_and_control_reconciliation(tmp_path):
         )
         assert status == 200
         assert json.loads(data)["launch"]["mode"] == "LOCAL_ONLY"
+
+
+def test_panel_discards_stale_async_results_and_confirms_cancel(tmp_path):
+    with server(tmp_path) as api:
+        status, script, _ = request(api, "GET", "/pr-watch-panel.js")
+        assert status == 200
+        assert "const epoch = ++refreshEpoch" in script
+        assert "if (!isCurrent()) return;" in script
+        assert "requestToken !== token" in script
+        assert "const detailTaskId = selectedTask" in script
+        assert 'encodeURIComponent(detailTaskId)' in script
+        assert 'window.confirm("Cancel "' in script
+        assert "innerHTML" not in script
+        assert "localStorage" not in script
