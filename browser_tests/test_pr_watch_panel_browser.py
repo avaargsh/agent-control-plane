@@ -441,14 +441,16 @@ def test_chromium_prepared_request_survives_aborted_post_and_reload(page, pilot)
     base, server = pilot
     connect(page, base)
     expect(page.locator("#goals .goal")).to_have_count(2)
-    held = []
-    page.route("**/api/goals/pr-a/pause", lambda route: held.append(route))
+    intercepted = []
+    def drop_before_server(route):
+        intercepted.append(route.request.post_data_json)
+        route.abort("failed")  # Explicit transport drop; never forward CAS.
+    page.route("**/api/goals/pr-a/pause", drop_before_server)
     card = page.locator("#goals .goal").filter(has_text="pr-a")
     with page.expect_request("**/api/goals/pr-a/pause"):
         card.get_by_role("button", name="Pause").click()
-    if not held:
-        page.wait_for_timeout(100)  # Request event precedes route dispatch.
-    assert held, "Prepare must commit before the control POST begins"
+    expect(page.locator("#message")).to_contain_text("outcome UNKNOWN")
+    assert len(intercepted) == 1
     assert server.service.goals.get(user_id="alice", goal_id="pr-a").version == 0
     assert server.service.goals.list_control_requests(user_id="alice")[0][
         "state"
