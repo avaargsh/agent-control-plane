@@ -188,6 +188,29 @@ class PilotService:
                 user_id=user_id, goal_id=goal_id, version=version,
             )
 
+    def dispatch_unattempted(
+        self, *, user_id: str, goal_id: str, version: int,
+    ) -> dict:
+        """Explicit recovery ONLY for a new keyed CAS not yet send-claimed."""
+        current = self.goals.control(
+            user_id=user_id, goal_id=goal_id, version=version,
+        )
+        if (current["signal_state"] != "PENDING"
+            or current["evidence"] != "UNATTEMPTED_V3"):
+            raise WatchConflict("control is not proven unattempted; read-only reconcile")
+        if self.bridge is None:
+            raise WatchConflict("trusted Temporal control bridge not configured")
+        # A second caller racing this one is fenced by a DB claim before RPC.
+        try:
+            return self.bridge.signal_committed(
+                self.goals, user_id=user_id, goal_id=goal_id, version=version,
+                unattempted_only=True,
+            )
+        except Exception:
+            return self.goals.control(
+                user_id=user_id, goal_id=goal_id, version=version,
+            )
+
     def reconcile(self, *, user_id: str, goal_id: str, version: int) -> dict:
         if self.bridge is None:
             return self.goals.control(
@@ -552,6 +575,22 @@ class Handler(BaseHTTPRequestHandler):
                     expected_version=data["expected_version"],
                 )
                 self._json(200, {"request": record})
+                return
+            dispatch_match = re.fullmatch(
+                r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/controls/"
+                r"([1-9][0-9]{0,11})/dispatch-unattempted", path
+            )
+            if dispatch_match:
+                if data:
+                    raise WatchError("dispatch-unattempted requires empty JSON object")
+                record = self.server.service.dispatch_unattempted(
+                    user_id=user, goal_id=dispatch_match.group(1),
+                    version=int(dispatch_match.group(2)),
+                )
+                self._json(
+                    200 if record["signal_state"] == "ACKED" else 202,
+                    {"control": _control_receipt(record)},
+                )
                 return
             reconcile_match = re.fullmatch(
                 r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/controls/"

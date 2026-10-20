@@ -236,3 +236,95 @@ def test_sigkill_after_commit_before_ack_replays_receipt_without_new_writes(isol
     goal, replayed = reopened.transition_with_request(**command)
     assert replayed is True and goal["version"] == 1
     assert len(reopened.controls(user_id=USER, goal_id="race")) == 1
+
+
+def test_pg_send_claim_has_one_owner_across_parallel_api_senders(isolated):
+    store = _store(isolated)
+    command = _command("race", "d" * 32)
+    store.prepare_control(**command)
+    goal, replayed = store.transition_with_request(**command)
+    assert not replayed and goal["version"] == 1
+    assert store.control(user_id=USER, goal_id="race", version=1)[
+        "evidence"
+    ] == "UNATTEMPTED_V3"
+    gate = Barrier(8)
+
+    def claim(_):
+        gate.wait(timeout=15)
+        return PostgresWatchStore(isolated).claim_control_signal(
+            user_id=USER, goal_id="race", version=1, unattempted_only=True,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        attempts = list(pool.map(claim, range(8)))
+    assert sum(record is not None for record in attempts) == 1
+    assert store.control(user_id=USER, goal_id="race", version=1)[
+        "signal_state"
+    ] == "UNKNOWN"
+    # Restart with a new DB connection: no claim can send the Signal again.
+    assert PostgresWatchStore(isolated).claim_control_signal(
+        user_id=USER, goal_id="race", version=1, unattempted_only=True,
+    ) is None
+    with pytest.raises(AdmissionError, match="not found"):
+        store.claim_control_signal(
+            user_id="bob", goal_id="race", version=1,
+            unattempted_only=True,
+        )
+
+
+def test_pg_legacy_pending_cannot_be_claimed_by_explicit_recovery(isolated):
+    store = _store(isolated)
+    store.transition(
+        user_id=USER, goal_id="race", action="pause", expected_version=0,
+    )
+    assert store.control(user_id=USER, goal_id="race", version=1)[
+        "evidence"
+    ] is None
+    assert store.claim_control_signal(
+        user_id=USER, goal_id="race", version=1, unattempted_only=True,
+    ) is None
+    assert store.control(user_id=USER, goal_id="race", version=1)[
+        "signal_state"
+    ] == "PENDING"
+
+
+def _claim_then_die(dsn, ready):
+    store = PostgresWatchStore(dsn)
+    claimed = store.claim_control_signal(
+        user_id=USER, goal_id="race", version=1,
+        unattempted_only=True,
+    )
+    ready.send(claimed is not None)
+    ready.close()
+    time.sleep(30)
+
+
+def test_pg_sigkill_after_signal_claim_cannot_dispatch_again(isolated):
+    store = _store(isolated)
+    command = _command("race", "e" * 32)
+    store.prepare_control(**command)
+    store.transition_with_request(**command)
+    recv, send = SPAWN.Pipe(duplex=False)
+    proc = SPAWN.Process(target=_claim_then_die, args=(isolated, send))
+    proc.start()
+    send.close()
+    try:
+        assert recv.poll(15), "child never committed the send claim"
+        assert recv.recv() is True
+        assert proc.is_alive()
+        proc.kill()
+        proc.join(timeout=10)
+        assert not proc.is_alive()
+        restarted = PostgresWatchStore(isolated)
+        assert restarted.control(user_id=USER, goal_id="race", version=1)[
+            "signal_state"
+        ] == "UNKNOWN"
+        assert restarted.claim_control_signal(
+            user_id=USER, goal_id="race", version=1,
+            unattempted_only=True,
+        ) is None
+    finally:
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=10)
+        recv.close()

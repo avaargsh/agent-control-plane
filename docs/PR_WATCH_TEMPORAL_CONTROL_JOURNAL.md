@@ -128,3 +128,50 @@ GitHub CI runs Python 3.11 and 3.12, real Temporal time-skipping server
 tests for signal history, lost ACK and nonexistent workflow, plus local
 HTTP auth/tenant/version tests. These are test-server results, not a
 production Temporal deployment nor live GitHub provider acceptance.
+
+
+## Crash-safe first Signal attempt for new keyed CAS (opt-in pilot)
+
+A control CAS and its Temporal RPC can never be one atomic PostgreSQL/
+Temporal transaction. Under the previous bridge, two concurrent API servers
+could both observe `PENDING` and attempt to Signal, and a crash after
+an accepted Signal but before persisting ACK could leave `PENDING`.
+
+The upgraded bridge uses the shared durable control journal as a one-way
+send claim:
+
+1. A **keyed** `transition_with_request` transaction writes the Goal CAS,
+   Control Journal and COMMITTED request with
+   `signal_state=PENDING, evidence=UNATTEMPTED_V3`. This marker is *only*
+   written for the new keyed path; older/legacy `PENDING` records lack
+   sufficient evidence to infer they have never been sent.
+2. Before the network call, every upgraded API sender atomically claims
+   `PENDING -> UNKNOWN, evidence=ACK_UNCERTAIN` with SQLite
+   `BEGIN IMMEDIATE` or PostgreSQL conditional `UPDATE .. RETURNING`.
+   Only the transaction winner makes the Temporal RPC; other senders
+   return the existing record without sending.
+3. RPC acceptance records ACKED, explicit not-found records NO_WORKFLOW,
+   and ambiguous failures remain UNKNOWN. If the process crashes **after
+   the claim**, UNKNOWN is persistent even if it never actually issued
+   the RPC. Absence from Temporal History **never** authorizes a second
+   network Signal.
+4. If the process crashes **after keyed Goal CAS but before the claim**,
+   a trusted local-token user may inspect the owner's Control Journal and
+   explicitly click **Dispatch unattempted signal** (or call authenticated
+   `POST /api/goals/{id}/controls/{version}/dispatch-unattempted`
+   with `{}`). The API accepts only the untouched `UNATTEMPTED_V3`
+   marker and a configured trusted Temporal bridge. The same atomic
+   claim fences two concurrent recoveries.
+
+No auto-scan/retry is run on startup. Old PENDING, UNKNOWN and other
+states can still request existing **read-only History reconciliation**,
+but can never use this new explicit dispatch endpoint. There is no
+automatic resend after ACK loss. The existing Workflow wake remains a
+hint to re-read durable Goal state, **not** execution proof.
+
+**Deployment constraint:** drain older pilot API instances before enabling
+this recovery path. A mixed deployment with an unupgraded sender that can
+send without a journal claim does not satisfy the at-most-one-attempt
+contract. This is loopback pilot behavior, not a general distributed
+Exactly-Once guarantee or production authorization. M6 external webhook
+acceptance remains NO-GO.

@@ -505,6 +505,38 @@
           line.append(label(control.action + " · v" + control.version +
             " · Temporal signal " + control.signal_state +
             " · receipt " + control.receipt_id));
+          if (control.signal_state === "PENDING" &&
+              control.evidence === "UNATTEMPTED_V3") {
+            const dispatch = document.createElement("button");
+            dispatch.type = "button";
+            dispatch.className = "secondary";
+            dispatch.textContent = "Dispatch unattempted signal";
+            dispatch.addEventListener("click", async () => {
+              if (!window.confirm("Dispatch the FIRST Temporal wake for " +
+                  detailTaskId + " v" + control.version +
+                  "? This does not prove execution.")) return;
+              dispatch.disabled = true;
+              const expectedSession = sessionEpoch;
+              try {
+                const result = await api(
+                  "/api/goals/" + encodeURIComponent(detailTaskId) +
+                    "/controls/" + control.version + "/dispatch-unattempted",
+                  { method: "POST", body: {} }
+                );
+                if (expectedSession !== sessionEpoch) return;
+                msg("Unattempted control signal: " + result.control.signal_state +
+                  " (no execution proof; never blindly resend UNKNOWN)");
+                await refresh();
+              } catch (error) {
+                if (expectedSession === sessionEpoch) {
+                  msg("Dispatch unavailable: " + error.message +
+                    ". Read back control journal; do not repeat UNKNOWN.");
+                  await refresh();
+                }
+              } finally { dispatch.disabled = false; }
+            });
+            line.append(dispatch);
+          }
           if (["UNKNOWN", "PENDING"].includes(control.signal_state)) {
             const reconcile = document.createElement("button");
             reconcile.type = "button";

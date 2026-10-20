@@ -292,7 +292,8 @@ class PostgresWatchStore(PostgresAdmission):
                 )
                 conn.execute(
                     """INSERT INTO pr_watch_pg_controls
-                       (user_id,goal_id,version,action) VALUES (%s,%s,%s,%s)""",
+                       (user_id,goal_id,version,action,evidence)
+                       VALUES (%s,%s,%s,%s,'UNATTEMPTED_V3')""",
                     (user_id, goal_id, expected_version + 1, action),
                 )
                 conn.execute(
@@ -341,6 +342,34 @@ class PostgresWatchStore(PostgresAdmission):
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def claim_control_signal(
+        self, *, user_id: str, goal_id: str, version: int,
+        unattempted_only: bool = False,
+    ) -> dict | None:
+        """Atomically fence all Temporal senders before network I/O.
+
+        UNKNOWN is sticky on loss of the claim holder; crashes before RPC
+        never establish that remote delivery definitely did not happen.
+        """
+        if not _id(user_id) or not _id(goal_id) or type(version) is not int or version < 1:
+            raise AdmissionError("invalid control identity")
+        with self._connection() as conn:
+            record = conn.execute(
+                """UPDATE pr_watch_pg_controls SET signal_state='UNKNOWN',
+                   evidence='ACK_UNCERTAIN', checked_at=clock_timestamp()
+                   WHERE user_id=%s AND goal_id=%s AND version=%s
+                     AND signal_state='PENDING'
+                     AND (%s=FALSE OR evidence='UNATTEMPTED_V3')
+                   RETURNING user_id,goal_id,version,action,signal_state,
+                             evidence,checked_at""",
+                (user_id, goal_id, version, unattempted_only),
+            ).fetchone()
+        if record is None:
+            # A denied user should not learn whether the row exists.
+            self.control(user_id=user_id, goal_id=goal_id, version=version)
+            return None
+        return dict(record)
+
     def record_control_signal(
         self, *, user_id: str, goal_id: str, version: int,
         state: str, evidence: str,
@@ -362,7 +391,8 @@ class PostgresWatchStore(PostgresAdmission):
             if row is None:
                 raise AdmissionError("control not found within user scope")
             old = row["signal_state"]
-            if old == "PENDING" or (state == "ACKED" and old in ("UNKNOWN", "NO_WORKFLOW")):
+            if (old == "PENDING" or (state == "ACKED" and old in ("UNKNOWN", "NO_WORKFLOW"))
+                or (old == "UNKNOWN" and state == "NO_WORKFLOW")):
                 conn.execute(
                     """UPDATE pr_watch_pg_controls SET
                        signal_state=%s,evidence=%s,checked_at=clock_timestamp()

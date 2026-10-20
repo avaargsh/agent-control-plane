@@ -628,3 +628,50 @@ def test_idempotent_retry_never_resends_temporal_signal(tmp_path):
         for invalid in ("abc", "Z" * 32, "f" * 33):
             assert request(api, "POST", "/api/goals/pr-1/controls/prepare",
                            who="alice", body={**preparation, "request_id": invalid})[0] == 400
+
+
+def test_dispatch_unattempted_only_after_durable_keyed_cas(tmp_path):
+    from pr_watch_control_bridge import TemporalControlBridge
+
+    class Bridge(TemporalControlBridge):
+        def __init__(self):
+            super().__init__(address="test:7233")
+            self.sent = []
+
+        async def _signal(self, *, user_id, goal_id, version, action):
+            self.sent.append((user_id, goal_id, version, action))
+            return "ACKED"
+
+    with server(tmp_path) as api:
+        create(api)
+        create(api, goal_id="legacy")
+        store = api.service.goals
+        request_id = "e" * 32
+        command = dict(
+            user_id="alice", goal_id="pr-1", action="pause",
+            expected_version=0, request_id=request_id,
+        )
+        store.prepare_control(**command)
+        store.transition_with_request(**command)  # Simulated crash before send.
+        store.transition(
+            user_id="alice", goal_id="legacy",
+            action="pause", expected_version=0,
+        )
+        path = "/api/goals/pr-1/controls/1/dispatch-unattempted"
+        assert request(api, "POST", path, body={})[0] == 401
+        assert request(api, "POST", path, who="bob", body={})[0] == 404
+        assert request(api, "POST", path, who="alice", body={"retry": True})[0] == 400
+        assert request(api, "POST", path, who="alice", body={})[0] == 409
+        assert request(api, "POST",
+                       "/api/goals/legacy/controls/1/dispatch-unattempted",
+                       who="alice", body={})[0] == 409
+        bridge = Bridge()
+        api.service.bridge = bridge
+        status, data, _ = request(api, "POST", path, who="alice", body={})
+        assert status == 200
+        assert json.loads(data)["control"]["signal_state"] == "ACKED"
+        assert len(bridge.sent) == 1
+        assert request(api, "POST", path, who="alice", body={})[0] == 409
+        assert len(bridge.sent) == 1
+        assert store.get(user_id="alice", goal_id="pr-1").version == 1
+        assert len(store.controls(user_id="alice", goal_id="pr-1")) == 1

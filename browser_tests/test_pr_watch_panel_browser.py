@@ -574,3 +574,54 @@ def test_chromium_committed_keyed_control_recovers_after_lost_ack_and_reload(pag
     page.get_by_role("button", name="Connect").click()
     expect(page.locator("#goals")).to_contain_text("pr-bob")
     expect(page.locator("#control-recovery .committed-history")).to_have_count(0)
+
+
+def test_chromium_dispatch_only_provably_unattempted_signal(page, pilot):
+    from pr_watch_control_bridge import TemporalControlBridge
+
+    class Bridge(TemporalControlBridge):
+        def __init__(self):
+            super().__init__(address="test:7233")
+            self.sent = []
+
+        async def _signal(self, *, user_id, goal_id, version, action):
+            self.sent.append((user_id, goal_id, version, action))
+            return "ACKED"
+
+    base, server = pilot
+    store = server.service.goals
+    identifier = "d" * 32
+    command = dict(
+        user_id="alice", goal_id="pr-a",
+        request_id=identifier, action="pause", expected_version=0,
+    )
+    store.prepare_control(**command)
+    store.transition_with_request(**command)  # API process crashed before sending.
+    bridge = Bridge()
+    server.service.bridge = bridge
+
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    page.locator("#activity-goal").select_option("pr-a")
+    expect(page.locator("#task-detail")).to_contain_text("Control journal")
+    button = page.get_by_role("button", name="Dispatch unattempted signal")
+    expect(button).to_be_visible()
+    page.once("dialog", lambda dialog: dialog.accept())
+    button.click()
+    expect(page.locator("#task-detail")).to_contain_text("Temporal signal ACKED")
+    expect(page.get_by_role(
+        "button", name="Dispatch unattempted signal",
+    )).to_have_count(0)
+    assert bridge.sent == [("alice", "pr-a", 1, "pause")]
+    assert len(store.controls(user_id="alice", goal_id="pr-a")) == 1
+    page.get_by_role("button", name="Refresh").click()
+    expect(page.get_by_role(
+        "button", name="Dispatch unattempted signal",
+    )).to_have_count(0)
+    assert len(bridge.sent) == 1
+    page.locator("#token").fill(TOKENS["bob"])
+    page.get_by_role("button", name="Connect").click()
+    expect(page.locator("#goals")).to_contain_text("pr-bob")
+    expect(page.get_by_role(
+        "button", name="Dispatch unattempted signal",
+    )).to_have_count(0)
