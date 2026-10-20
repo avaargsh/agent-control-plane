@@ -5,9 +5,11 @@ on:
       - 'examples/m6_acceptance_validator.py'
       - 'examples/m6_materialized_evidence.py'
       - 'examples/m6_paired_delivery_evidence.py'
+      - 'examples/m6_signed_review.py'
       - 'tests/test_m6_acceptance_validator.py'
       - 'tests/test_m6_materialized_evidence.py'
       - 'tests/test_m6_paired_delivery_evidence.py'
+      - 'tests/test_m6_signed_review.py'
       - 'docs/M6_ACCEPTANCE_VALIDATOR.md'
       - '.github/workflows/m6-acceptance-evidence.yml'
   push:
@@ -33,6 +35,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: python -m pip install pytest ruff
-      - run: ruff check examples/m6_acceptance_validator.py examples/m6_materialized_evidence.py examples/m6_paired_delivery_evidence.py tests/test_m6_acceptance_validator.py tests/test_m6_materialized_evidence.py tests/test_m6_paired_delivery_evidence.py
+      - run: python -m pip install pytest ruff 'cryptography>=44,<51'
+      - run: ruff check examples/m6_acceptance_validator.py examples/m6_materialized_evidence.py examples/m6_paired_delivery_evidence.py examples/m6_signed_review.py tests/test_m6_acceptance_validator.py tests/test_m6_materialized_evidence.py tests/test_m6_paired_delivery_evidence.py tests/test_m6_signed_review.py
       - run: python -m pytest -q tests/test_m6_acceptance_validator.py tests/test_m6_materialized_evidence.py tests/test_m6_paired_delivery_evidence.py
