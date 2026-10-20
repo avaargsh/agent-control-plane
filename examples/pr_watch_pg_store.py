@@ -179,6 +179,9 @@ class PostgresWatchStore(PostgresAdmission):
         from pr_watch_pg_migrations import PostgresMigrations
         PostgresMigrations(self._dsn).require_version(3)
         with self._connection() as conn:
+            # Serialize identical request keys even when competing Goal IDs differ.
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                         (user_id + ":" + request_id,))
             goal = conn.execute(
                 """SELECT state,version FROM pr_watch_pg_goals
                    WHERE user_id=%s AND goal_id=%s FOR UPDATE""",
@@ -256,6 +259,8 @@ class PostgresWatchStore(PostgresAdmission):
         from pr_watch_pg_migrations import PostgresMigrations
         PostgresMigrations(self._dsn).require_version(3)
         with self._connection() as conn:
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                         (user_id + ":" + request_id,))
             goal = conn.execute(
                 """SELECT state,version FROM pr_watch_pg_goals
                    WHERE user_id=%s AND goal_id=%s FOR UPDATE""",
