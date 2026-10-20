@@ -204,3 +204,36 @@ def test_duplicate_signed_json_keys_fail_closed(tmp_path):
     }
     with pytest.raises(ProtocolViolation, match="duplicate signed"):
         _verify(mapping, context, signer, signed)
+
+@pytest.mark.parametrize("field", [
+    "operation_id", "resource_uid", "authorization_hash",
+    "principal_type", "principal_subject",
+])
+def test_even_trusted_signer_cannot_rebind_old_proof_to_new_operation(tmp_path, field):
+    mapping, context, signer, private, stmt = _case(tmp_path)
+    changed = {**context, field: "different-from-original-proof"}
+    altered = copy.deepcopy(stmt)
+    altered["predicate"]["context"] = changed
+    with pytest.raises(ProtocolViolation, match="proof operation or principal mismatch"):
+        _verify(mapping, changed, signer, _signed(private, altered))
+
+
+def test_oversized_payload_and_nonfinite_json_denied(tmp_path):
+    mapping, context, signer, private, stmt = _case(tmp_path)
+    oversized = _signed(private, stmt)
+    oversized["payload"] = base64.b64encode(b"x" * 65537).decode()
+    with pytest.raises(ProtocolViolation, match="oversized"):
+        _verify(mapping, context, signer, oversized)
+
+    encoded = json.dumps(stmt, separators=(",", ":")).encode()
+    malformed = encoded.replace(b'{"_type":', b'{"fake":NaN,"_type":', 1)
+    asserted = {
+        "payloadType": PAYLOAD_TYPE,
+        "payload": base64.b64encode(malformed).decode(),
+        "signatures": [{
+            "keyid": signer.keyid,
+            "sig": base64.b64encode(private.sign(dsse_pae(malformed))).decode(),
+        }],
+    }
+    with pytest.raises(ProtocolViolation, match="non-finite"):
+        _verify(mapping, context, signer, asserted)
