@@ -94,13 +94,19 @@ def verify_materialized(report: object, root: Path) -> dict:
         return _result(errors, 0)
 
     try:
-        # The selected root is itself part of the trust boundary. Resolving a
-        # symlink first would hide that the operator selected a redirected root.
+        # Pin the selected directory itself without following a final symlink.
         if root.is_symlink():
             raise ValueError("evidence root must not be a symbolic link")
-        root = root.resolve(strict=True)
-        if not root.is_dir():
-            raise ValueError("evidence root is not a directory")
+        flags = (
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        )
+        root_fd = os.open(root, flags)
+        try:
+            if not stat.S_ISDIR(os.fstat(root_fd).st_mode):
+                raise ValueError("evidence root is not a directory")
+        finally:
+            os.close(root_fd)
     except (OSError, ValueError):
         return _result(errors + ["evidence root unavailable"], 0)
 
@@ -173,8 +179,18 @@ def main() -> int:
         # Bounded, local manifest parse. Never echo its contents or raw paths.
         if args.manifest.is_symlink():
             raise ValueError("manifest must not be a symbolic link")
-        with args.manifest.open("rb") as stream:
-            payload = stream.read(_MAX_BYTES + 1)
+        flags = (
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+        )
+        descriptor = os.open(args.manifest, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ValueError("regular manifest file required")
+            with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                payload = stream.read(_MAX_BYTES + 1)
+        finally:
+            os.close(descriptor)
         if len(payload) > _MAX_BYTES:
             raise ValueError("manifest exceeds size bound")
         report = json.loads(payload.decode("utf-8"))
