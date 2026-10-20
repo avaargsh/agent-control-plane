@@ -48,6 +48,7 @@ class CurrentEffectAuthority:
     nonce: str
     resource_uid: str
     principal: Principal
+    executor: Principal
     resource_generation: int
     lease_id: str
     lease_epoch: int
@@ -152,15 +153,18 @@ class LiveEffectBoundaryGate:
             raise ProtocolViolation("live effect authority version is invalid")
         authorization.verify()
         action.verify()
-        if caller != authorization.principal or active_lease.holder != caller:
-            raise ProtocolViolation("live effect execution principal mismatch")
+        # The policy subject and the lease-holding controller are DISTINCT
+        # principals in ACP. Preserve that separation at the effect boundary.
+        if active_lease.holder != caller:
+            raise ProtocolViolation("live effect execution lease holder mismatch")
         if (action.transition_hash != authorization.transition_hash
                 or action.action_hash != authorization.action_hash
                 or subject.resource_uid != active_lease.resource_uid):
             raise ProtocolViolation("live effect original authorization binding mismatch")
         expected = (
             self.scope.tenant_id, self.scope.project_id, self.scope.cluster_id,
-            work_id, operation_id, self.scope.nonce, subject.resource_uid, caller,
+            work_id, operation_id, self.scope.nonce, subject.resource_uid,
+            authorization.principal, caller,
             resource_generation, active_lease.lease_id, active_lease.epoch,
             action.transition_hash, action.action_hash,
             authorization.authorization_hash, approval_hash,
@@ -170,7 +174,7 @@ class LiveEffectBoundaryGate:
         actual = (
             observed.tenant_id, observed.project_id, observed.cluster_id,
             observed.work_id, observed.operation_id, observed.nonce,
-            observed.resource_uid, observed.principal,
+            observed.resource_uid, observed.principal, observed.executor,
             observed.resource_generation, observed.lease_id, observed.lease_epoch,
             observed.transition_hash, observed.action_hash,
             observed.authorization_hash, observed.approval_hash,
