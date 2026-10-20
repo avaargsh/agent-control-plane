@@ -65,6 +65,40 @@ class TemporalWebhookWake:
 
         return asyncio.run(inspect())
 
+    def prove_exactly_once(self, signal_id: str) -> bool:
+        """Operator audit only: one and only one exact wake in full History.
+
+        This is deliberately stricter than prove(), whose positive-existence
+        semantics are used to reconcile an ambiguous ACK without re-sending.
+        A duplicate or undecodable wake prevents an exactly-once claim.
+        """
+        if not isinstance(signal_id, str) or not signal_id.startswith(
+            "pr-watch-webhook:"
+        ) or len(signal_id) != len("pr-watch-webhook:") + 64:
+            return False
+
+        async def inspect() -> bool:
+            client = await self._client()
+            handle = client.get_workflow_handle(self.workflow)
+            history = await handle.fetch_history()
+            matches = 0
+            for event in history.events:
+                attrs = event.workflow_execution_signaled_event_attributes
+                if attrs.signal_name != "wake":
+                    continue
+                if not attrs.input.payloads:
+                    raise ValueError("Temporal wake history payload missing")
+                # We cannot make an exact cardinality claim if any wake is
+                # present but cannot be interpreted by the trusted converter.
+                decoded = await client.data_converter.decode(attrs.input.payloads)
+                if decoded == [signal_id]:
+                    matches += 1
+                    if matches > 1:
+                        return False
+            return matches == 1
+
+        return asyncio.run(inspect())
+
 
 class GitHubWebhookIngress:
     """One immutable (user, goal, repository, PR) binding, never payload routing."""
