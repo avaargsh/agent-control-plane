@@ -2,6 +2,8 @@
   "use strict";
   let token = "";
   let selectedTask = "";
+  let refreshEpoch = 0;
+  let refreshing = false;
   const el = (id) => document.getElementById(id);
   const msg = (text) => { el("message").textContent = text; };
   const label = (text, css = "") => {
@@ -12,10 +14,11 @@
   };
   const api = async (path, options = {}) => {
     if (!token) throw Error("Connect with a local token first.");
+    const requestToken = token;
     const result = await fetch(path, {
       method: options.method || "GET",
       headers: {
-        Authorization: "Bearer " + token,
+        Authorization: "Bearer " + requestToken,
         ...(options.body ? { "Content-Type": "application/json" } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
@@ -23,6 +26,7 @@
       credentials: "omit",
     });
     const body = await result.json();
+    if (requestToken !== token) throw Error("Session changed; stale response discarded.");
     if (!result.ok) throw Error(body.error || "Request failed");
     return body;
   };
@@ -56,6 +60,7 @@
       button.className = action === "cancel" ? "danger" : "secondary";
       button.textContent = action[0].toUpperCase() + action.slice(1);
       button.addEventListener("click", async () => {
+        if (action === "cancel" && !window.confirm("Cancel " + goal.goal_id + "? This cannot be resumed.")) return;
         button.disabled = true;
         try {
           const outcome = await api(
@@ -108,6 +113,10 @@
   };
   const refresh = async () => {
     if (!token) return;
+    const epoch = ++refreshEpoch;
+    const currentToken = token;
+    const currentTask = selectedTask;
+    const isCurrent = () => epoch === refreshEpoch && currentToken === token && currentTask === selectedTask;
     try {
       const params = new URLSearchParams();
       const state = el("task-state").value;
@@ -119,6 +128,7 @@
         api("/api/goals"), api("/api/events?after=0"),
         api("/api/tasks?" + params.toString()),
       ]);
+      if (!isCurrent()) return;
       const goals = results[0];
       const events = results[1];
       const tasks = results[2].tasks;
@@ -143,6 +153,7 @@
         // Fetch the single owner-scoped Task directly rather than treating
         // the filtered list as authoritative for detail.
         const response = await api("/api/tasks/" + encodeURIComponent(selectedTask));
+        if (!isCurrent()) return;
         const task = response.task;
         const title = document.createElement("strong");
         title.textContent = task.task_id + " · " + task.state;
@@ -159,6 +170,7 @@
           api("/api/goals/" + encodeURIComponent(selectedTask) + "/launch"),
           api("/api/goals/" + encodeURIComponent(selectedTask) + "/controls"),
         ]);
+        if (!isCurrent()) return;
         const launch = launchResponse.launch;
         const launchLine = document.createElement("p");
         launchLine.textContent = "Enrollment: " + launch.state +
@@ -239,11 +251,15 @@
       });
       el("events").replaceChildren(...nodes);
       if (!nodes.length) el("events").append(label("No events yet.", "muted"));
-    } catch (error) { msg(error.message); }
+    } catch (error) { if (isCurrent()) msg(error.message); }
   };
   el("connect").addEventListener("click", async () => {
+    ++refreshEpoch;
     token = el("token").value;
     selectedTask = "";
+    el("goals").replaceChildren(label("Loading tasks…", "muted"));
+    el("task-detail").replaceChildren(label("Select a task to inspect.", "muted"));
+    el("events").replaceChildren(label("Loading activity…", "muted"));
     el("token").value = "";
     msg("");
     await refresh();
