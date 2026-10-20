@@ -3,14 +3,22 @@ on:
   pull_request:
     paths:
       - 'examples/m6_acceptance_validator.py'
+      - 'examples/m6_materialized_evidence.py'
+      - 'examples/m6_paired_delivery_evidence.py'
       - 'tests/test_m6_acceptance_validator.py'
+      - 'tests/test_m6_materialized_evidence.py'
+      - 'tests/test_m6_paired_delivery_evidence.py'
       - 'docs/M6_ACCEPTANCE_VALIDATOR.md'
       - '.github/workflows/m6-acceptance-evidence.yml'
   push:
     branches: [main]
     paths:
       - 'examples/m6_acceptance_validator.py'
+      - 'examples/m6_materialized_evidence.py'
+      - 'examples/m6_paired_delivery_evidence.py'
       - 'tests/test_m6_acceptance_validator.py'
+      - 'tests/test_m6_materialized_evidence.py'
+      - 'tests/test_m6_paired_delivery_evidence.py'
       - '.github/workflows/m6-acceptance-evidence.yml'
 permissions:
   contents: read
@@ -26,5 +34,5 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install pytest ruff
-      - run: ruff check examples/m6_acceptance_validator.py tests/test_m6_acceptance_validator.py
-      - run: python -m pytest -q tests/test_m6_acceptance_validator.py
+      - run: ruff check examples/m6_acceptance_validator.py examples/m6_materialized_evidence.py examples/m6_paired_delivery_evidence.py tests/test_m6_acceptance_validator.py tests/test_m6_materialized_evidence.py tests/test_m6_paired_delivery_evidence.py
+      - run: python -m pytest -q tests/test_m6_acceptance_validator.py tests/test_m6_materialized_evidence.py tests/test_m6_paired_delivery_evidence.py
