@@ -152,7 +152,7 @@ def test_real_tls_proxy_preserves_raw_signed_bytes_and_replay(tmp_path):
             assert len(seen) == 1
             assert len(journal(store)) == 1
             assert journal(store)[0][1] == hashlib.sha256(raw).hexdigest()
-            assert b"caf" not in repr(journal(store)).encode()
+            # UUIDs/digests may coincidentally contain hex substring "caf".\n            # Assert that no raw JSON field name or complete body is stored.\n            persisted = repr(journal(store)).encode("utf-8")\n            assert raw not in persisted\n            assert b'"pull_request"' not in persisted\n            assert b'"title"' not in persisted
 
 
 def test_real_tls_proxy_rejects_signature_scope_and_reused_delivery(tmp_path):
