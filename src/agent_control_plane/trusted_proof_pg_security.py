@@ -109,6 +109,10 @@ def _runtime_privileges(conn: Any, role: str) -> dict[str, bool]:
              has_table_privilege(%s,
                'public.acp_trusted_proof_signers', 'INSERT') AS signer_insert,
              has_table_privilege(%s,
+               'public.acp_trusted_proof_signers', 'DELETE') AS signer_delete,
+             has_table_privilege(%s,
+               'public.acp_trusted_proof_signers', 'TRUNCATE') AS signer_truncate,
+             has_table_privilege(%s,
                'public.acp_trusted_proof_receipts', 'UPDATE') AS receipt_update,
              has_table_privilege(%s,
                'public.acp_trusted_proof_receipts', 'DELETE') AS receipt_delete,
@@ -120,7 +124,7 @@ def _runtime_privileges(conn: Any, role: str) -> dict[str, bool]:
              has_table_privilege(%s,
                'public.acp_trusted_proof_receipts', 'INSERT') AS receipt_insert,
              has_function_privilege(%s, %s, 'EXECUTE') AS signer_execute""",
-        (role,) * 9 + (role, FUNCTION_SIGNATURE),
+        (role,) * 11 + (role, FUNCTION_SIGNATURE),
     ).fetchone()
 
 
@@ -199,6 +203,7 @@ def grant_runtime_access(conn: Any, role: str) -> None:
     state = _runtime_privileges(conn, role)
     unsafe = (
         "signer_select", "signer_update", "signer_insert",
+        "signer_delete", "signer_truncate",
         "receipt_update", "receipt_delete", "receipt_truncate",
         "schema_create",
     )
