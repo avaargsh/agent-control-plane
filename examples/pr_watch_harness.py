@@ -405,6 +405,24 @@ class GoalStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_unsettled_controls(self, *, user_id: str, limit: int = 100) -> list[dict]:
+        """Bounded, owner-scoped committed controls awaiting signal resolution.
+
+        These rows prove the Goal CAS/intent committed, NOT that Temporal
+        delivered or executed the requested control.
+        """
+        if not user_id or type(limit) is not int or not 1 <= limit <= 100:
+            raise WatchError("invalid scoped receipt query")
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT user_id,goal_id,version,action,signal_state,
+                          checked_at,evidence FROM pr_watch_control_intents
+                   WHERE user_id=? AND signal_state IN ('PENDING','UNKNOWN')
+                   ORDER BY goal_id,version DESC LIMIT ?""",
+                (user_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def record_control_signal(
         self, *, user_id: str, goal_id: str, version: int,
         state: str, evidence: str,
