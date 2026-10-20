@@ -1,0 +1,33 @@
+name: pr-watch-browser-chromium
+
+on:
+  pull_request:
+    paths:
+      - 'browser_tests/**'
+      - 'examples/pr_watch_panel.*'
+      - 'examples/pr_watch_service.py'
+      - 'examples/pr_watch_harness.py'
+      - 'examples/pr_watch_task_projection.py'
+      - '.github/workflows/pr-watch-browser-chromium.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]' 'playwright==1.57.0'
+      - run: python -m playwright install --with-deps chromium
+      - name: Chromium loopback-only acceptance
+        run: python -m pytest -q browser_tests/test_pr_watch_panel_browser.py
