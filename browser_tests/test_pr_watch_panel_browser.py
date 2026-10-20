@@ -332,6 +332,72 @@ def test_chromium_definite_cas_rejection_never_offers_ambiguous_retry(page, pilo
     card = page.locator("#goals .goal").filter(has_text="pr-a")
     card.get_by_role("button", name="Pause").click()
     expect(page.locator("#message")).to_contain_text("rejected (HTTP 409")
-    expect(page.locator("#control-recovery")).to_be_empty()
+    # This attempt was rejected, but another actor's committed pending
+    # control must remain visible (without attributing it to this attempt).
+    expect(page.locator("#control-recovery")).to_contain_text(
+        "durable pause control recorded at v1",
+    )
+    expect(page.locator("#control-recovery")).not_to_contain_text(
+        "response lost or uncertain",
+    )
     expect(card).to_contain_text("PAUSED")
     assert len(server.service.goals.controls(user_id="alice", goal_id="pr-a")) == 1
+
+
+def test_chromium_committed_control_receipt_survives_reload_and_relogin(page, pilot):
+    base, server = pilot
+    store = server.service.goals
+    store.transition(
+        user_id="alice", goal_id="pr-a", action="pause", expected_version=0,
+    )
+    store.record_control_signal(
+        user_id="alice", goal_id="pr-a", version=1,
+        state="UNKNOWN", evidence="ACK_UNCERTAIN",
+    )
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    expect(page.locator("#control-recovery")).to_contain_text(
+        "durable pause control recorded at v1",
+    )
+    expect(page.locator("#control-recovery")).to_contain_text(
+        "CAS committed; execution remains unverified",
+    )
+    assert page.locator("#control-recovery .recovery-entry").count() == 1
+    first_receipt = page.locator("#control-recovery").inner_text()
+    assert "prc_" in first_receipt
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator("#control-recovery")).to_be_empty()
+    # No token is persisted; the user must authenticate again to read journal.
+    page.locator("#token").fill(TOKENS["alice"])
+    page.get_by_role("button", name="Connect").click()
+    expect(page.locator("#control-recovery")).to_contain_text(
+        "durable pause control recorded at v1",
+    )
+    assert page.locator("#control-recovery").inner_text() == first_receipt
+    page.get_by_role("button", name="Inspect control journal").click()
+    expect(page.locator("#task-detail")).to_contain_text("Control journal")
+    expect(page.locator("#task-detail")).to_contain_text("receipt prc_")
+    assert page.evaluate("localStorage.length + sessionStorage.length") == 0
+
+    page.locator("#token").fill(TOKENS["bob"])
+    page.get_by_role("button", name="Connect").click()
+    expect(page.locator("#goals")).to_contain_text("pr-bob")
+    expect(page.locator("#control-recovery")).to_be_empty()
+
+
+def test_chromium_resolved_signal_disappears_after_readonly_refresh(page, pilot):
+    base, server = pilot
+    store = server.service.goals
+    store.transition(
+        user_id="alice", goal_id="pr-a", action="pause", expected_version=0,
+    )
+    connect(page, base)
+    expect(page.locator("#control-recovery")).to_contain_text(
+        "Temporal signal PENDING",
+    )
+    store.record_control_signal(
+        user_id="alice", goal_id="pr-a", version=1,
+        state="LOCAL_ONLY", evidence="BRIDGE_DISABLED",
+    )
+    page.get_by_role("button", name="Refresh").click()
+    expect(page.locator("#control-recovery")).to_be_empty()

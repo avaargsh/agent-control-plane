@@ -183,6 +183,20 @@ class PostgresWatchStore(PostgresAdmission):
             ).fetchall()
         return [dict(x) for x in rows]
 
+    def list_unsettled_controls(self, *, user_id: str, limit: int = 100) -> list[dict]:
+        """Read-only committed controls with unresolved Temporal signals."""
+        if not _id(user_id) or type(limit) is not int or not 1 <= limit <= 100:
+            raise AdmissionError("invalid scoped receipt query")
+        with self._connection() as conn:
+            rows = conn.execute(
+                """SELECT user_id,goal_id,version,action,signal_state,
+                          checked_at,evidence FROM pr_watch_pg_controls
+                   WHERE user_id=%s AND signal_state IN ('PENDING','UNKNOWN')
+                   ORDER BY goal_id,version DESC LIMIT %s""",
+                (user_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def record_control_signal(
         self, *, user_id: str, goal_id: str, version: int,
         state: str, evidence: str,

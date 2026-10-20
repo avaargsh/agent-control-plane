@@ -46,6 +46,9 @@ body, URL, or browser-provided headers.
 | POST | `/api/goals/{id}/pause` | CAS RUNNING -> PAUSED |
 | POST | `/api/goals/{id}/resume` | CAS PAUSED -> RUNNING |
 | POST | `/api/goals/{id}/cancel` | CAS RUNNING/PAUSED -> CANCELLED |
+| GET | `/api/control-receipts?limit=N` | Bounded owner-scoped CAS-committed controls with `PENDING/UNKNOWN` Temporal signals (max 100) |
+| GET | `/api/goals/{id}/controls/{version}` | Exact user-scoped durable control receipt or 404 |
+| GET | `/api/goals/{id}/controls` | Latest 50 committed control records including stable receipt IDs |
 | GET | `/api/events?after=N` | Durable scoped event cursor (bounded 100) |
 | GET | `/api/events/stream?after=N` | One-shot SSE snapshot with IDs and retry hint |
 | GET | `/healthz` | Unauthenticated local liveness only |
@@ -92,3 +95,33 @@ event replay, and public/static UI bootstrap without leaked credentials.
 
 This pilot makes no claims about a real Temporal cluster, remote browser
 session, external delivery confirmation, or operation ownership proof.
+
+## Recover control history after reloading the pilot
+
+After refreshing the page, reconnect with a local bearer token. The panel
+reads `/api/control-receipts?limit=100` and displays committed controls
+whose **Temporal signal** is still `PENDING` or `UNKNOWN`. The user can
+open the owner-scoped Task control journal to inspect and (when appropriate)
+explicitly reconcile the signal through the existing read-only workflow
+history check. The bearer credential is never saved to browser storage.
+
+A `receipt_id` is a deterministic fingerprint of the already-committed
+`(user_id, goal_id, version, action)` record, not a user-generated
+idempotency key, a secret credential, proof that a specific HTTP attempt
+committed the record, a Temporal ACK, or verification of business success.
+`cas_committed: true` only means that **this row exists in the durable
+Goal/control transaction**. It never upgrades an observed terminal state to
+verified execution. The bounded list is a snapshot, **not pagination or a
+complete historical export**; precise records remain queryable by version.
+
+**Important recovery limit:** if a client attempted an operation but no
+request reached or committed on the server, no durable receipt exists. After
+page reload the pilot cannot recover that absent client-side attempt. Even
+with an existing matching CAS row, the server cannot attribute it to a
+particular lost HTTP response. Do not retry a potentially committed control
+blindly; examine the scoped Goal/version and control journal first.
+
+Neither API endpoint introduces new DDL; SQLite and PostgreSQL use the
+pre-existing CAS control tables, preserving the PostgreSQL v2 migration
+checksum and authority boundaries. Public M6 GitHub webhook acceptance is
+still a separate NO-GO gate.

@@ -449,3 +449,93 @@ def test_panel_does_not_retain_stale_task_views_on_refresh_error(tmp_path):
         assert "Activity unavailable." in script
         assert "if (isCurrent())" in script
         assert "innerHTML" not in script
+
+
+def test_committed_control_receipt_survives_service_restart_and_is_scoped(tmp_path):
+    # A committed CAS control is durable independent of response delivery.
+    with server(tmp_path) as api:
+        create(api)
+        create(api, who="bob", goal_id="private-bob")
+        store = api.service.goals
+        store.transition(
+            user_id="alice", goal_id="pr-1", action="pause", expected_version=0,
+        )
+        store.record_control_signal(
+            user_id="alice", goal_id="pr-1", version=1,
+            state="UNKNOWN", evidence="ACK_UNCERTAIN",
+        )
+        status, data, _ = request(
+            api, "GET", "/api/control-receipts?limit=10", who="alice",
+        )
+        assert status == 200
+        response = json.loads(data)
+        assert response["schema"] == "pr-watch-control-receipts/v1"
+        assert len(response["controls"]) == 1
+        item = response["controls"][0]
+        assert item["goal_id"] == "pr-1" and item["version"] == 1
+        assert item["action"] == "pause" and item["signal_state"] == "UNKNOWN"
+        assert item["cas_committed"] is True
+        assert item["receipt_id"].startswith("prc_")
+        receipt_id = item["receipt_id"]
+        status, data, _ = request(
+            api, "GET", "/api/goals/pr-1/controls/1", who="alice",
+        )
+        assert status == 200
+        assert json.loads(data)["control"]["receipt_id"] == receipt_id
+        assert request(
+            api, "GET", "/api/goals/pr-1/controls/1", who="bob",
+        )[0] == 404
+        assert request(
+            api, "GET", "/api/control-receipts?limit=10", who="bob",
+        )[0] == 200
+        assert json.loads(request(
+            api, "GET", "/api/control-receipts", who="bob",
+        )[1])["controls"] == []
+        assert request(api, "GET", "/api/control-receipts")[0] == 401
+        for invalid in (
+            "/api/control-receipts?limit=0",
+            "/api/control-receipts?limit=101",
+            "/api/control-receipts?limit=1&limit=2",
+            "/api/control-receipts?user_id=bob",
+        ):
+            assert request(api, "GET", invalid, who="alice")[0] == 400
+
+    # Reconstruct from persisted journal, without using browser storage
+    # or claiming that UNKNOWN Temporal delivery means uncommitted Goal CAS.
+    with server(tmp_path) as api:
+        status, data, _ = request(
+            api, "GET", "/api/control-receipts", who="alice",
+        )
+        assert status == 200
+        item = json.loads(data)["controls"][0]
+        assert item["receipt_id"] == receipt_id
+        assert item["signal_state"] == "UNKNOWN"
+        assert item["cas_committed"] is True
+        assert request(
+            api, "GET", "/api/goals/pr-1/controls/1?unexpected=1",
+            who="alice",
+        )[0] == 400
+
+
+def test_unsettled_control_readback_only_returns_pending_or_unknown(tmp_path):
+    with server(tmp_path) as api:
+        create(api)
+        store = api.service.goals
+        store.transition(
+            user_id="alice", goal_id="pr-1", action="pause", expected_version=0,
+        )
+        status, data, _ = request(api, "GET", "/api/control-receipts", who="alice")
+        assert status == 200
+        assert json.loads(data)["controls"][0]["signal_state"] == "PENDING"
+        store.record_control_signal(
+            user_id="alice", goal_id="pr-1", version=1,
+            state="LOCAL_ONLY", evidence="BRIDGE_DISABLED",
+        )
+        assert json.loads(request(
+            api, "GET", "/api/control-receipts", who="alice",
+        )[1])["controls"] == []
+        item = json.loads(request(
+            api, "GET", "/api/goals/pr-1/controls/1", who="alice",
+        )[1])["control"]
+        assert item["signal_state"] == "LOCAL_ONLY"
+        assert item["cas_committed"] is True

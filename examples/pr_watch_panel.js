@@ -10,6 +10,7 @@
   // In-tab only: uncertainty is not persisted across reloads or logins.
   // A network failure cannot prove that the CAS mutation did not commit.
   const uncertainControls = new Map();
+  let durableUnsettled = [];
   const el = (id) => document.getElementById(id);
   const msg = (text) => { el("message").textContent = String(text); };
   const setSync = (text, state) => {
@@ -51,6 +52,28 @@
   const renderRecovery = () => {
     const area = el("control-recovery");
     area.replaceChildren();
+    // Committed receipts are reconstructed from the server after reconnect.
+    // Pending/unknown here refers to the Temporal signal, NOT the CAS commit.
+    for (const receipt of durableUnsettled) {
+      const entry = document.createElement("section");
+      entry.className = "recovery-entry";
+      const note = document.createElement("p");
+      note.textContent = receipt.goal_id + ": durable " + receipt.action +
+        " control recorded at v" + receipt.version +
+        " (Temporal signal " + receipt.signal_state + "), receipt " +
+        receipt.receipt_id + ". CAS committed; execution remains unverified.";
+      const inspect = document.createElement("button");
+      inspect.type = "button";
+      inspect.className = "secondary";
+      inspect.textContent = "Inspect control journal";
+      inspect.addEventListener("click", () => {
+        selectedTask = receipt.goal_id;
+        el("task-detail").replaceChildren(label("Loading task details…", "muted"));
+        refresh();
+      });
+      entry.append(note, inspect);
+      area.append(entry);
+    }
     for (const [goalId, attempt] of uncertainControls) {
       const entry = document.createElement("section");
       entry.className = "recovery-entry";
@@ -230,11 +253,14 @@
       const results = await Promise.all([
         api("/api/goals"), api("/api/events?after=0"),
         api("/api/tasks?" + params.toString()),
+        api("/api/control-receipts?limit=100"),
       ]);
       if (!isCurrent()) return;
       const goals = results[0];
       const events = results[1];
       const tasks = results[2].tasks;
+      durableUnsettled = results[3].controls;
+      renderRecovery();
       const byId = new Map(goals.goals.map((goal) => [goal.goal_id, goal]));
       const cards = tasks.filter((task) => byId.has(task.task_id)).map(
         (task) => goalCard(byId.get(task.task_id), task)
@@ -334,7 +360,8 @@
           const line = document.createElement("div");
           line.className = "control-entry";
           line.append(label(control.action + " · v" + control.version +
-            " · Temporal signal " + control.signal_state));
+            " · Temporal signal " + control.signal_state +
+            " · receipt " + control.receipt_id));
           if (["UNKNOWN", "PENDING"].includes(control.signal_state)) {
             const reconcile = document.createElement("button");
             reconcile.type = "button";
@@ -367,6 +394,8 @@
     } catch (error) {
       if (isCurrent()) {
         refreshHadError = true;
+        durableUnsettled = [];
+        renderRecovery();
         setSync("Update failed", "error");
         el("goals").replaceChildren(label("Unable to load tasks; retry Refresh.", "muted"));
         el("task-detail").replaceChildren(label("Task details unavailable.", "muted"));
@@ -389,6 +418,7 @@
     refreshHadError = false;
     pendingControls.clear();
     uncertainControls.clear();
+    durableUnsettled = [];
     renderRecovery();
     selectedTask = "";
     el("goals").replaceChildren(label("Loading tasks…", "muted"));
