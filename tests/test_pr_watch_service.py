@@ -539,3 +539,92 @@ def test_unsettled_control_readback_only_returns_pending_or_unknown(tmp_path):
         )[1])["control"]
         assert item["signal_state"] == "LOCAL_ONLY"
         assert item["cas_committed"] is True
+
+
+def test_prepared_control_durable_replay_and_cross_owner_isolation(tmp_path):
+    request_id = "1" * 32
+    with server(tmp_path) as api:
+        create(api)
+        prepared = {
+            "request_id": request_id, "action": "pause", "expected_version": 0,
+        }
+        path = "/api/goals/pr-1/controls/prepare"
+        status, data, _ = request(api, "POST", path, who="alice", body=prepared)
+        assert status == 200 and json.loads(data)["request"]["state"] == "PREPARED"
+        status, data, _ = request(api, "POST", path, who="alice", body=prepared)
+        assert status == 200 and json.loads(data)["request"]["state"] == "PREPARED"
+        assert api.service.goals.get(user_id="alice", goal_id="pr-1").version == 0
+        assert request(api, "GET", "/api/control-requests/" + request_id, who="bob")[0] == 404
+        assert json.loads(request(api, "GET", "/api/control-requests", who="bob")[1])["requests"] == []
+        assert request(api, "POST", path, who="bob", body=prepared)[0] == 404
+        assert request(api, "POST", path, who="alice", body={
+            **prepared, "action": "cancel",
+        })[0] == 409
+        status, data, _ = request(api, "GET", "/api/control-requests", who="alice")
+        assert status == 200
+        assert len(json.loads(data)["requests"]) == 1
+        for url in (
+            "/api/control-requests?limit=0",
+            "/api/control-requests?limit=101",
+            "/api/control-requests?user=bob",
+            "/api/control-requests?limit=1&limit=2",
+        ):
+            assert request(api, "GET", url, who="alice")[0] == 400
+        assert request(api, "GET", "/api/control-requests")[0] == 401
+        assert request(api, "POST", "/api/goals/pr-1/pause", who="alice",
+                       body={"expected_version": 0, "request_id": "2" * 32})[0] == 409
+        assert api.service.goals.get(user_id="alice", goal_id="pr-1").version == 0
+    # The prepare response may have been lost and the browser reloaded.
+    with server(tmp_path) as api:
+        status, data, _ = request(
+            api, "GET", "/api/control-requests/" + request_id, who="alice",
+        )
+        assert status == 200 and json.loads(data)["request"]["state"] == "PREPARED"
+        body = {"expected_version": 0, "request_id": request_id}
+        status, data, _ = request(api, "POST", "/api/goals/pr-1/pause", who="alice", body=body)
+        assert status == 202
+        assert json.loads(data)["replayed"] is False
+        assert json.loads(data)["control"]["version"] == 1
+        assert json.loads(request(
+            api, "GET", "/api/control-requests/" + request_id, who="alice",
+        )[1])["request"]["state"] == "COMMITTED"
+        status, data, _ = request(api, "POST", "/api/goals/pr-1/pause", who="alice", body=body)
+        assert status == 202
+        assert json.loads(data)["replayed"] is True
+        assert json.loads(data)["goal"]["version"] == 1
+        assert len(api.service.goals.controls(user_id="alice", goal_id="pr-1")) == 1
+        assert request(api, "POST", "/api/goals/pr-1/cancel", who="alice", body=body)[0] == 409
+
+
+def test_idempotent_retry_never_resends_temporal_signal(tmp_path):
+    request_id = "a" * 32
+    class CountingBridge:
+        calls = 0
+
+        def signal_committed(self, store, *, user_id, goal_id, version):
+            self.calls += 1
+            return store.record_control_signal(
+                user_id=user_id, goal_id=goal_id, version=version,
+                state="ACKED", evidence="SIGNAL_ACK",
+            )
+
+    with server(tmp_path) as api:
+        create(api)
+        bridge = CountingBridge()
+        api.service.bridge = bridge
+        preparation = {"request_id": request_id, "action": "cancel", "expected_version": 0}
+        assert request(api, "POST", "/api/goals/pr-1/controls/prepare",
+                       who="alice", body=preparation)[0] == 200
+        payload = {"expected_version": 0, "request_id": request_id}
+        for i in range(3):
+            status, data, _ = request(
+                api, "POST", "/api/goals/pr-1/cancel", who="alice", body=payload,
+            )
+            assert status == 200
+            assert json.loads(data)["replayed"] is (i != 0)
+        assert bridge.calls == 1
+        assert len(api.service.goals.controls(user_id="alice", goal_id="pr-1")) == 1
+        assert api.service.goals.get(user_id="alice", goal_id="pr-1").state == "CANCELLED"
+        for invalid in ("abc", "Z" * 32, "f" * 33):
+            assert request(api, "POST", "/api/goals/pr-1/controls/prepare",
+                           who="alice", body={**preparation, "request_id": invalid})[0] == 400
