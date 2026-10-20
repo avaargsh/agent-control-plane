@@ -71,3 +71,42 @@ including in failure paths.
   positive Temporal/Telegram reconciliation; missing evidence is not
   proof of absence.
 - No production-grade leader election or unbounded dispatcher.
+
+## PostgreSQL v3 prepared-control concurrency and crash boundary
+
+The separate `tests/test_pr_watch_pg_v3_chaos.py` suite upgrades a
+**new, randomly named isolated schema** directly to v3; it never
+truncates or modifies another tenant/schema. It runs five real PG16 cases:
+
+1. Six concurrent clients execute one prepared `request_id`: exactly one
+   new Goal CAS and Control Journal row, five replays of that receipt.
+2. Two distinct prepared keys compete for the same expected Goal version:
+   exactly one commits. The loser stays PREPARED, becomes stale, and cannot
+   silently advance to a newer Goal version.
+3. The same ID can be prepared by different **authenticated owners**;
+   reusing it across Goals or commands within one owner is rejected.
+4. SIGKILL a dedicated child **after real SQL CAS/Journal/request mutation
+   but before transaction COMMIT**. PostgreSQL must roll all three writes
+   back. Reopening the store reveals PREPARED; an explicit later execution
+   is still possible.
+5. SIGKILL after the real transaction COMMIT but **before any client
+   acknowledgement**. Reopening the store reveals COMMITTED, and replay
+   returns the existing receipt without another Goal CAS/Control Journal row.
+
+The crash instrumentation wraps the production store's connection context,
+not its SQL mutation logic; a child uses its own connection and PID. The
+parent only kills the child it created. A separate v3 test step runs on
+Python 3.11 and 3.12 within `pr-watch-postgres-admission`.
+
+```bash
+python -m pytest -vv -s tests/test_pr_watch_pg_v3_chaos.py -x --timeout=75
+```
+
+**Proof boundary:** these tests establish PostgreSQL transaction
+atomicity and deterministic request replay within the pilot contract.
+They do not establish exactly-once **remote** Temporal Signal delivery,
+nor do they guarantee that a crash between COMMIT and the first signal
+attempt causes a signal to be sent later. A durable PENDING control still
+requires explicit trusted readback/reconciliation. A PREPARED request that
+lost its original response must never be automatically executed on reload.
+Public GitHub Webhook M6 remains NO-GO.
