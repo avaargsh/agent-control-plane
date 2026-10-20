@@ -78,6 +78,9 @@ def _unique_json(raw: bytes) -> dict:
                 ProtocolViolation("non-finite signed JSON value")
             ),
         )
+    except ProtocolViolation:
+        # Preserve exact fail-closed reason (duplicate keys / non-finite input).
+        raise
     except (ValueError, UnicodeError, TypeError) as exc:
         raise ProtocolViolation("invalid signed JSON") from exc
     if not isinstance(result, dict):
