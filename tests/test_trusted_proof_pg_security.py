@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -17,7 +16,6 @@ from agent_control_plane.state_transition_protocol import ProtocolViolation  # n
 from agent_control_plane.trusted_proof_pg import TrustedProofPostgres  # noqa: E402
 from agent_control_plane.trusted_proof_pg_security import (  # noqa: E402
     FUNCTION_SIGNATURE,
-    validate_security_boundary,
 )
 from test_trusted_proof_pg import (  # noqa: E402
     _provision,
@@ -177,9 +175,9 @@ def test_extension_checksum_drift_fails_closed(store):
 
 def test_runtime_cannot_reinstall_or_grant_permissions(verifier_role):
     restricted, role = verifier_role
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+    with pytest.raises(ProtocolViolation, match="schema owner"):
         restricted.install()
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+    with pytest.raises(ProtocolViolation, match="schema owner"):
         restricted.grant_runtime(role)
 
 
