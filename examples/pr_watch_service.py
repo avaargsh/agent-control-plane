@@ -30,6 +30,22 @@ def _goal_payload(value) -> dict:
     return asdict(value) if is_dataclass(value) else dict(value)
 
 
+def _control_receipt(value: dict) -> dict:
+    """Stable identity derived only from an already committed CAS journal row.
+
+    The receipt ID is not an idempotency key and does not prove signal
+    delivery, workflow completion or which HTTP attempt produced the row.
+    """
+    record = dict(value)
+    identity = json.dumps(
+        [record["user_id"], record["goal_id"], record["version"], record["action"]],
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")
+    record["receipt_id"] = "prc_" + hashlib.sha256(identity).hexdigest()[:32]
+    record["cas_committed"] = True
+    return record
+
+
 def _json_default(value):
     if isinstance(value, datetime):
         return value.isoformat()
@@ -299,6 +315,21 @@ class Handler(BaseHTTPRequestHandler):
             if user is None:
                 return
             service = self.server.service
+            if path == "/api/control-receipts":
+                if set(query) - {"limit"} or len(query.get("limit", ["100"])) != 1:
+                    raise WatchError("invalid control receipt query")
+                raw_limit = query.get("limit", ["100"])[0]
+                if not re.fullmatch(r"[1-9][0-9]{0,2}", raw_limit) or int(raw_limit) > 100:
+                    raise WatchError("invalid control receipt limit")
+                # Owner scope originates exclusively from the bearer token.
+                controls = service.goals.list_unsettled_controls(
+                    user_id=user, limit=int(raw_limit),
+                )
+                self._json(200, {
+                    "schema": "pr-watch-control-receipts/v1",
+                    "controls": [_control_receipt(item) for item in controls],
+                })
+                return
             if path == "/api/tasks":
                 # Filters are applied AFTER the authenticated owner-scoped
                 # Goal query and task projection. No caller-supplied identity
@@ -386,15 +417,29 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self._json(200, {"launch": record})
                 return
+            control_detail = re.fullmatch(
+                r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/controls/"
+                r"([1-9][0-9]{0,11})", path
+            )
+            if control_detail:
+                if query:
+                    raise WatchError("unexpected query")
+                # The store scopes the receipt to this authenticated user.
+                record = service.goals.control(
+                    user_id=user, goal_id=control_detail.group(1),
+                    version=int(control_detail.group(2)),
+                )
+                self._json(200, {"control": _control_receipt(record)})
+                return
             control_list = re.fullmatch(
                 r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/controls", path
             )
             if control_list:
                 if query:
                     raise WatchError("unexpected query")
-                self._json(200, {"controls": service.goals.controls(
+                self._json(200, {"controls": [_control_receipt(item) for item in service.goals.controls(
                     user_id=user, goal_id=control_list.group(1),
-                )})
+                )]})
                 return
             match = re.fullmatch(r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})", path)
             if match:
@@ -464,7 +509,7 @@ class Handler(BaseHTTPRequestHandler):
                     user_id=user, goal_id=reconcile_match.group(1),
                     version=int(reconcile_match.group(2)),
                 )
-                self._json(200, {"control": record})
+                self._json(200, {"control": _control_receipt(record)})
                 return
             match = re.fullmatch(
                 r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/(pause|resume|cancel)", path
@@ -482,7 +527,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self._json(
                     200 if control["signal_state"] == "ACKED" else 202,
-                    {"goal": _goal_payload(goal), "control": control},
+                    {"goal": _goal_payload(goal), "control": _control_receipt(control)},
                 )
                 return
             self._json(404, {"error": "not found"})
