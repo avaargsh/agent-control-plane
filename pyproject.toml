@@ -19,6 +19,7 @@ dependencies = [
 mcp = ["mcp>=2,<3"]
 pg-pilot = ["psycopg[binary]>=3.2,<4"]
 proof-verify = ["cryptography>=44,<51"]
+proof-ledger = ["cryptography>=44,<51", "psycopg[binary]>=3.2,<4"]
 dev = [
   "pytest>=8.0",
   "mcp>=2,<3",
