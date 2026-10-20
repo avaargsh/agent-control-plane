@@ -40,3 +40,10 @@ button.danger { border-color:#f1d6d9; background:#fff4f4; color:#b12d3d; }
 .event p { font-size:13px; margin:5px 0 7px; word-break:break-word; }
 footer { margin-top:24px; }
 @media (max-width:750px) { .columns { grid-template-columns:1fr; } .shell { padding:12px 14px 35px; } .auth,.section { padding:16px; } }
+
+.task-toolbar { display:grid; grid-template-columns:1fr 1.5fr .65fr; gap:7px 10px; margin:0 0 10px; align-items:end; }
+.task-toolbar label { grid-row:1; margin:0; }
+.task-toolbar select,.task-toolbar input { grid-row:2; width:100%; min-width:0; height:39px; border:1px solid #d9dce2; border-radius:9px; padding:8px; background:#fff; font:inherit; }
+.task-toolbar select:focus-visible,.task-toolbar input:focus-visible { outline:2px solid #7b8caf; outline-offset:2px; }
+.task-status { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+@media (max-width:500px) { .task-toolbar { grid-template-columns:1fr 1fr; } .task-toolbar label,.task-toolbar select,.task-toolbar input { grid-row:auto; } }

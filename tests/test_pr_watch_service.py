@@ -335,3 +335,33 @@ def test_registration_triggers_temporal_enrollment_only_once(tmp_path):
         assert launcher.calls == 2  # No new provider start from repeated call.
         assert api.service.goals.launch(user_id="alice", goal_id="task")["state"] == "ACKED"
         assert request(api, "GET", "/api/goals/task/launch", who="bob")[0] == 404
+
+
+def test_panel_task_filters_are_served_and_api_remains_scoped(tmp_path):
+    with server(tmp_path) as api:
+        status, html, _ = request(api, "GET", "/")
+        assert status == 200
+        for selector in ('id="task-state"', 'id="task-repo"', 'id="task-limit"'):
+            assert selector in html
+        assert "independently verified success" in html
+        status, js, _ = request(api, "GET", "/pr-watch-panel.js")
+        assert status == 200
+        assert 'api("/api/tasks?" + params.toString())' in js
+        assert "new URLSearchParams()" in js
+        assert "business_outcome_verified = true" not in js
+        assert "localStorage" not in js
+        status, css, _ = request(api, "GET", "/pr-watch-panel.css")
+        assert status == 200 and ".task-toolbar" in css
+        create(api)
+        status, body, _ = request(
+            api, "GET", "/api/tasks?state=WAITING&limit=20", who="alice",
+        )
+        assert status == 200
+        tasks = json.loads(body)["tasks"]
+        assert len(tasks) == 1
+        assert tasks[0]["business_outcome_verified"] is False
+        assert tasks[0]["independent_proof_ref"] is None
+        assert request(api, "GET", "/api/tasks?limit=20", who="bob")[0] == 200
+        assert json.loads(request(
+            api, "GET", "/api/tasks?limit=20", who="bob",
+        )[1])["tasks"] == []
