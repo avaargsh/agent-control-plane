@@ -29,9 +29,9 @@ PREDICATE_TYPE = "https://agent-control-plane.dev/m6-signed-review/v1"
 _MAX_MANIFEST_BYTES = 4_000_000
 _MAX_ENVELOPE_BYTES = 65_536
 _MAX_CLOCK_SKEW_SECONDS = 30
-_SHA256 = re.compile(r"[0-9a-f]{64}\\Z")
-_SHA40 = re.compile(r"[0-9a-f]{40}\\Z")
-_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}\\Z")
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_SHA40 = re.compile(r"[0-9a-f]{40}\Z")
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}\Z")
 
 
 class SignedReviewError(ValueError):
