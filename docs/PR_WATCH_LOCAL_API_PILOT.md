@@ -156,10 +156,16 @@ browser storage. The client must authenticate again after refreshing.
    never proves that a previous HTTP POST reached the service. Distinct
    PREPARED requests can race; CAS still permits only one commit.
 
-The legacy POST with only `expected_version` continues to use strict CAS
-without an idempotent request key. No automatic retry of a missing ACK is
-introduced. The browser interface has not yet been migrated to invoke the
-two-phase path; this is an opt-in authenticated HTTP contract first.
+The local PR Watch browser uses the two-phase path when the service supports
+it. It creates a random request ID in memory, persists PREPARED on the server,
+then submits the keyed action. After a page reload and a new login, an eligible
+PREPARED entry appears with an explicit **Execute prepared** button; no control
+is retried automatically, and Cancel requires renewed confirmation. A PREPARED
+entry whose Goal version has changed is not executable from the panel; inspect
+the server journal instead. The legacy POST with only `expected_version`
+continues to use strict CAS without an idempotent key. On PostgreSQL v2 the
+browser detects HTTP 501 on the optional request-list API and keeps using this
+legacy path until an operator installs v3.
 
 ### PostgreSQL installation gate
 

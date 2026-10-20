@@ -210,6 +210,8 @@ def test_chromium_prevents_duplicate_controls_during_pending_post(page, pilot):
     card = page.locator("#goals .goal").filter(has_text="pr-a")
     with page.expect_request("**/api/goals/pr-a/pause"):
         card.get_by_role("button", name="Pause").click()
+    if not held:
+        page.wait_for_timeout(100)  # Route handler runs after request event.
     assert held
     expect(card.get_by_role("button", name="Pause")).to_be_disabled()
     expect(card.get_by_role("button", name="Cancel")).to_be_disabled()
@@ -401,3 +403,102 @@ def test_chromium_resolved_signal_disappears_after_readonly_refresh(page, pilot)
     )
     page.get_by_role("button", name="Refresh").click()
     expect(page.locator("#control-recovery")).to_be_empty()
+
+
+def test_chromium_two_phase_control_uses_same_request_id(page, pilot):
+    base, server = pilot
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    observed = []
+
+    def record(route):
+        observed.append((route.request.url, route.request.post_data_json))
+        route.continue_()
+
+    page.route("**/api/goals/pr-a/controls/prepare", record)
+    page.route("**/api/goals/pr-a/pause", record)
+    card = page.locator("#goals .goal").filter(has_text="pr-a")
+    card.get_by_role("button", name="Pause").click()
+    expect(card).to_contain_text("PAUSED")
+    assert len(observed) == 2
+    assert observed[0][0].endswith("/controls/prepare")
+    assert observed[1][0].endswith("/pause")
+    identifier = observed[0][1]["request_id"]
+    assert len(identifier) == 32 and identifier.isascii()
+    assert observed[1][1] == {"expected_version": 0, "request_id": identifier}
+    journal = server.service.goals.control_request(
+        user_id="alice", request_id=identifier,
+    )
+    assert journal["state"] == "COMMITTED"
+    assert journal["committed_version"] == 1
+    assert len(server.service.goals.controls(
+        user_id="alice", goal_id="pr-a",
+    )) == 1
+    assert page.evaluate("localStorage.length + sessionStorage.length") == 0
+
+
+def test_chromium_prepared_request_survives_aborted_post_and_reload(page, pilot):
+    base, server = pilot
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    intercepted = []
+    def drop_before_server(route):
+        intercepted.append(route.request.post_data_json)
+        route.abort("failed")  # Explicit transport drop; never forward CAS.
+    page.route("**/api/goals/pr-a/pause", drop_before_server)
+    card = page.locator("#goals .goal").filter(has_text="pr-a")
+    with page.expect_request("**/api/goals/pr-a/pause"):
+        card.get_by_role("button", name="Pause").click()
+    expect(page.locator("#message")).to_contain_text("outcome UNKNOWN")
+    assert len(intercepted) == 1
+    assert server.service.goals.get(user_id="alice", goal_id="pr-a").version == 0
+    assert server.service.goals.list_control_requests(user_id="alice")[0][
+        "state"
+    ] == "PREPARED"
+
+    page.unroute("**/api/goals/pr-a/pause")
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator("#control-recovery")).to_be_empty()
+    page.locator("#token").fill(TOKENS["alice"])
+    page.get_by_role("button", name="Connect").click()
+    expect(page.locator("#control-recovery")).to_contain_text(
+        "CAS not committed; execution requires explicit confirmation",
+    )
+    expect(page.get_by_role("button", name="Execute prepared")).to_be_visible()
+    expect(page.locator("#goals .goal").filter(
+        has_text="pr-a",
+    ).get_by_role("button", name="Pause")).to_be_disabled()
+    # Explicit approval executes the already prepared ID, never a new key.
+    page.get_by_role("button", name="Execute prepared").click()
+    expect(page.locator("#goals .goal").filter(has_text="pr-a")).to_contain_text(
+        "PAUSED",
+    )
+    expect(page.locator("#control-recovery")).not_to_contain_text(
+        "CAS not committed",
+    )
+    assert server.service.goals.list_control_requests(user_id="alice")[0][
+        "state"
+    ] == "COMMITTED"
+    assert len(server.service.goals.controls(
+        user_id="alice", goal_id="pr-a",
+    )) == 1
+    assert page.evaluate("localStorage.length + sessionStorage.length") == 0
+
+
+def test_chromium_pg_v2_feature_gate_uses_legacy_cas_without_prepare(page, pilot):
+    base, server = pilot
+    page.route("**/api/control-requests?limit=100", lambda route: route.fulfill(
+        status=501, content_type="application/json",
+        body='{"error":"operator must install PostgreSQL schema v3"}',
+    ))
+    prepared = []
+    page.route("**/api/goals/pr-a/controls/prepare", lambda route: prepared.append(route))
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    card = page.locator("#goals .goal").filter(has_text="pr-a")
+    card.get_by_role("button", name="Pause").click()
+    expect(card).to_contain_text("PAUSED")
+    assert not prepared, "Legacy fallback must not call unsupported V3 prepare endpoint"
+    assert len(server.service.goals.controls(
+        user_id="alice", goal_id="pr-a",
+    )) == 1

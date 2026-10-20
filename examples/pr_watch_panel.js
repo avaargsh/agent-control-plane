@@ -11,6 +11,8 @@
   // A network failure cannot prove that the CAS mutation did not commit.
   const uncertainControls = new Map();
   let durableUnsettled = [];
+  let preparedRequests = [];
+  let preparedControlsSupported = false;
   const el = (id) => document.getElementById(id);
   const msg = (text) => { el("message").textContent = String(text); };
   const setSync = (text, state) => {
@@ -49,9 +51,71 @@
     }
     return body;
   };
+  const resumePrepared = async (record) => {
+    if (pendingControls.has(record.goal_id) || uncertainControls.has(record.goal_id)) return;
+    // Only an explicit user click may execute a prepared command after reload.
+    if (record.action === "cancel" &&
+        !window.confirm("Cancel " + record.goal_id + "? This cannot be resumed.")) return;
+    const attemptSession = sessionEpoch;
+    pendingControls.add(record.goal_id);
+    renderRecovery();
+    try {
+      const response = await api(
+        "/api/goals/" + encodeURIComponent(record.goal_id) + "/" + record.action,
+        { method: "POST", body: {
+          expected_version: record.expected_version, request_id: record.request_id,
+        }},
+      );
+      if (attemptSession !== sessionEpoch) return;
+      if (response.request_id !== record.request_id || !response.control ||
+          response.control.version !== record.expected_version + 1 ||
+          response.control.action !== record.action) {
+        throw Error("Control receipt incomplete; readback required.");
+      }
+      msg(record.goal_id + ": prepared " + record.action +
+          (response.replayed ? " already committed; existing receipt returned." :
+            " committed; Temporal " + response.control.signal_state +
+            " (not execution proof)."));
+    } catch (error) {
+      if (attemptSession === sessionEpoch) {
+        if (!error.httpStatus || error.httpStatus >= 500) {
+          uncertainControls.set(record.goal_id, {
+            action: record.action, expectedVersion: record.expected_version,
+          });
+          msg(record.goal_id + ": prepared action outcome UNKNOWN; inspect the " +
+              "durable request and control journal. No automatic retry.");
+        } else {
+          msg(record.goal_id + ": prepared action rejected (" + error.message +
+              "); check server state.");
+        }
+      }
+    } finally {
+      if (attemptSession === sessionEpoch) {
+        pendingControls.delete(record.goal_id);
+        await refresh();
+      }
+    }
+  };
   const renderRecovery = () => {
     const area = el("control-recovery");
     area.replaceChildren();
+    for (const record of preparedRequests) {
+      const entry = document.createElement("section");
+      entry.className = "recovery-entry";
+      const note = document.createElement("p");
+      note.textContent = record.goal_id + ": prepared " + record.action +
+        " at v" + record.expected_version +
+        ". CAS not committed; execution requires explicit confirmation.";
+      const execute = document.createElement("button");
+      execute.type = "button";
+      execute.className = "secondary";
+      execute.textContent = "Execute prepared";
+      execute.disabled = pendingControls.has(record.goal_id) ||
+        uncertainControls.has(record.goal_id);
+      execute.addEventListener("click", () => resumePrepared(record));
+      entry.append(note, execute);
+      area.append(entry);
+    }
     // Committed receipts are reconstructed from the server after reconnect.
     // Pending/unknown here refers to the Temporal signal, NOT the CAS commit.
     for (const receipt of durableUnsettled) {
@@ -164,18 +228,40 @@
       button.className = action === "cancel" ? "danger" : "secondary";
       button.textContent = action[0].toUpperCase() + action.slice(1);
       button.addEventListener("click", async () => {
-        if (pendingControls.has(goal.goal_id) || uncertainControls.has(goal.goal_id)) return;
+        if (pendingControls.has(goal.goal_id) || uncertainControls.has(goal.goal_id) ||
+            preparedRequests.some((r) => r.goal_id === goal.goal_id)) return;
         if (action === "cancel" && !window.confirm("Cancel " + goal.goal_id + "? This cannot be resumed.")) return;
         const actionToken = token;
         const actionSession = sessionEpoch;
         pendingControls.add(goal.goal_id);
         for (const controlButton of actions.querySelectorAll("button")) controlButton.disabled = true;
         try {
+          let command = { expected_version: goal.version };
+          if (preparedControlsSupported) {
+            // Request metadata is persisted on the server before execution;
+            // no token or request ID is saved in browser storage.
+            const requestId = crypto.randomUUID().replaceAll("-", "");
+            const prepared = await api(
+              "/api/goals/" + encodeURIComponent(goal.goal_id) + "/controls/prepare", {
+                method: "POST",
+                body: {
+                  request_id: requestId, action, expected_version: goal.version,
+                },
+              }
+            );
+            if (actionToken !== token || actionSession !== sessionEpoch) return;
+            if (!prepared.request || prepared.request.request_id !== requestId ||
+                prepared.request.state !== "PREPARED") {
+              throw Error("Prepare outcome uncertain; read back server request journal.");
+            }
+            command = { ...command, request_id: requestId };
+          }
           const outcome = await api(
             "/api/goals/" + encodeURIComponent(goal.goal_id) + "/" + action, {
-              method: "POST", body: { expected_version: goal.version }
+              method: "POST", body: command
             }
           );
+
           if (actionToken !== token || actionSession !== sessionEpoch) return;
           if (!outcome.control || !outcome.goal ||
               outcome.goal.version !== goal.version + 1 ||
@@ -216,7 +302,8 @@
           }
         }
       });
-      if (pendingControls.has(goal.goal_id) || uncertainControls.has(goal.goal_id)) button.disabled = true;
+      if (pendingControls.has(goal.goal_id) || uncertainControls.has(goal.goal_id) ||
+          preparedRequests.some((r) => r.goal_id === goal.goal_id)) button.disabled = true;
       actions.append(button);
     }
     const inspect = document.createElement("button");
@@ -254,12 +341,23 @@
         api("/api/goals"), api("/api/events?after=0"),
         api("/api/tasks?" + params.toString()),
         api("/api/control-receipts?limit=100"),
+        api("/api/control-requests?limit=100").catch((error) => {
+          if (error.httpStatus === 501) return { unsupported: true, requests: [] };
+          throw error;
+        }),
       ]);
       if (!isCurrent()) return;
       const goals = results[0];
       const events = results[1];
       const tasks = results[2].tasks;
       durableUnsettled = results[3].controls;
+      preparedControlsSupported = !results[4].unsupported;
+      preparedRequests = results[4].requests.filter((record) =>
+        record.state === "PREPARED" && goals.goals.some((goal) =>
+          goal.goal_id === record.goal_id &&
+          goal.version === record.expected_version
+        )
+      );
       renderRecovery();
       const byId = new Map(goals.goals.map((goal) => [goal.goal_id, goal]));
       const cards = tasks.filter((task) => byId.has(task.task_id)).map(
@@ -395,6 +493,7 @@
       if (isCurrent()) {
         refreshHadError = true;
         durableUnsettled = [];
+        preparedRequests = [];
         renderRecovery();
         setSync("Update failed", "error");
         el("goals").replaceChildren(label("Unable to load tasks; retry Refresh.", "muted"));
@@ -419,6 +518,8 @@
     pendingControls.clear();
     uncertainControls.clear();
     durableUnsettled = [];
+    preparedRequests = [];
+    preparedControlsSupported = false;
     renderRecovery();
     selectedTask = "";
     el("goals").replaceChildren(label("Loading tasks…", "muted"));
