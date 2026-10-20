@@ -7,7 +7,6 @@ This fences *participating* PostgreSQL changes, not external identity changes.
 from __future__ import annotations
 
 import hashlib
-import json
 from contextlib import contextmanager
 from typing import Any, Iterator, Mapping
 
@@ -270,7 +269,7 @@ class PostgresCurrentEffectAuthorityReader:
                 "FROM public.acp_live_effect_readers WHERE login_role=%s",
                 (role,),
             ).fetchone()
-            if bound != dict(zip(("tenant_id","project_id","cluster_id"),values)):
+            if bound != dict(zip(("tenant_id","project_id","cluster_id"),values,strict=True)):
                 raise ProtocolViolation("M6 reader cannot silently change scope")
             conn.execute(
                 sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role))
@@ -336,6 +335,7 @@ class PostgresCurrentEffectAuthorityReader:
             keys=dict(zip(
                 ("tenant_id","project_id","cluster_id","work_id","operation_id"),
                 params,
+                strict=True,
             ))
             yield _decode(row,keys) if row is not None else None
 
