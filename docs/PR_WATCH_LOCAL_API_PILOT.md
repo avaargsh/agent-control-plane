@@ -160,7 +160,12 @@ The local PR Watch browser uses the two-phase path when the service supports
 it. It creates a random request ID in memory, persists PREPARED on the server,
 then submits the keyed action. After a page reload and a new login, an eligible
 PREPARED entry appears with an explicit **Execute prepared** button; no control
-is retried automatically, and Cancel requires renewed confirmation. A PREPARED
+is retried automatically, and Cancel requires renewed confirmation. Already
+COMMITTED client requests appear in a collapsed, owner-scoped **Committed
+client requests** history, including the stable request ID and CAS version;
+opening Task detail is a read-only lookup and never retransmits control signals.
+A COMMITTED client request proves only the database CAS and associated
+control-intent transaction, not Temporal delivery or business execution. A PREPARED
 entry whose Goal version has changed is not executable from the panel; inspect
 the server journal instead. The legacy POST with only `expected_version`
 continues to use strict CAS without an idempotent key. On PostgreSQL v2 the
