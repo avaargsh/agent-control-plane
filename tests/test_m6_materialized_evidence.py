@@ -144,6 +144,16 @@ def test_missing_pair_identity_or_fake_delivery_denied(tmp_path):
     assert verify_materialized(manifest, root)["decision"] == "NO_GO"
 
 
+def test_symlinked_evidence_root_is_denied(tmp_path):
+    target = tmp_path / "actual"
+    manifest = fixture_bundle(target)
+    link = tmp_path / "root-link"
+    link.symlink_to(target, target_is_directory=True)
+    result = verify_materialized(manifest, link)
+    assert result["decision"] == "NO_GO"
+    assert any("evidence root unavailable" in x for x in result["errors"])
+
+
 def test_oversized_and_missing_gate_file_denied(tmp_path):
     root = tmp_path / "bundle"
     manifest = fixture_bundle(root)
@@ -176,6 +186,15 @@ def test_cli_only_file_matched_does_not_release_and_fails_on_missing_root(tmp_pa
     )
     assert missing.returncode == 1
     assert json.loads(missing.stdout)["decision"] == "NO_GO"
+
+    link = tmp_path / "manifest-link.json"
+    link.symlink_to(manifest_path)
+    symlinked = subprocess.run(
+        cmd[:2] + [str(link)] + cmd[3:],
+        check=False, capture_output=True, text=True,
+    )
+    assert symlinked.returncode == 1
+    assert json.loads(symlinked.stdout)["decision"] == "NO_GO"
 
 
 def test_untrusted_non_object_manifest_is_no_go(tmp_path):
