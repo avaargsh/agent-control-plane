@@ -4,7 +4,7 @@
   let selectedTask = "";
   let refreshEpoch = 0;
   const el = (id) => document.getElementById(id);
-  const msg = (text) => { el("message").textContent = text; };
+  const msg = (text) => { el("message").textContent = String(text); };
   const label = (text, css = "") => {
     const node = document.createElement("span");
     node.textContent = String(text);
@@ -24,9 +24,12 @@
       cache: "no-store",
       credentials: "omit",
     });
-    const body = await result.json();
+    const body = await result.json().catch(() => ({}));
     if (requestToken !== token) throw Error("Session changed; stale response discarded.");
-    if (!result.ok) throw Error(body.error || "Request failed");
+    if (!result.ok) {
+      const detail = typeof body.error === "string" ? body.error : "Request failed";
+      throw Error("HTTP " + result.status + ": " + detail);
+    }
     return body;
   };
   const goalCard = (goal, task) => {
@@ -251,7 +254,14 @@
       });
       el("events").replaceChildren(...nodes);
       if (!nodes.length) el("events").append(label("No events yet.", "muted"));
-    } catch (error) { if (isCurrent()) msg(error.message); }
+    } catch (error) {
+      if (isCurrent()) {
+        el("goals").replaceChildren(label("Unable to load tasks; retry Refresh.", "muted"));
+        el("task-detail").replaceChildren(label("Task details unavailable.", "muted"));
+        el("events").replaceChildren(label("Activity unavailable.", "muted"));
+        msg(error.message);
+      }
+    }
   };
   el("connect").addEventListener("click", async () => {
     ++refreshEpoch;

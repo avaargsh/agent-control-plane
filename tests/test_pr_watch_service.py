@@ -436,3 +436,16 @@ def test_panel_discards_stale_async_results_and_confirms_cancel(tmp_path):
         assert 'window.confirm("Cancel "' in script
         assert "innerHTML" not in script
         assert "localStorage" not in script
+
+
+def test_panel_does_not_retain_stale_task_views_on_refresh_error(tmp_path):
+    with server(tmp_path) as api:
+        status, script, _ = request(api, "GET", "/pr-watch-panel.js")
+        assert status == 200
+        assert 'result.json().catch(() => ({}))' in script
+        assert '"HTTP " + result.status' in script
+        assert "Unable to load tasks; retry Refresh." in script
+        assert "Task details unavailable." in script
+        assert "Activity unavailable." in script
+        assert "if (isCurrent())" in script
+        assert "innerHTML" not in script
