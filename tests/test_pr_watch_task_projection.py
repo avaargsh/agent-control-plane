@@ -188,3 +188,49 @@ def test_task_http_projection_is_authenticated_and_owner_scoped(tmp_path):
         assert status == 200 and item["task"]["task_id"] == "shared"
         assert request(api, "/api/goals/shared", who="alice")[0] == 200
         assert request(api, "/api/tasks/shared", who="alice", method="POST", payload={})[0] == 404
+
+
+def test_task_list_filters_by_state_repo_and_limit_without_cross_user_leak(tmp_path):
+    with local_api(tmp_path) as api:
+        for who, goal_id, repo in (
+            ("alice", "g-one", REPO),
+            ("alice", "g-two", "example/second"),
+            ("bob", "private", REPO),
+        ):
+            status, _ = request(
+                api, "/api/goals", who=who, method="POST",
+                payload={"goal_id": goal_id, "repo": repo, "number": 10},
+            )
+            assert status == 200
+        status, body = request(api, "/api/tasks?state=WAITING", who="alice")
+        assert status == 200
+        assert {t["task_id"] for t in body["tasks"]} == {"g-one", "g-two"}
+        status, body = request(api, "/api/tasks?repo=" + REPO, who="alice")
+        assert status == 200
+        assert [t["task_id"] for t in body["tasks"]] == ["g-one"]
+        status, body = request(
+            api, "/api/tasks?repo=" + REPO + "&state=WAITING&limit=1",
+            who="alice",
+        )
+        assert status == 200
+        assert [t["task_id"] for t in body["tasks"]] == ["g-one"]
+        status, body = request(api, "/api/tasks?state=ACTIVE", who="alice")
+        assert status == 200 and body["tasks"] == []
+        status, body = request(api, "/api/tasks?limit=1", who="alice")
+        assert status == 200 and len(body["tasks"]) == 1
+        assert request(api, "/api/tasks?state=WAITING", who="bob")[1]["tasks"][0][
+            "task_id"
+        ] == "private"
+        assert request(api, "/api/tasks?state=WAITING")[0] == 401
+
+
+@pytest.mark.parametrize("query", [
+    "user_id=bob", "state=SUCCEEDED", "state=", "state=WAITING&state=ACTIVE",
+    "repo=", "repo=other", "repo=../admin", "repo=example%2F..",
+    "repo=example/second&repo=example/second",
+    "limit=0", "limit=101", "limit=-1", "limit=01", "limit=abc",
+    "limit=1&limit=2", "unknown=1", "state=WAITING&user_id=bob",
+])
+def test_task_query_invalid_parameters_fail_closed(tmp_path, query):
+    with local_api(tmp_path) as api:
+        assert request(api, "/api/tasks?" + query, who="alice")[0] == 400
