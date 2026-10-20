@@ -49,15 +49,26 @@ class TrustedReviewer:
 
 
 def _read_regular(path: Path, limit: int) -> bytes:
+    """Read a bounded regular file without following a final-component symlink.
+
+    The O_NOFOLLOW open is the security boundary; the earlier path check is
+    only for a clearer error and is not relied on to prevent a TOCTOU swap.
+    """
     if path.is_symlink():
         raise SignedReviewError("symlink input denied")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        with path.open("rb") as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+        descriptor = os.open(path, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 raise SignedReviewError("regular file required")
-            data = stream.read(limit + 1)
+            with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                data = stream.read(limit + 1)
+        finally:
+            os.close(descriptor)
     except OSError as exc:
-        raise SignedReviewError("input unavailable") from exc
+        raise SignedReviewError("input unavailable or unsafe") from exc
     if not data or len(data) > limit:
         raise SignedReviewError("input empty or exceeds size limit")
     return data
