@@ -502,3 +502,75 @@ def test_chromium_pg_v2_feature_gate_uses_legacy_cas_without_prepare(page, pilot
     assert len(server.service.goals.controls(
         user_id="alice", goal_id="pr-a",
     )) == 1
+
+
+def test_chromium_committed_keyed_control_recovers_after_lost_ack_and_reload(page, pilot):
+    """After durable CAS but lost HTTP ACK, only read back; never submit again."""
+    base, server = pilot
+    connect(page, base)
+    expect(page.locator("#goals .goal")).to_have_count(2)
+    attempts = []
+
+    def commit_then_drop(route):
+        body = route.request.post_data_json
+        attempts.append(body)
+        # Send the same authenticated request to the local pilot to commit,
+        # but drop the Chromium request before it reaches the server.
+        req = Request(
+            base + "/api/goals/pr-a/pause",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": "Bearer " + TOKENS["alice"],
+                "Content-Type": "application/json",
+            },
+        )
+        with urlopen(req, timeout=5) as response:
+            assert response.status == 202
+        route.abort("failed")
+
+    page.route("**/api/goals/pr-a/pause", commit_then_drop)
+    card = page.locator("#goals .goal").filter(has_text="pr-a")
+    card.get_by_role("button", name="Pause").click()
+    expect(page.locator("#message")).to_contain_text("outcome UNKNOWN")
+    assert len(attempts) == 1
+    request_id = attempts[0]["request_id"]
+    assert server.service.goals.control_request(
+        user_id="alice", request_id=request_id,
+    )["state"] == "COMMITTED"
+    assert server.service.goals.get(user_id="alice", goal_id="pr-a").version == 1
+    assert len(server.service.goals.controls(
+        user_id="alice", goal_id="pr-a",
+    )) == 1
+
+    page.unroute("**/api/goals/pr-a/pause")
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator("#control-recovery")).to_be_empty()
+    page.locator("#token").fill(TOKENS["alice"])
+    page.get_by_role("button", name="Connect").click()
+    expect(page.locator("#goals .goal").filter(
+        has_text="pr-a",
+    )).to_contain_text("PAUSED")
+    history = page.locator("#control-recovery .committed-history")
+    expect(history).to_have_count(1)
+    history.locator("summary").click()
+    expect(history).to_contain_text("CAS COMMITTED")
+    expect(history).to_contain_text(request_id)
+    expect(history).to_contain_text("do not prove")
+    expect(page.get_by_role("button", name="Execute prepared")).to_have_count(0)
+
+    # This button performs a read-only detail lookup, not a second CAS.
+    history.get_by_role("button", name="Inspect committed control").click()
+    expect(page.locator("#task-detail")).to_contain_text("Control journal")
+    expect(page.locator("#task-detail")).to_contain_text("receipt prc_")
+    assert len(attempts) == 1
+    assert len(server.service.goals.controls(
+        user_id="alice", goal_id="pr-a",
+    )) == 1
+    assert page.evaluate("localStorage.length + sessionStorage.length") == 0
+
+    # Changing identity clears the previous user's recovered request history.
+    page.locator("#token").fill(TOKENS["bob"])
+    page.get_by_role("button", name="Connect").click()
+    expect(page.locator("#goals")).to_contain_text("pr-bob")
+    expect(page.locator("#control-recovery .committed-history")).to_have_count(0)
