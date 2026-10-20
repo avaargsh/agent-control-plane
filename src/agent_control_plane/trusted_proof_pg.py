@@ -19,6 +19,7 @@ from .state_transition_protocol import ProtocolViolation
 from .trusted_proof_pg_security import (
     grant_runtime_access,
     install_security_boundary,
+    require_schema_operator,
     validate_security_boundary,
 )
 from .trusted_proof_envelope import (
@@ -158,6 +159,7 @@ class TrustedProofPostgres:
     def install(self) -> None:
         """Explicit operator action only; never invoked during verification."""
         with self._connection() as conn:
+            require_schema_operator(conn)
             conn.execute("SET LOCAL lock_timeout = '8s'")
             conn.execute("SELECT pg_advisory_xact_lock(%s)", (ADVISORY_LOCK,))
             names = (
@@ -189,6 +191,7 @@ class TrustedProofPostgres:
     def grant_runtime(self, role: str) -> None:
         """Operator-only GRANT with postcondition denying signer/receipt writes."""
         with self._connection() as conn:
+            require_schema_operator(conn)
             self._verify_schema(conn)
             grant_runtime_access(conn, role)
 
