@@ -76,3 +76,16 @@ reports larger than 4 MiB before JSON parsing. These checks bound accidental
 or hostile local evidence inputs; they do not authenticate the author or prove
 that a report was produced from a real GitHub delivery. The final decision
 remains `NO_GO` until independently verified live evidence and signed review.
+
+
+## Signed independent reviewer decision
+
+The text field `reviewer_decision=GO` is not a signature. Use the separate
+`m6_signed_review.py` verifier to authenticate a detached DSSE/Ed25519
+decision from an externally pinned reviewer key. It binds the exact manifest
+bytes and expected deployed commit, and for GO rechecks every materialized
+evidence file and the paired PR/check reports.
+
+See [M6 signed review verification](M6_SIGNED_REVIEW.md). A valid signature
+returns `SIGNED_GO_VERIFIED_NOT_RELEASED`, **not GO**. Every result continues
+to report `release_decision=NO_GO`; no deployment action is exposed.
