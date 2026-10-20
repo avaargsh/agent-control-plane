@@ -389,3 +389,36 @@ def test_task_detail_and_activity_panel_uses_scoped_read_only_endpoints(tmp_path
         assert detail["independent_proof_ref"] is None
         assert request(api, "GET", "/api/tasks/pr-1", who="bob")[0] == 404
         assert request(api, "GET", "/api/events?after=0", who="bob")[0] == 200
+
+
+def test_panel_exposes_scoped_launch_and_control_reconciliation(tmp_path):
+    with server(tmp_path) as api:
+        create(api)
+        status, script, _ = request(api, "GET", "/pr-watch-panel.js")
+        assert status == 200
+        assert '"/launch/reconcile"' in script
+        assert '"/controls/" + control.version + "/reconcile"' in script
+        assert "Control journal" in script
+        assert "does not prove workflow completion" in script
+        assert "not execution proof" in script
+        assert "innerHTML" not in script
+        assert "localStorage" not in script
+        assert request(api, "GET", "/api/goals/pr-1/launch", who="bob")[0] == 404
+        assert request(api, "GET", "/api/goals/pr-1/controls", who="bob")[0] == 404
+        status, data, _ = request(
+            api, "POST", "/api/goals/pr-1/pause", who="alice",
+            body={"expected_version": 0},
+        )
+        assert status == 202
+        assert json.loads(data)["control"]["signal_state"] == "LOCAL_ONLY"
+        status, data, _ = request(
+            api, "GET", "/api/goals/pr-1/controls", who="alice",
+        )
+        assert status == 200
+        assert len(json.loads(data)["controls"]) == 1
+        status, data, _ = request(
+            api, "POST", "/api/goals/pr-1/launch/reconcile",
+            who="alice", body={},
+        )
+        assert status == 200
+        assert json.loads(data)["launch"]["mode"] == "LOCAL_ONLY"
