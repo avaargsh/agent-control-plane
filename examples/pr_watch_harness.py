@@ -515,7 +515,7 @@ class GoalStore:
                 )
                 db.execute(
                     """INSERT INTO pr_watch_control_intents
-                       (user_id,goal_id,version,action) VALUES (?,?,?,?)""",
+                       (user_id,goal_id,version,action,evidence) VALUES (?,?,?,?,"UNATTEMPTED_V3")""",
                     (user_id, goal_id, expected_version + 1, action),
                 )
                 db.execute(
@@ -571,6 +571,42 @@ class GoalStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def claim_control_signal(
+        self, *, user_id: str, goal_id: str, version: int,
+        unattempted_only: bool = False,
+    ) -> dict | None:
+        """Commit the one-way send fence BEFORE any Temporal network I/O.
+
+        NULL evidence in legacy PENDING rows never proves no prior send.
+        Explicit recovery therefore only claims a new keyed, untouched
+        UNATTEMPTED_V3 row. Once claimed, a crash leaves UNKNOWN rather
+        than a new opportunity for blind resend.
+        """
+        if not user_id or not goal_id or type(version) is not int or version < 1:
+            raise WatchError("invalid control identity")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """SELECT * FROM pr_watch_control_intents
+                   WHERE user_id=? AND goal_id=? AND version=?""",
+                (user_id, goal_id, version),
+            ).fetchone()
+            if row is None:
+                raise WatchError("control not found within user scope")
+            if row["signal_state"] != "PENDING" or (
+                unattempted_only and row["evidence"] != "UNATTEMPTED_V3"
+            ):
+                return None
+            db.execute(
+                """UPDATE pr_watch_control_intents SET
+                   signal_state='UNKNOWN', evidence='ACK_UNCERTAIN',
+                   checked_at=datetime('now')
+                   WHERE user_id=? AND goal_id=? AND version=?
+                     AND signal_state='PENDING'""",
+                (user_id, goal_id, version),
+            )
+        return self.control(user_id=user_id, goal_id=goal_id, version=version)
+
     def record_control_signal(
         self, *, user_id: str, goal_id: str, version: int,
         state: str, evidence: str,
@@ -595,7 +631,7 @@ class GoalStore:
                 return self.control(user_id=user_id, goal_id=goal_id, version=version)
             if row["signal_state"] != "PENDING" and (
                 row["signal_state"], state
-            ) not in (("UNKNOWN", "ACKED"), ("NO_WORKFLOW", "ACKED")):
+            ) not in (("UNKNOWN", "ACKED"), ("UNKNOWN", "NO_WORKFLOW"), ("NO_WORKFLOW", "ACKED")):
                 return self.control(user_id=user_id, goal_id=goal_id, version=version)
             db.execute(
                 """UPDATE pr_watch_control_intents SET signal_state=?,
