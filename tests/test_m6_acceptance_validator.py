@@ -92,3 +92,19 @@ def test_cli_missing_file_fails_closed(tmp_path):
     )
     assert result.returncode == 1
     assert json.loads(result.stdout)["decision"] == "NO_GO"
+
+def test_unhashable_nested_gate_status_fails_closed():
+    for value in ([], {}, None, 7, True):
+        item = report()
+        item["gates"]["raw_body_hmac_verified"]["outcome"] = value
+        result = validate(item)
+        assert result["decision"] == "NO_GO"
+        assert any("raw_body_hmac_verified" in error for error in result["errors"])
+
+
+def test_untrusted_non_object_gate_fails_closed():
+    for value in ([], "PASS", None, 3):
+        item = report()
+        item["gates"]["raw_body_hmac_verified"] = value
+        assert validate(item)["decision"] == "NO_GO"
+
