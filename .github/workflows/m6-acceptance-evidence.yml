@@ -11,6 +11,7 @@ on:
       - 'tests/test_m6_paired_delivery_evidence.py'
       - 'tests/test_m6_signed_review.py'
       - 'docs/M6_ACCEPTANCE_VALIDATOR.md'
+      - 'docs/M6_SIGNED_REVIEW.md'
       - '.github/workflows/m6-acceptance-evidence.yml'
   push:
     branches: [main]
