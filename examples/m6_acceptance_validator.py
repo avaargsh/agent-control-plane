@@ -57,7 +57,8 @@ def validate(report: object) -> dict:
         errors.append("gate keys must exactly match the pinned acceptance matrix")
     for key in GATES:
         item = gates.get(key)
-        if not isinstance(item, dict) or item.get("outcome") not in OUTCOMES:
+        if (not isinstance(item, dict) or not isinstance(item.get("outcome"), str)
+                or item["outcome"] not in OUTCOMES):
             errors.append(f"{key}: invalid or missing outcome")
             continue
         if not isinstance(item.get("evidence_sha256"), str) or not HEX64.fullmatch(item["evidence_sha256"]):
