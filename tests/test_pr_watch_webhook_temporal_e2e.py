@@ -151,10 +151,21 @@ def test_signed_webhook_wakes_existing_workflow_and_observes_real_state(tmp_path
                 wrong_history = await asyncio.to_thread(
                     witness.prove, signal_id + "-not-recorded",
                 )
+                # Operator release evidence must prove cardinality exactly one,
+                # not merely the positive-existence proof used for ACK recovery.
+                exact_one = await asyncio.to_thread(
+                    witness.prove_exactly_once, signal_id,
+                )
+                missing_one = await asyncio.to_thread(
+                    witness.prove_exactly_once,
+                    "pr-watch-webhook:" + "f" * 64,
+                )
 
         assert failed_proof == {"signal_state": "UNKNOWN"}
         assert verified_proof == {"signal_state": "ACKED"}
         assert wrong_history is False
+        assert exact_one is True
+        assert missing_one is False
         assert first == {"status": "accepted", "signal_state": "ACKED"}
         assert duplicate == {"status": "duplicate", "signal_state": "ACKED"}
         assert result["state"] == "FINISHED" and result["phase"] == "MERGED"

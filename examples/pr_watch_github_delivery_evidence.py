@@ -76,6 +76,56 @@ def _headers(value: object) -> dict[str, str]:
     return normalized
 
 
+def verify_hook_configuration(
+    *, hook: object, hook_id: int, event: str, expected_endpoint: str,
+) -> dict:
+    """Current GitHub hook configuration; NOT a historical secret attestation.
+
+    GitHub REST includes active/event/TLS properties of the current hook.
+    It does not prove that a secret existed at the time of an older delivery,
+    nor does it reveal the original receiver's signed raw HTTP body.
+    """
+    if not isinstance(hook, dict) or not _positive(hook_id):
+        raise EvidenceAuditError("GitHub hook configuration unavailable")
+    if (
+        type(hook.get("id")) is not int or hook["id"] != hook_id
+        or hook.get("type") != "Repository"
+        or hook.get("name") != "web"
+        or hook.get("active") is not True
+    ):
+        raise EvidenceAuditError("GitHub webhook identity or active state mismatch")
+    config = hook.get("config")
+    if not isinstance(config, dict):
+        raise EvidenceAuditError("GitHub webhook configuration missing")
+    insecure_ssl = config.get("insecure_ssl")
+    if (
+        config.get("url") != expected_endpoint
+        or not _endpoint(expected_endpoint)
+        or config.get("content_type") != "json"
+        or type(insecure_ssl) not in (str, int)
+        or insecure_ssl not in ("0", 0)
+    ):
+        raise EvidenceAuditError("GitHub webhook endpoint, TLS or encoding unsafe")
+    events = hook.get("events")
+    allowed = frozenset(("pull_request", "check_run", "check_suite"))
+    if (
+        not isinstance(events, list) or not events
+        or any(not isinstance(item, str) for item in events)
+        or len(set(events)) != len(events)
+        or not set(events).issubset(allowed)
+        or "pull_request" not in events
+        or not set(events).intersection(("check_run", "check_suite"))
+        or event not in events
+    ):
+        raise EvidenceAuditError("GitHub webhook events are too broad or incomplete")
+    return {
+        "github_webhook_configuration": "CURRENT_ACTIVE_CONFIG_MATCHED",
+        "github_webhook_tls_verification": "CURRENTLY_REQUIRED",
+        "github_webhook_event_scope": "EXACT_PR_CHECK_ALLOWLIST",
+        "github_webhook_secret_provisioning": "NOT_ATTESTED_BY_API",
+    }
+
+
 def verify_delivery_record(
     *, record: dict, repository: dict, repo: str, number: int,
     guid: str, hook_id: int, delivery_id: int, expected_endpoint: str,
@@ -203,6 +253,12 @@ def _read_json(*, repo: str, path: str, token: str) -> dict:
         raise EvidenceAuditError("GitHub webhook read token required")
     if not isinstance(repo, str) or not _REPO.fullmatch(repo):
         raise EvidenceAuditError("invalid repository selector")
+    # Operator auditor is strictly for repository metadata and hook evidence.
+    # Callers must never steer its bearer token to unrelated REST endpoints.
+    if path != "" and not re.fullmatch(
+        r"/hooks/[1-9][0-9]{0,19}(?:/deliveries/[1-9][0-9]{0,19})?", path
+    ):
+        raise EvidenceAuditError("unsupported GitHub audit GET path")
     owner, name = repo.split("/", 1)
     url = ("https://api.github.com/repos/" + quote(owner, safe="")
            + "/" + quote(name, safe="") + path)
@@ -237,7 +293,7 @@ def _read_json(*, repo: str, path: str, token: str) -> dict:
 def audit_github_delivery(
     *, dsn: str, user_id: str, goal_id: str, guid: str,
     hook_id: int, delivery_id: int, expected_endpoint: str,
-    token: str, prove=None, fetch_json=None,
+    token: str, prove=None, prove_once=None, fetch_json=None,
 ) -> dict:
     """Read both PG and GitHub API, never change webhook registration/state."""
     if not _positive(hook_id) or not _positive(delivery_id) or (
@@ -248,7 +304,7 @@ def audit_github_delivery(
     # checked before making any provider requests.
     report = audit_delivery(
         dsn=dsn, user_id=user_id, goal_id=goal_id,
-        delivery=guid, prove=prove,
+        delivery=guid, prove=prove_once if prove_once is not None else prove,
     )
     store = PostgresWatchStore(dsn)
     goal = store.goal(user_id=user_id, goal_id=goal_id)
@@ -257,8 +313,16 @@ def audit_github_delivery(
         def fetch_json(path):
             return _read_json(repo=repo, path=path, token=token)
     repository = fetch_json("")
+    hook = fetch_json("/hooks/" + str(hook_id))
     record = fetch_json(
         "/hooks/" + str(hook_id) + "/deliveries/" + str(delivery_id)
+    )
+    # Both the current hook configuration and delivery history are official
+    # GitHub API reads; neither is trusted as an HMAC raw-body attestation.
+    current_config = verify_hook_configuration(
+        hook=hook, hook_id=hook_id,
+        event=record.get("event") if isinstance(record, dict) else "",
+        expected_endpoint=expected_endpoint,
     )
     matched = verify_delivery_record(
         record=record, repository=repository, repo=repo,
@@ -266,6 +330,12 @@ def audit_github_delivery(
         delivery_id=delivery_id, expected_endpoint=expected_endpoint,
     )
     report.update(matched)
+    report.update(current_config)
+    report["temporal_signal_cardinality"] = (
+        "EXACTLY_ONE_PROVEN" if (
+            prove_once is not None and report["temporal_history"] == "PROVEN"
+        ) else "NOT_PROVEN"
+    )
     report["actual_github_delivery_origin"] = "GITHUB_API_RECORD_CORROBORATED"
     # GitHub API request.payload is parsed JSON; exact raw bytes cannot be
     # reconstructed. This is not HMAC re-verification, operator signoff or GO.
@@ -295,10 +365,11 @@ def main() -> None:
         prove = None
         if args.temporal_address:
             from pr_watch_webhook import TemporalWebhookWake
-            prove = TemporalWebhookWake(
+            witness = TemporalWebhookWake(
                 args.temporal_address, args.temporal_namespace,
                 args.user, args.goal,
-            ).prove
+            )
+            prove = witness.prove_exactly_once
         report = audit_github_delivery(
             dsn=os.getenv("PR_WATCH_PG_DSN", ""),
             user_id=args.user, goal_id=args.goal,
@@ -306,7 +377,7 @@ def main() -> None:
             delivery_id=args.github_delivery_id,
             expected_endpoint=args.expected_endpoint,
             token=os.getenv("PR_WATCH_GITHUB_HOOK_READ_TOKEN", ""),
-            prove=prove,
+            prove_once=prove,
         )
     except EvidenceAuditError as exc:
         parser.error(str(exc))

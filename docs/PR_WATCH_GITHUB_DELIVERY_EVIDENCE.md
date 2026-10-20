@@ -18,7 +18,8 @@ own record that it sent a specific event to the configured endpoint**.
   delivery ID are **different** and both are required.
 - A separate, short-lived, operator-supplied read-only token, with fine-grained
   **Webhooks: read** permission for that specific repository. The tool calls
-  only `GET /repos/{owner}/{repo}` and
+  only `GET /repos/{owner}/{repo}`,
+  `GET /repos/{owner}/{repo}/hooks/{hook_id}` and
   `GET /repos/{owner}/{repo}/hooks/{hook_id}/deliveries/{delivery_id}`.
   The token must additionally be allowed to read repository metadata.
 - Exact HTTPS destination URL (e.g. `https://staging.example.org/webhooks/github`),
@@ -60,6 +61,13 @@ team (hashes are pseudonymous, not anonymized).
 - Exact Hook ID, numeric GitHub delivery ID, canonical delivery GUID, request
   headers, allowed event/action, previously bound PR number or check association,
   and independently supplied HTTPS destination.
+- Current GitHub Hook configuration: active Repository webhook, JSON payload,
+  TLS certificate verification enabled (insecure_ssl=0), exact expected HTTPS
+  endpoint, and ONLY pull_request / check_run / check_suite subscriptions.
+  At least one check event and pull_request are required. Disabled hooks,
+  catch-all subscriptions or unrelated push events fail closed.
+  The GitHub Hook API cannot independently attest webhook secret provisioning
+  or historic configuration at the time a past event was delivered.
 - GitHub observed an HTTP 202 `accepted` or 200 `duplicate` with the
   expected receiver JSON acknowledgement, rather than a 2xx `ignored` hint.
 - The same GUID exists in the scoped PostgreSQL Inbox. Its SHA-256 payload
@@ -67,7 +75,13 @@ team (hashes are pseudonymous, not anonymized).
   Optional real Temporal History yields `PROVEN` only after an exact Signal.
 - No automatic retry after `UNKNOWN`, no Signal mutation, no DDL, no GitHub
   webhook write. HTTP client targets **only api.github.com** with GET, refuses
-  redirects and bounds responses to 2 MiB.
+  redirects, allows only the precise repository/Hook/delivery GET paths,
+  and bounds responses to 2 MiB.
+- With --temporal-address, the operator auditor checks the exact deterministic
+  Workflow History for ONE and only one matching, decodable wake. The output
+  temporal_signal_cardinality=EXACTLY_ONE_PROVEN is never set from
+  positive-existence checks or a webhook ACK. Reconciliation keeps its
+  positive-existence proof; it must not resend UNKNOWN deliveries.
 
 ### Critical limitation: parsed JSON is *not* raw signed bytes
 
@@ -98,7 +112,9 @@ PR_WATCH_PG_TEST_DSN='postgresql://.../disposable' \
 ```
 
 The CI tests perform **real PG16 journal writes + read-only audits** with
-*injected GitHub API record fixtures*. They test mismatched repo ID, GUID,
+*injected GitHub API current Hook and delivery record fixtures*.
+Temporal cardinality has independent malformed/duplicate History tests
+and a real Temporal SDK History E2E assertion. They test mismatched repo ID, GUID,
 Hook ID, PR selectors, wrong endpoint, response/duplicate semantics, missing
 History proof, and raw-secret redaction. They do NOT contact GitHub's Webhook
 delivery API or attest a live external event, because CI has no configured

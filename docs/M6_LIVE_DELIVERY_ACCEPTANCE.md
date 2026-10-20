@@ -12,15 +12,16 @@ Default decision is **NO-GO**. No public listener, GitHub webhook registration, 
 
 - [ ] Record exact repository commit, operator approval, disposable environment identifiers and review time.
 - [ ] Confirm current PG16 V2 migration ledger, optional Inbox extension checksum, existing backup and restore rehearsal; perform no request-time DDL.
-- [ ] Review effective Nginx config and certificate chain, raw-byte body forwarding, fixed backend Host, restricted routes, method and Origin checks, request-size cap, rate limits and secret rotation. Do not reuse the localhost-only self-signed CI template as a public production configuration.
+- [ ] Review effective Nginx config and certificate chain, raw-byte body forwarding, fixed backend Host, restricted routes, method and Origin checks, request-size cap, rate limits and secret rotation.
+- [ ] Using GitHub Webhooks:read (no write), independently fetch the **current** Hook configuration; require active, JSON, insecure_ssl=0, exact expected endpoint, narrow pull_request + associated checks subscriptions. This does not attest the historical Hook configuration or secret. Do not reuse the localhost-only self-signed CI template as a public production configuration.
 - [ ] Confirm authenticated Goal owner/repo/PR binding, read-only GitHub token permissions, Temporal Workflow ID, History retention and event observation API.
 - [ ] Capture pre-delivery Inbox count, Goal version, Workflow History watermark and task projection. Do not infer success from a baseline snapshot digest.
 
 ## 2. Real delivery and independent observation
 
 - [ ] Register the explicitly authorized disposable GitHub webhook using the reviewed external HTTPS endpoint and a non-production secret. Capture redacted GitHub delivery ID, event type, HTTP response class, delivery timestamp and redelivery status.
-- [ ] Trigger a real pull_request event for the bound PR. Verify HMAC over exact raw bytes at the receiver; separately capture Inbox claim and one matching Temporal wake Signal in Workflow History.
-- [ ] Trigger an explicitly PR-associated check_run.completed or check_suite.completed event. If GitHub omits pull_requests[] (e.g. fork checks), record polling fallback, not a fabricated association.
+- [ ] Trigger a real pull_request event for the bound PR. Verify HMAC over exact raw bytes at the receiver; separately capture Inbox claim and **exactly one** matching Temporal wake Signal from the complete Workflow History. Existence alone is insufficient for release evidence.
+- [ ] Trigger an explicitly PR-associated check_run.completed or check_suite.completed event. Independently prove **exactly one** scoped wake for this distinct GUID. If GitHub omits pull_requests[] (e.g. fork checks), record polling fallback, not a fabricated association.
 - [ ] Worker independently refetches the exact GitHub PR and CI using a read-only credential. Compare observed PR identity/head SHA and outcome with the stored Goal and authenticated scoped events.
 - [ ] GET /api/tasks/{goal_id} must remain business_outcome_verified=false and independent_proof_ref=null even after observed MERGED. Only ACP #191 trusted-signer and exact-operation proof work may introduce independently verified completion in a separately reviewed contract.
 
