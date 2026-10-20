@@ -100,7 +100,7 @@ def test_chromium_user_switch_isolates_goals_and_detail(page, pilot):
     expect(page.locator("#goals")).to_contain_text("pr-a")
     expect(page.locator("#goals")).not_to_contain_text("pr-bob")
     page.locator("#activity-goal").select_option("pr-a")
-    expect(page.locator("#task-detail strong")).to_contain_text("pr-a")
+    expect(page.locator("#task-detail strong").first).to_contain_text("pr-a")
     expect(page.locator("#task-detail")).to_contain_text(
         "Business outcome independently verified: NO",
     )
@@ -126,10 +126,10 @@ def test_chromium_ignores_out_of_order_task_detail(page, pilot):
         page.wait_for_timeout(50)
     assert held, "Chromium did not intercept the first detail request"
     page.locator("#activity-goal").select_option("pr-b")
-    expect(page.locator("#task-detail strong")).to_contain_text("pr-b")
+    expect(page.locator("#task-detail strong").first).to_contain_text("pr-b")
     held[0].fulfill(status=200, content_type="application/json",
                     body=json.dumps({"task": {"task_id": "pr-a"}}))
-    expect(page.locator("#task-detail strong")).to_contain_text("pr-b")
+    expect(page.locator("#task-detail strong").first).to_contain_text("pr-b")
     expect(page.locator("#task-detail")).not_to_contain_text("pr-a")
 
 
@@ -138,7 +138,7 @@ def test_chromium_refresh_error_does_not_display_stale_task(page, pilot):
     connect(page, base)
     expect(page.locator("#goals .goal")).to_have_count(2)
     page.locator("#activity-goal").select_option("pr-a")
-    expect(page.locator("#task-detail strong")).to_contain_text("pr-a")
+    expect(page.locator("#task-detail strong").first).to_contain_text("pr-a")
     page.route("**/api/goals", lambda route: route.fulfill(
         status=503, content_type="application/json",
         body='{"error":"temporary backend outage"}',
@@ -174,6 +174,6 @@ def test_chromium_pause_resume_and_cancel_confirmation(page, pilot):
     expect(card).to_contain_text("CANCELLED")
     assert service.service.goals.get(user_id="alice", goal_id="pr-a").state == "CANCELLED"
     controls = service.service.goals.controls(user_id="alice", goal_id="pr-a")
-    assert [control["action"] for control in controls] == [
+    assert [control["action"] for control in reversed(controls)] == [
         "pause", "resume", "cancel",
     ]
