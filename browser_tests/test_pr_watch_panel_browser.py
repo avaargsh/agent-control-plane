@@ -332,7 +332,14 @@ def test_chromium_definite_cas_rejection_never_offers_ambiguous_retry(page, pilo
     card = page.locator("#goals .goal").filter(has_text="pr-a")
     card.get_by_role("button", name="Pause").click()
     expect(page.locator("#message")).to_contain_text("rejected (HTTP 409")
-    expect(page.locator("#control-recovery")).to_be_empty()
+    # This attempt was rejected, but another actor's committed pending
+    # control must remain visible (without attributing it to this attempt).
+    expect(page.locator("#control-recovery")).to_contain_text(
+        "durable pause control recorded at v1",
+    )
+    expect(page.locator("#control-recovery")).not_to_contain_text(
+        "response lost or uncertain",
+    )
     expect(card).to_contain_text("PAUSED")
     assert len(server.service.goals.controls(user_id="alice", goal_id="pr-a")) == 1
 
