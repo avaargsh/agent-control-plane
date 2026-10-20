@@ -65,6 +65,11 @@
       <section class="section">
         <div class="section-head"><h2>Activity</h2><span class="muted">Read-only audit view</span></div>
         <p class="muted">Events reflect durable observations; a queued notification is not a confirmed delivery.</p>
+        <div class="detail-filter">
+          <label for="activity-goal">Activity for task</label>
+          <select id="activity-goal"><option value="">All tasks</option></select>
+        </div>
+        <div id="task-detail" class="task-detail" aria-live="polite"><p class="muted">Select a task to inspect its latest projection.</p></div>
         <div id="events" class="events"><p class="muted">No events loaded.</p></div>
       </section>
     </div>
