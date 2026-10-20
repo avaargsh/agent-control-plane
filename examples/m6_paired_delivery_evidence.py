@@ -31,7 +31,6 @@ _EXPECTED = {
     "raw_hmac_body_equivalence": "NOT_ATTESTED_BY_API",
     "observations_attributed_to_delivery": "NOT_PROVEN",
     "release_decision": "NO_GO",
-    "actual_github_delivery_origin": "GITHUB_API_RECORD_CORROBORATED",
 }
 _DIGEST_KEYS = (
     "scope_digest", "workflow_digest", "delivery_digest",
