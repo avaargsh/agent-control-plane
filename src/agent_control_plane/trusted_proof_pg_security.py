@@ -147,9 +147,11 @@ def grant_runtime_access(conn: Any, role: str) -> None:
     ):
         raise ProtocolViolation("runtime role has elevated privileges")
     if conn.execute(
-        """SELECT pg_has_role(%s, relowner, 'MEMBER') AS is_owner
-           FROM pg_class WHERE oid=to_regclass(
-               'public.acp_trusted_proof_signers')""",
+        """SELECT pg_has_role(r.oid, c.relowner, 'MEMBER') AS is_owner
+           FROM pg_roles r
+           JOIN pg_class c
+             ON c.oid=to_regclass('public.acp_trusted_proof_signers')
+           WHERE r.rolname=%s""",
         (role,),
     ).fetchone()["is_owner"]:
         raise ProtocolViolation("runtime role inherits signer table ownership")
