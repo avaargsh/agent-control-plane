@@ -78,3 +78,10 @@ button:focus-visible { outline:2px solid #4775b8; outline-offset:2px; }
   .task-toolbar select,.task-toolbar input { min-height:44px; }
   .shell { max-width:100%; }
 }
+
+/* An uncertain POST is not a failed transaction: keep readback actionable. */
+.control-recovery:empty { display:none; }
+.recovery-entry { border:1px solid #e8c88d; background:#fffaf0; border-radius:10px; padding:12px; margin:12px 0; overflow-wrap:anywhere; }
+.recovery-entry p { font-size:12px; color:#7f4c12; }
+.recovery-entry button { font-size:12px; min-height:42px; border-color:#caa873; }
+@media (max-width:500px) { .recovery-entry button { width:100%; min-height:44px; white-space:normal; } }
