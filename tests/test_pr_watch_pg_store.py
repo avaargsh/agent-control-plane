@@ -331,3 +331,32 @@ def test_pg_v2_and_temporal_enrollment_share_exact_goal_identity(context):
             assert paused["state"] == "PAUSED"
             assert db.launch(user_id=user,goal_id="g1")["state"] == "ACKED"
     asyncio.run(scenario())
+
+
+def test_pg_unsettled_receipts_are_scoped_bounded_and_migration_free(context):
+    db, user = context
+    db.transition(
+        user_id=user, goal_id="g1", action="pause", expected_version=0,
+    )
+    receipts = db.list_unsettled_controls(user_id=user)
+    assert len(receipts) == 1
+    assert receipts[0]["action"] == "pause"
+    assert receipts[0]["version"] == 1
+    assert receipts[0]["signal_state"] == "PENDING"
+    assert db.list_unsettled_controls(user_id="not-owner") == []
+    for value in (0, 101, True):
+        with pytest.raises(AdmissionError, match="invalid scoped receipt"):
+            db.list_unsettled_controls(user_id=user, limit=value)
+    db.record_control_signal(
+        user_id=user, goal_id="g1", version=1,
+        state="UNKNOWN", evidence="ACK_UNCERTAIN",
+    )
+    assert db.list_unsettled_controls(user_id=user)[0]["signal_state"] == "UNKNOWN"
+    db.record_control_signal(
+        user_id=user, goal_id="g1", version=1,
+        state="ACKED", evidence="HISTORY_PROOF",
+    )
+    assert db.list_unsettled_controls(user_id=user) == []
+    assert db.control(
+        user_id=user, goal_id="g1", version=1,
+    )["signal_state"] == "ACKED"
