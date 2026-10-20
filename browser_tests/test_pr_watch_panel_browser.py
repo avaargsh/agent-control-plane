@@ -120,8 +120,11 @@ def test_chromium_ignores_out_of_order_task_detail(page, pilot):
     expect(page.locator("#goals .goal")).to_have_count(2)
     held = []
     page.route("**/api/tasks/pr-a", lambda route: held.append(route))
-    page.locator("#activity-goal").select_option("pr-a")
-    expect.poll(lambda: len(held)).to_be_greater_than(0)
+    with page.expect_request("**/api/tasks/pr-a"):
+        page.locator("#activity-goal").select_option("pr-a")
+    if not held:
+        page.wait_for_timeout(50)
+    assert held, "Chromium did not intercept the first detail request"
     page.locator("#activity-goal").select_option("pr-b")
     expect(page.locator("#task-detail strong")).to_contain_text("pr-b")
     held[0].fulfill(status=200, content_type="application/json",
