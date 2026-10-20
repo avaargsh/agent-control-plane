@@ -12,6 +12,8 @@
   const uncertainControls = new Map();
   let durableUnsettled = [];
   let preparedRequests = [];
+  let committedRequests = [];
+  let committedExpanded = false;
   let preparedControlsSupported = false;
   const el = (id) => document.getElementById(id);
   const msg = (text) => { el("message").textContent = String(text); };
@@ -115,6 +117,44 @@
       execute.addEventListener("click", () => resumePrepared(record));
       entry.append(note, execute);
       area.append(entry);
+    }
+    if (committedRequests.length) {
+      const history = document.createElement("details");
+      history.className = "committed-history";
+      history.open = committedExpanded;
+      const heading = document.createElement("summary");
+      heading.textContent = "Committed client requests (" + committedRequests.length +
+        " in bounded owner snapshot)";
+      history.append(heading);
+      const explanation = document.createElement("p");
+      explanation.className = "muted";
+      explanation.textContent =
+        "These request IDs prove durable Goal CAS only. They do not prove " +
+        "Temporal signaling, worker execution or business outcome.";
+      history.append(explanation);
+      for (const record of committedRequests) {
+        const entry = document.createElement("div");
+        entry.className = "committed-entry";
+        const detail = document.createElement("p");
+        detail.textContent = record.goal_id + ": " + record.action +
+          " committed at v" + record.committed_version +
+          " · request " + record.request_id + " · CAS COMMITTED";
+        const inspect = document.createElement("button");
+        inspect.type = "button";
+        inspect.className = "secondary";
+        inspect.textContent = "Inspect committed control";
+        inspect.addEventListener("click", () => {
+          selectedTask = record.goal_id;
+          el("task-detail").replaceChildren(label("Loading task details…", "muted"));
+          refresh();
+        });
+        entry.append(detail, inspect);
+        history.append(entry);
+      }
+      history.addEventListener("toggle", () => {
+        committedExpanded = history.open;
+      });
+      area.append(history);
     }
     // Committed receipts are reconstructed from the server after reconnect.
     // Pending/unknown here refers to the Temporal signal, NOT the CAS commit.
@@ -358,6 +398,11 @@
           goal.version === record.expected_version
         )
       );
+      committedRequests = results[4].requests.filter((record) =>
+        record.state === "COMMITTED" &&
+        record.committed_version === record.expected_version + 1 &&
+        goals.goals.some((goal) => goal.goal_id === record.goal_id)
+      ).slice(0, 20);
       renderRecovery();
       const byId = new Map(goals.goals.map((goal) => [goal.goal_id, goal]));
       const cards = tasks.filter((task) => byId.has(task.task_id)).map(
@@ -494,6 +539,7 @@
         refreshHadError = true;
         durableUnsettled = [];
         preparedRequests = [];
+        committedRequests = [];
         renderRecovery();
         setSync("Update failed", "error");
         el("goals").replaceChildren(label("Unable to load tasks; retry Refresh.", "muted"));
@@ -519,6 +565,8 @@
     uncertainControls.clear();
     durableUnsettled = [];
     preparedRequests = [];
+    committedRequests = [];
+    committedExpanded = false;
     preparedControlsSupported = false;
     renderRecovery();
     selectedTask = "";
