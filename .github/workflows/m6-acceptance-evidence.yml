@@ -1,0 +1,30 @@
+name: m6-acceptance-evidence
+on:
+  pull_request:
+    paths:
+      - 'examples/m6_acceptance_validator.py'
+      - 'tests/test_m6_acceptance_validator.py'
+      - 'docs/M6_ACCEPTANCE_VALIDATOR.md'
+      - '.github/workflows/m6-acceptance-evidence.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'examples/m6_acceptance_validator.py'
+      - 'tests/test_m6_acceptance_validator.py'
+      - '.github/workflows/m6-acceptance-evidence.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install pytest ruff
+      - run: ruff check examples/m6_acceptance_validator.py tests/test_m6_acceptance_validator.py
+      - run: python -m pytest -q tests/test_m6_acceptance_validator.py
