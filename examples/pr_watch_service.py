@@ -300,17 +300,45 @@ class Handler(BaseHTTPRequestHandler):
                 return
             service = self.server.service
             if path == "/api/tasks":
-                if query:
-                    raise WatchError("unexpected query")
-                # Read-only projection; the Goal store remains authoritative.
-                # Bound the list to the existing scoped 100-Goal API limit.
+                # Filters are applied AFTER the authenticated owner-scoped
+                # Goal query and task projection. No caller-supplied identity
+                # is accepted, and the v1 response schema remains unchanged.
+                allowed = {"state", "repo", "limit"}
+                if set(query) - allowed or any(len(values) != 1 for values in query.values()):
+                    raise WatchError("invalid task query")
+                state = query.get("state", [None])[0]
+                repo = query.get("repo", [None])[0]
+                limit_raw = query.get("limit", ["100"])[0]
+                if state is not None and state not in {
+                    "WAITING", "UNKNOWN", "ACTIVE", "PAUSED",
+                    "CANCEL_REQUESTED", "OBSERVED_TERMINAL",
+                }:
+                    raise WatchError("invalid task state filter")
+                if repo is not None and (
+                    not re.fullmatch(
+                        r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repo
+                    )
+                    or repo.startswith(".") or "/." in repo
+                ):
+                    raise WatchError("invalid task repository filter")
+                if not re.fullmatch(r"[1-9][0-9]{0,2}", limit_raw) or int(limit_raw) > 100:
+                    raise WatchError("invalid task limit")
+                # Bounded source snapshot: limit applies to matched tasks,
+                # not the raw Goals, so filter results are deterministic.
                 tasks = [
                     project_task(goal, service.goals.launch(
                         user_id=user, goal_id=_goal_payload(goal)["goal_id"],
                     ), principal=user)
                     for goal in service.goals.list_goals(user_id=user)
                 ]
-                self._json(200, {"schema": "pr-watch-task-projection/v1", "tasks": tasks})
+                if state is not None:
+                    tasks = [task for task in tasks if task["state"] == state]
+                if repo is not None:
+                    tasks = [task for task in tasks if task["repo"] == repo]
+                self._json(200, {
+                    "schema": "pr-watch-task-projection/v1",
+                    "tasks": tasks[:int(limit_raw)],
+                })
                 return
             task_match = re.fullmatch(
                 r"/api/tasks/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})", path
