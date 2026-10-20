@@ -52,9 +52,9 @@ def _read_evidence(root: Path, relative: object) -> bytes:
     root_fd = current_fd = -1
     opened_dirs: list[int] = []
     try:
-        # Resolve the selected root once, then pin it with O_NOFOLLOW.
-        resolved_root = root.resolve(strict=True)
-        root_fd = os.open(resolved_root, directory_flags)
+        # Open the supplied root itself with O_NOFOLLOW; resolving first would
+        # follow a root swapped to a symlink between the check and the open.
+        root_fd = os.open(root, directory_flags)
         current_fd = root_fd
         for component in path.parts[:-1]:
             next_fd = os.open(
