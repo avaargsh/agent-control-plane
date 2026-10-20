@@ -210,6 +210,8 @@ def test_chromium_prevents_duplicate_controls_during_pending_post(page, pilot):
     card = page.locator("#goals .goal").filter(has_text="pr-a")
     with page.expect_request("**/api/goals/pr-a/pause"):
         card.get_by_role("button", name="Pause").click()
+    if not held:
+        page.wait_for_timeout(100)  # Route handler runs after request event.
     assert held
     expect(card.get_by_role("button", name="Pause")).to_be_disabled()
     expect(card.get_by_role("button", name="Cancel")).to_be_disabled()
@@ -444,6 +446,8 @@ def test_chromium_prepared_request_survives_aborted_post_and_reload(page, pilot)
     card = page.locator("#goals .goal").filter(has_text="pr-a")
     with page.expect_request("**/api/goals/pr-a/pause"):
         card.get_by_role("button", name="Pause").click()
+    if not held:
+        page.wait_for_timeout(100)  # Request event precedes route dispatch.
     assert held, "Prepare must commit before the control POST begins"
     assert server.service.goals.get(user_id="alice", goal_id="pr-a").version == 0
     assert server.service.goals.list_control_requests(user_id="alice")[0][
