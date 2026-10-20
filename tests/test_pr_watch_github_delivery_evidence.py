@@ -119,6 +119,7 @@ def invoke(evidence, *, record=None, repository=None, hook=None, prove=None, pro
 def test_provider_record_plus_pg_claim_corroborates_real_identity_only(evidence):
     output = invoke(evidence, prove=lambda signal: signal == evidence[4])
     assert output["github_delivery_record"] == "MATCHED"
+    assert output["github_event"] == "pull_request"
     assert output["actual_github_delivery_origin"] == "GITHUB_API_RECORD_CORROBORATED"
     assert output["temporal_history"] == "PROVEN"
     assert output["inbox_state"] == "ACKED"
