@@ -56,6 +56,13 @@ _BEARER = re.compile(r"^Bearer ([A-Za-z0-9._~+/-]{32,256})$")
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 
+def _has_prepared_control_schema(service) -> bool:
+    if service.storage_backend != "postgres":
+        return True
+    from pr_watch_pg_migrations import PostgresMigrations
+    return PostgresMigrations(service.goals._dsn).status().version >= 3
+
+
 class PilotConfigError(ValueError):
     pass
 
@@ -315,6 +322,37 @@ class Handler(BaseHTTPRequestHandler):
             if user is None:
                 return
             service = self.server.service
+            if path == "/api/control-requests":
+                if set(query) - {"limit"} or len(query.get("limit", ["100"])) != 1:
+                    raise WatchError("invalid control request query")
+                raw_limit = query.get("limit", ["100"])[0]
+                if not re.fullmatch(r"[1-9][0-9]{0,2}", raw_limit) or int(raw_limit) > 100:
+                    raise WatchError("invalid control request limit")
+                if not _has_prepared_control_schema(service):
+                    self._json(501, {"error": "operator must install PostgreSQL schema v3"})
+                    return
+                self._json(200, {
+                    "schema": "pr-watch-control-requests/v1",
+                    "requests": service.goals.list_control_requests(
+                        user_id=user, limit=int(raw_limit),
+                    ),
+                })
+                return
+            request_lookup = re.fullmatch(
+                r"/api/control-requests/([0-9a-f]{32})", path
+            )
+            if request_lookup:
+                if query:
+                    raise WatchError("unexpected query")
+                if not _has_prepared_control_schema(service):
+                    self._json(501, {"error": "operator must install PostgreSQL schema v3"})
+                    return
+                self._json(200, {
+                    "request": service.goals.control_request(
+                        user_id=user, request_id=request_lookup.group(1),
+                    ),
+                })
+                return
             if path == "/api/control-receipts":
                 if set(query) - {"limit"} or len(query.get("limit", ["100"])) != 1:
                     raise WatchError("invalid control receipt query")
@@ -498,6 +536,23 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self._json(200, {"launch": launch})
                 return
+            prepare_match = re.fullmatch(
+                r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/controls/prepare",
+                path,
+            )
+            if prepare_match:
+                if set(data) != {"request_id", "action", "expected_version"}:
+                    raise WatchError("request_id, action and expected_version required")
+                if not _has_prepared_control_schema(self.server.service):
+                    self._json(501, {"error": "operator must install PostgreSQL schema v3"})
+                    return
+                record = store.prepare_control(
+                    user_id=user, goal_id=prepare_match.group(1),
+                    request_id=data["request_id"], action=data["action"],
+                    expected_version=data["expected_version"],
+                )
+                self._json(200, {"request": record})
+                return
             reconcile_match = re.fullmatch(
                 r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/controls/"
                 r"([0-9]{1,12})/reconcile", path
@@ -515,27 +570,49 @@ class Handler(BaseHTTPRequestHandler):
                 r"/api/goals/([A-Za-z0-9][A-Za-z0-9_.-]{0,95})/(pause|resume|cancel)", path
             )
             if match:
-                if set(data) != {"expected_version"}:
-                    raise WatchError("expected_version is required")
-                goal = store.transition(
-                    user_id=user, goal_id=match.group(1), action=match.group(2),
-                    expected_version=data["expected_version"],
-                )
-                control = self.server.service.signal_committed(
-                    user_id=user, goal_id=_goal_payload(goal)["goal_id"],
-                    version=_goal_payload(goal)["version"],
-                )
-                self._json(
-                    200 if control["signal_state"] == "ACKED" else 202,
-                    {"goal": _goal_payload(goal), "control": _control_receipt(control)},
-                )
+                if set(data) not in ({"expected_version"}, {"expected_version", "request_id"}):
+                    raise WatchError("expected_version or prepared request_id required")
+                is_keyed = "request_id" in data
+                if is_keyed:
+                    if not _has_prepared_control_schema(self.server.service):
+                        self._json(501, {"error": "operator must install PostgreSQL schema v3"})
+                        return
+                    goal, replayed = store.transition_with_request(
+                        user_id=user, goal_id=match.group(1), action=match.group(2),
+                        expected_version=data["expected_version"],
+                        request_id=data["request_id"],
+                    )
+                else:
+                    goal = store.transition(
+                        user_id=user, goal_id=match.group(1), action=match.group(2),
+                        expected_version=data["expected_version"],
+                    )
+                    replayed = False
+                if replayed:
+                    # This request already committed. Never re-signal Temporal
+                    # or re-invoke a provider on an HTTP retry.
+                    control = store.control(
+                        user_id=user, goal_id=match.group(1),
+                        version=data["expected_version"] + 1,
+                    )
+                else:
+                    control = self.server.service.signal_committed(
+                        user_id=user, goal_id=match.group(1),
+                        version=data["expected_version"] + 1,
+                    )
+                response = {"goal": _goal_payload(goal), "control": _control_receipt(control)}
+                if is_keyed:
+                    response.update({"request_id": data["request_id"], "replayed": replayed})
+                self._json(200 if control["signal_state"] == "ACKED" else 202, response)
                 return
             self._json(404, {"error": "not found"})
         except WatchConflict as exc:
             self._json(409, {"error": str(exc)})
         except ValueError as exc:
             reason = str(exc)
-            if "stale version" in reason or "invalid lifecycle transition" in reason:
+            if ("stale version" in reason or "invalid lifecycle transition" in reason
+                or "request ID already bound" in reason
+                or "prepare request before execution" in reason):
                 status = 409
             else:
                 status = 404 if "not found within user scope" in reason else 400

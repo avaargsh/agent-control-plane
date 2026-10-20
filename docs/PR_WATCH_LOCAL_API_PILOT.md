@@ -46,6 +46,9 @@ body, URL, or browser-provided headers.
 | POST | `/api/goals/{id}/pause` | CAS RUNNING -> PAUSED |
 | POST | `/api/goals/{id}/resume` | CAS PAUSED -> RUNNING |
 | POST | `/api/goals/{id}/cancel` | CAS RUNNING/PAUSED -> CANCELLED |
+| POST | `/api/goals/{id}/controls/prepare` | Reserve a validated client request, without changing the Goal |
+| GET | `/api/control-requests?limit=N` | User-scoped prepared/committed request journal (max 100) |
+| GET | `/api/control-requests/{request_id}` | Exact user-scoped request status (PREPARED/COMMITTED) |
 | GET | `/api/control-receipts?limit=N` | Bounded owner-scoped CAS-committed controls with `PENDING/UNKNOWN` Temporal signals (max 100) |
 | GET | `/api/goals/{id}/controls/{version}` | Exact user-scoped durable control receipt or 404 |
 | GET | `/api/goals/{id}/controls` | Latest 50 committed control records including stable receipt IDs |
@@ -125,3 +128,51 @@ Neither API endpoint introduces new DDL; SQLite and PostgreSQL use the
 pre-existing CAS control tables, preserving the PostgreSQL v2 migration
 checksum and authority boundaries. Public M6 GitHub webhook acceptance is
 still a separate NO-GO gate.
+
+## Explicit two-phase client request contract (experimental)
+
+A new opt-in request key supports safely resuming control operations across a
+browser refresh, without putting bearer tokens, operation IDs, or secrets in
+browser storage. The client must authenticate again after refreshing.
+
+1. Generate a cryptographically random 16-byte ID encoded as 32 lowercase
+   hex digits (e.g. `crypto.randomUUID().replaceAll("-", "")`).
+2. `POST /api/goals/{id}/controls/prepare` with JSON
+   `{"request_id":"<32 hex>","action":"pause","expected_version":0}`.
+   The server atomically checks the scoped Goal/version and persists a
+   `PREPARED` intent, without applying the action or waking Temporal.
+3. Only after the server acknowledges PREPARED, send the existing
+   `POST /api/goals/{id}/pause` with
+   `{"expected_version":0,"request_id":"<same 32 hex>"}`.
+   Inside one database transaction, the server commits Goal CAS, the
+   durable control journal entry, and marks the client request `COMMITTED`.
+4. A repeat of **that exact request ID with the same owner, action, Goal
+   and expected version** returns `replayed:true` and the existing control
+   record. It never resends the Temporal wake. A different request ID or
+   mismatched payload cannot impersonate that receipt.
+5. After reload, authenticated `GET /api/control-requests` recovers
+   PREPARED (not yet committed) and COMMITTED requests. A PREPARED record
+   may need **explicit operator approval** to execute; its presence alone
+   never proves that a previous HTTP POST reached the service. Distinct
+   PREPARED requests can race; CAS still permits only one commit.
+
+The legacy POST with only `expected_version` continues to use strict CAS
+without an idempotent request key. No automatic retry of a missing ACK is
+introduced. The browser interface has not yet been migrated to invoke the
+two-phase path; this is an opt-in authenticated HTTP contract first.
+
+### PostgreSQL installation gate
+
+The existing schema v1/v2 migration scripts and checksums are unchanged.
+Prepared controls require **explicit operator installation of v3** using
+`python examples/pr_watch_pg_migrations.py upgrade --to 3` in a quiesced,
+backed-up pilot database. On a v2 database the new prepared-request API
+returns HTTP 501 rather than attempting request-time DDL; legacy control
+APIs continue to operate. SQLite creates the additional request table with
+the existing local pilot bootstrap. Runtime schema validation accepts v2 or
+v3; the existing `rollback-empty-v2` command is not a V3 downgrade.
+
+This remains loopback-only development functionality. Not production
+authorization, proof of a Temporal ACK, ownership attestation, or
+independently verified business success. Real external webhook M6 remains
+NO-GO.

@@ -154,6 +154,19 @@ class GoalStore:
                     checked_at TEXT, evidence TEXT,
                     PRIMARY KEY (user_id, goal_id, version)
                 );
+                CREATE TABLE IF NOT EXISTS pr_watch_control_requests (
+                    user_id TEXT NOT NULL, goal_id TEXT NOT NULL,
+                    request_id TEXT NOT NULL, action TEXT NOT NULL,
+                    expected_version INTEGER NOT NULL CHECK(expected_version>=0),
+                    state TEXT NOT NULL DEFAULT 'PREPARED'
+                        CHECK(state IN ('PREPARED','COMMITTED')),
+                    committed_version INTEGER,
+                    PRIMARY KEY (user_id,request_id),
+                    FOREIGN KEY (user_id,goal_id)
+                        REFERENCES pr_watch_goals(user_id,goal_id),
+                    CHECK ((state='PREPARED' AND committed_version IS NULL)
+                        OR (state='COMMITTED' AND committed_version=expected_version+1))
+                );
                 CREATE TABLE IF NOT EXISTS pr_watch_launches (
                     user_id TEXT NOT NULL, goal_id TEXT NOT NULL,
                     state TEXT NOT NULL DEFAULT 'PENDING',
@@ -378,6 +391,141 @@ class GoalStore:
                 (user_id, goal_id, expected_version + 1, action),
             )
         return self.get(user_id=user_id, goal_id=goal_id)
+
+    @staticmethod
+    def _check_request_id(request_id: str) -> None:
+        if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f]{32}", request_id):
+            raise WatchError("invalid client request ID")
+
+    def prepare_control(
+        self, *, user_id: str, goal_id: str, request_id: str,
+        action: str, expected_version: int,
+    ) -> dict:
+        """Durably reserve a client request before any Goal CAS mutation."""
+        self._check_request_id(request_id)
+        if action not in ("pause", "resume", "cancel") or (
+            type(expected_version) is not int or expected_version < 0
+        ):
+            raise WatchError("invalid control preparation")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute(
+                """SELECT * FROM pr_watch_control_requests
+                   WHERE user_id=? AND request_id=?""",
+                (user_id, request_id),
+            ).fetchone()
+            if old:
+                if (old["goal_id"], old["action"], old["expected_version"]) != (
+                    goal_id, action, expected_version
+                ):
+                    raise WatchConflict("request ID already bound to another command")
+                return dict(old)
+            goal = db.execute(
+                "SELECT state,version FROM pr_watch_goals WHERE user_id=? AND goal_id=?",
+                (user_id, goal_id),
+            ).fetchone()
+            if goal is None:
+                raise WatchError("goal not found within user scope")
+            valid = {
+                "pause": ("RUNNING",),
+                "resume": ("PAUSED",),
+                "cancel": ("RUNNING", "PAUSED"),
+            }
+            if goal["version"] != expected_version or goal["state"] not in valid[action]:
+                raise WatchConflict("stale goal version or illegal lifecycle transition")
+            db.execute(
+                """INSERT INTO pr_watch_control_requests
+                   (user_id,goal_id,request_id,action,expected_version)
+                   VALUES (?,?,?,?,?)""",
+                (user_id, goal_id, request_id, action, expected_version),
+            )
+            return dict(db.execute(
+                """SELECT * FROM pr_watch_control_requests
+                   WHERE user_id=? AND request_id=?""",
+                (user_id, request_id),
+            ).fetchone())
+
+    def control_request(self, *, user_id: str, request_id: str) -> dict:
+        self._check_request_id(request_id)
+        with self._connection() as db:
+            row = db.execute(
+                """SELECT * FROM pr_watch_control_requests
+                   WHERE user_id=? AND request_id=?""",
+                (user_id, request_id),
+            ).fetchone()
+        if row is None:
+            raise WatchError("control request not found within user scope")
+        return dict(row)
+
+    def list_control_requests(self, *, user_id: str, limit: int = 100) -> list[dict]:
+        if not user_id or type(limit) is not int or not 1 <= limit <= 100:
+            raise WatchError("invalid scoped control request limit")
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT * FROM pr_watch_control_requests
+                   WHERE user_id=? ORDER BY goal_id,expected_version DESC LIMIT ?""",
+                (user_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def transition_with_request(
+        self, *, user_id: str, goal_id: str, action: str,
+        expected_version: int, request_id: str,
+    ) -> tuple[Goal, bool]:
+        """One atomic CAS + control intent + request receipt. Replay has no signal."""
+        self._check_request_id(request_id)
+        valid = {
+            "pause": (("RUNNING",), "PAUSED"),
+            "resume": (("PAUSED",), "RUNNING"),
+            "cancel": (("RUNNING", "PAUSED"), "CANCELLED"),
+        }
+        if action not in valid or type(expected_version) is not int or expected_version < 0:
+            raise WatchError("invalid action or expected version")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            req = db.execute(
+                """SELECT * FROM pr_watch_control_requests
+                   WHERE user_id=? AND request_id=?""",
+                (user_id, request_id),
+            ).fetchone()
+            if req is None:
+                raise WatchConflict("prepare request before execution")
+            if (req["goal_id"], req["action"], req["expected_version"]) != (
+                goal_id, action, expected_version
+            ):
+                raise WatchConflict("request ID already bound to another command")
+            if req["state"] == "COMMITTED":
+                # Already committed: never replay the Temporal signal.
+                replayed = True
+            else:
+                goal = db.execute(
+                    """SELECT state,version FROM pr_watch_goals
+                       WHERE user_id=? AND goal_id=?""",
+                    (user_id, goal_id),
+                ).fetchone()
+                if goal is None:
+                    raise WatchError("goal not found within user scope")
+                sources, target = valid[action]
+                if goal["state"] not in sources or goal["version"] != expected_version:
+                    raise WatchConflict("stale goal version or illegal lifecycle transition")
+                db.execute(
+                    """UPDATE pr_watch_goals SET state=?,version=version+1
+                       WHERE user_id=? AND goal_id=? AND version=?""",
+                    (target, user_id, goal_id, expected_version),
+                )
+                db.execute(
+                    """INSERT INTO pr_watch_control_intents
+                       (user_id,goal_id,version,action) VALUES (?,?,?,?)""",
+                    (user_id, goal_id, expected_version + 1, action),
+                )
+                db.execute(
+                    """UPDATE pr_watch_control_requests
+                       SET state='COMMITTED',committed_version=?
+                       WHERE user_id=? AND request_id=?""",
+                    (expected_version + 1, user_id, request_id),
+                )
+                replayed = False
+        return self.get(user_id=user_id, goal_id=goal_id), replayed
 
     def control(self, *, user_id: str, goal_id: str, version: int) -> dict:
         if type(version) is not int or version < 0:

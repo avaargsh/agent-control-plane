@@ -1,6 +1,7 @@
 """Operator-only transactional PostgreSQL schema migrator for PR Watch Pilot.
 
 Version 1 = admission Goal/Launch. Version 2 = observations/control/Attention.
+Version 3 = idempotent prepared controls, a separate durable CAS request ledger.
 Legacy *complete* v1/v2 schemas can be adopted without data mutation.
 Do not run against production before backup/review and application quiescence.
 """
@@ -20,7 +21,35 @@ from pr_watch_pg_store import SCHEMA_V2
 
 # Existing published DDL is pinned by its audit digest on first installation.
 # Modifying a previously recorded version will fail closed on next read.
-SCRIPTS = {1: SCHEMA_V1, 2: SCHEMA_V2}
+SCHEMA_V3 = """
+-- Extend the V1/V2 ledger check without modifying recorded checksums.
+ALTER TABLE pr_watch_pg_schema_migrations
+  DROP CONSTRAINT IF EXISTS pr_watch_pg_schema_migrations_version_check;
+ALTER TABLE pr_watch_pg_schema_migrations
+  ADD CONSTRAINT pr_watch_pg_schema_migrations_version_check
+    CHECK(version IN (1,2,3));
+CREATE TABLE IF NOT EXISTS pr_watch_pg_control_requests (
+  user_id TEXT NOT NULL,
+  goal_id TEXT NOT NULL,
+  request_id TEXT NOT NULL CHECK(
+    length(request_id)=32 AND request_id !~ '[^0-9a-f]'
+  ),
+  action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel')),
+  expected_version BIGINT NOT NULL CHECK(expected_version >= 0),
+  state TEXT NOT NULL DEFAULT 'PREPARED'
+    CHECK(state IN ('PREPARED','COMMITTED')),
+  committed_version BIGINT,
+  PRIMARY KEY(user_id,request_id),
+  FOREIGN KEY(user_id,goal_id) REFERENCES pr_watch_pg_goals(user_id,goal_id),
+  CHECK(
+    (state='PREPARED' AND committed_version IS NULL)
+    OR (state='COMMITTED' AND committed_version=expected_version+1)
+  )
+);
+CREATE INDEX IF NOT EXISTS pr_watch_pg_control_requests_user
+  ON pr_watch_pg_control_requests(user_id,goal_id,expected_version);
+"""
+SCRIPTS = {1: SCHEMA_V1, 2: SCHEMA_V2, 3: SCHEMA_V3}
 LEDGER = "pr_watch_pg_schema_migrations"
 LOCK_ID = 657805283175221
 V1 = {
@@ -56,15 +85,21 @@ V2 = {
         "remote_message_id", "accepted_at", "owner", "generation",
     },
 }
+V3 = {"pr_watch_pg_control_requests": {
+    "user_id", "goal_id", "request_id", "action", "expected_version",
+    "state", "committed_version",
+}}
 INDEXES = {
     1: ("pr_watch_pg_launches_pending",),
     2: ("pr_watch_pg_events_cursor", "pr_watch_pg_deliveries_due"),
+    3: ("pr_watch_pg_control_requests_user",),
 }
 # Required minimum number of primary, unique and foreign key constraints.
 KEYS = {
     "pr_watch_pg_goals": (1, 0, 0),
     "pr_watch_pg_launches": (1, 0, 1),
     "pr_watch_pg_controls": (1, 0, 1),
+    "pr_watch_pg_control_requests": (1, 0, 1),
     "pr_watch_pg_events": (1, 1, 1),
     "pr_watch_pg_attention_decisions": (1, 0, 0),
     "pr_watch_pg_deliveries": (1, 1, 1),
@@ -139,6 +174,8 @@ class PostgresMigrations:
                 name: columns for name, columns in V2.items()
                 if name != "pr_watch_pg_goals"
             })
+        if version >= 3:
+            expected.update(V3)
         for table, columns in expected.items():
             if not self._exists(conn, table):
                 raise MigrationError("missing required schema table: " + table)
@@ -154,7 +191,7 @@ class PostgresMigrations:
                     raise MigrationError("missing required index: " + index)
 
     def _legacy_version(self, conn) -> int:
-        names = set(V1) | set(V2)
+        names = set(V1) | set(V2) | set(V3)
         present = {name for name in names if self._exists(conn, name)}
         if not present:
             return 0
@@ -162,6 +199,8 @@ class PostgresMigrations:
             raise MigrationError("partial legacy V1 schema; manual review required")
         complete_v2 = set(V2) - {"pr_watch_pg_goals"}
         if complete_v2 <= present:
+            if set(V3) & present:
+                raise MigrationError("unversioned V3 schema requires manual review")
             self._check_shape(conn, 2)
             return 2
         if present != set(V1):
@@ -198,7 +237,7 @@ class PostgresMigrations:
     def _create_ledger(conn) -> None:
         conn.execute(
             """CREATE TABLE IF NOT EXISTS pr_watch_pg_schema_migrations (
-                 version INTEGER PRIMARY KEY CHECK (version IN (1,2)),
+                 version INTEGER PRIMARY KEY CHECK (version IN (1,2,3)),
                  checksum CHAR(64) NOT NULL,
                  applied_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
                )"""
@@ -216,6 +255,13 @@ class PostgresMigrations:
                 f"PostgreSQL schema version {version} required; found {state.version}"
             )
 
+    def require_minimum_version(self, version: int) -> None:
+        state = self.status()
+        if state.version < version:
+            raise MigrationError(
+                f"PostgreSQL schema version {version} required; found {state.version}"
+            )
+
     def upgrade(self, target: int = 2, *, adopt_legacy: bool = False) -> MigrationState:
         """Single transaction; advisory lock serializes participating installers.
 
@@ -223,7 +269,7 @@ class PostgresMigrations:
         coordinate clients that never acquire this migration lock.
         """
         if type(target) is not int or target not in SCRIPTS:
-            raise MigrationError("target version must be 1 or 2")
+            raise MigrationError("target version must be 1, 2 or 3")
         with self._connect() as conn:
             conn.execute("SET LOCAL lock_timeout = '8s'")
             conn.execute("SELECT pg_advisory_xact_lock(%s)", (LOCK_ID,))
@@ -282,7 +328,7 @@ class PostgresMigrations:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Operator-only PR Watch PG migrations")
     parser.add_argument("action", choices=("status", "upgrade", "rollback-empty-v2"))
-    parser.add_argument("--to", type=int, choices=(1, 2), default=2)
+    parser.add_argument("--to", type=int, choices=(1, 2, 3), default=2)
     parser.add_argument("--adopt-legacy", action="store_true")
     parser.add_argument("--confirm-empty", action="store_true")
     args = parser.parse_args()
