@@ -49,16 +49,31 @@ class TrustedReviewer:
 
 
 def _read_regular(path: Path, limit: int) -> bytes:
-    """Read a bounded regular file while refusing a final-component symlink."""
-    if not hasattr(os, "O_NOFOLLOW"):
-        raise SignedReviewError("platform lacks safe no-follow file opens")
-    flags = os.O_RDONLY | os.O_NOFOLLOW
-    flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    """Read a bounded regular file without following any path-component links."""
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise SignedReviewError("platform lacks safe no-follow directory opens")
+    # Anchor resolution at / and open each component relative to an already-open
+    # directory. O_NOFOLLOW on the final file alone does not protect parent
+    # directories from being replaced by symlinks.
+    absolute = Path(os.path.abspath(path))
+    components = absolute.parts[1:]
+    if not components:
+        raise SignedReviewError("regular file required")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    directory_flags |= getattr(os, "O_CLOEXEC", 0)
+    opened_fds: list[int] = []
     try:
-        fd = os.open(path, flags)
-    except OSError as exc:
-        raise SignedReviewError("input unavailable or symlink denied") from exc
-    try:
+        directory_fd = os.open("/", directory_flags)
+        opened_fds.append(directory_fd)
+        for component in components[:-1]:
+            directory_fd = os.open(
+                component, directory_flags, dir_fd=directory_fd,
+            )
+            opened_fds.append(directory_fd)
+        file_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+        file_flags |= getattr(os, "O_CLOEXEC", 0)
+        fd = os.open(components[-1], file_flags, dir_fd=directory_fd)
+        opened_fds.append(fd)
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise SignedReviewError("regular file required")
         chunks: list[bytes] = []
@@ -70,8 +85,11 @@ def _read_regular(path: Path, limit: int) -> bytes:
             chunks.append(chunk)
             remaining -= len(chunk)
         data = b"".join(chunks)
+    except OSError as exc:
+        raise SignedReviewError("input unavailable or symlink denied") from exc
     finally:
-        os.close(fd)
+        for opened_fd in reversed(opened_fds):
+            os.close(opened_fd)
     if not data or len(data) > limit:
         raise SignedReviewError("input empty or exceeds size limit")
     return data
