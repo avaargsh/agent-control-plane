@@ -57,7 +57,8 @@ def _read_evidence(root: Path, relative: object) -> bytes:
             )
             opened_fds.append(directory_fd)
         file_fd = os.open(
-            path.parts[-1], os.O_RDONLY | nofollow | cloexec,
+            path.parts[-1], os.O_RDONLY | nofollow | cloexec
+            | getattr(os, "O_NONBLOCK", 0),
             dir_fd=directory_fd,
         )
         opened_fds.append(file_fd)
