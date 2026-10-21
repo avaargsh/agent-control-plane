@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from m6_acceptance_validator import GATES
 from m6_signed_review import (
+    _read_regular,
     PAYLOAD_TYPE,
     PREDICATE_TYPE,
     STATEMENT_TYPE,
@@ -149,6 +150,23 @@ def _verify(manifest, root, trusted, envelope, *, source=SOURCE, now=NOW):
         evidence_root=root,
         now=now,
     )
+
+
+def test_cli_input_reader_rejects_symlink_and_non_regular_file(tmp_path):
+    from m6_signed_review import SignedReviewError
+
+    source = tmp_path / "trusted.json"
+    source.write_bytes(b'{"trusted":true}')
+    link = tmp_path / "trusted-link.json"
+    link.symlink_to(source)
+    with pytest.raises(SignedReviewError, match="input unavailable or symlink denied"):
+        _read_regular(link, 1024)
+
+    fifo = tmp_path / "trusted.fifo"
+    import os
+    os.mkfifo(fifo)
+    with pytest.raises(SignedReviewError, match="regular file required"):
+        _read_regular(fifo, 1024)
 
 
 def test_valid_signed_go_is_authenticated_but_never_releases(tmp_path):

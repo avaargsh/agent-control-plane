@@ -49,19 +49,32 @@ class TrustedReviewer:
 
 
 def _read_regular(path: Path, limit: int) -> bytes:
-    if path.is_symlink():
-        raise SignedReviewError("symlink input denied")
+    """Read a bounded regular file while refusing a final-component symlink."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise SignedReviewError("platform lacks safe no-follow file opens")
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        with path.open("rb") as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                raise SignedReviewError("regular file required")
-            data = stream.read(limit + 1)
+        fd = os.open(path, flags)
     except OSError as exc:
-        raise SignedReviewError("input unavailable") from exc
+        raise SignedReviewError("input unavailable or symlink denied") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise SignedReviewError("regular file required")
+        chunks: list[bytes] = []
+        remaining = limit + 1
+        while remaining:
+            chunk = os.read(fd, min(65_536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
+    finally:
+        os.close(fd)
     if not data or len(data) > limit:
         raise SignedReviewError("input empty or exceeds size limit")
     return data
-
 
 def _unique_json(raw: bytes, limit: int) -> dict:
     if type(raw) is not bytes or not raw or len(raw) > limit:

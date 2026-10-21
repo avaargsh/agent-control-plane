@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path, PurePosixPath
 
 from m6_acceptance_validator import GATES, validate
@@ -26,7 +28,7 @@ _PAIR = (
 
 
 def _read_evidence(root: Path, relative: object) -> bytes:
-    """Reject absolute/traversal/links and bound reads to 4 MiB per gate."""
+    """Read a bounded regular file without following links during path lookup."""
     if not isinstance(relative, str) or len(relative) > 512 or not relative:
         raise ValueError("invalid evidence path")
     if "\\" in relative:
@@ -37,19 +39,49 @@ def _read_evidence(root: Path, relative: object) -> bytes:
         for part in path.parts
     ):
         raise ValueError("invalid evidence path")
-    candidate = root
-    for component in path.parts:
-        candidate = candidate / component
-        if candidate.is_symlink():
-            raise ValueError("symbolic link in evidence path")
-    if not candidate.is_file():
-        raise ValueError("evidence file not found")
-    with candidate.open("rb") as stream:
-        data = stream.read(_MAX_BYTES + 1)
+
+    # Path.is_symlink() followed by Path.open() has a TOCTOU gap: a local
+    # writer could swap a checked component for a symlink before it is opened.
+    # Anchor each lookup to an already-open directory and reject symlinks in
+    # the kernel's open operation, rather than relying on prior path checks.
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise ValueError("platform lacks safe no-follow directory opens")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY
+    nofollow = os.O_NOFOLLOW
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory_fd = os.open(root, directory_flags | nofollow | cloexec)
+    opened_fds = [directory_fd]
+    try:
+        for component in path.parts[:-1]:
+            directory_fd = os.open(
+                component, directory_flags | nofollow | cloexec,
+                dir_fd=directory_fd,
+            )
+            opened_fds.append(directory_fd)
+        file_fd = os.open(
+            path.parts[-1], os.O_RDONLY | nofollow | cloexec
+            | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=directory_fd,
+        )
+        opened_fds.append(file_fd)
+        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+            raise ValueError("regular evidence file required")
+        chunks: list[bytes] = []
+        remaining = _MAX_BYTES + 1
+        while remaining:
+            chunk = os.read(file_fd, min(65_536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
+    finally:
+        for fd in reversed(opened_fds):
+            os.close(fd)
+
     if not data or len(data) > _MAX_BYTES:
         raise ValueError("evidence file empty or exceeds byte limit")
     return data
-
 
 def verify_materialized(report: object, root: Path) -> dict:
     """Bind every claimed SHA-256 to actual bytes, never infer live origin."""

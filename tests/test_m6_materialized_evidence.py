@@ -144,6 +144,41 @@ def test_missing_pair_identity_or_fake_delivery_denied(tmp_path):
     assert verify_materialized(manifest, root)["decision"] == "NO_GO"
 
 
+def test_symlinked_parent_component_is_denied(tmp_path):
+    root = tmp_path / "bundle"
+    manifest = fixture_bundle(root)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    source = outside / "evidence.json"
+    source.write_text("outside evidence", encoding="utf-8")
+    (root / "nested-link").symlink_to(outside, target_is_directory=True)
+    gate = manifest["gates"]["operator_approval"]
+    gate["evidence_path"] = "nested-link/evidence.json"
+    gate["evidence_sha256"] = hashlib.sha256(
+        source.read_bytes()
+    ).hexdigest()
+    result = verify_materialized(manifest, root)
+    assert result["decision"] == "NO_GO"
+    assert any("evidence file missing, unsafe or oversized" in x
+               for x in result["errors"])
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "mkfifo"),
+                    reason="FIFO test requires POSIX")
+def test_non_regular_evidence_file_denied_without_blocking(tmp_path):
+    import os
+
+    root = tmp_path / "bundle"
+    manifest = fixture_bundle(root)
+    gate = manifest["gates"]["operator_approval"]
+    fifo = root / gate["evidence_path"]
+    fifo.unlink()
+    os.mkfifo(fifo)
+    gate["evidence_sha256"] = hashlib.sha256(b"fifo").hexdigest()
+    result = verify_materialized(manifest, root)
+    assert result["decision"] == "NO_GO"
+
+
 def test_symlinked_evidence_root_is_denied(tmp_path):
     target = tmp_path / "actual"
     manifest = fixture_bundle(target)
