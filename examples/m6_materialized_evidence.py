@@ -44,8 +44,10 @@ def _read_evidence(root: Path, relative: object) -> bytes:
     # writer could swap a checked component for a symlink before it is opened.
     # Anchor each lookup to an already-open directory and reject symlinks in
     # the kernel's open operation, rather than relying on prior path checks.
-    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise ValueError("platform lacks safe no-follow directory opens")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY
+    nofollow = os.O_NOFOLLOW
     cloexec = getattr(os, "O_CLOEXEC", 0)
     directory_fd = os.open(root, directory_flags | nofollow | cloexec)
     opened_fds = [directory_fd]
