@@ -162,6 +162,15 @@ def test_cli_input_reader_rejects_symlink_and_non_regular_file(tmp_path):
     with pytest.raises(SignedReviewError, match="input unavailable or symlink denied"):
         _read_regular(link, 1024)
 
+    real_dir = tmp_path / "trusted-dir"
+    real_dir.mkdir()
+    nested_source = real_dir / "nested.json"
+    nested_source.write_bytes(b'{"nested":true}')
+    parent_link = tmp_path / "trusted-dir-link"
+    parent_link.symlink_to(real_dir, target_is_directory=True)
+    with pytest.raises(SignedReviewError, match="input unavailable or symlink denied"):
+        _read_regular(parent_link / "nested.json", 1024)
+
     fifo = tmp_path / "trusted.fifo"
     import os
     os.mkfifo(fifo)
