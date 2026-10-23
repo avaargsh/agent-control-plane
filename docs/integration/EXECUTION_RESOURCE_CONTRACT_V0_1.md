@@ -73,8 +73,8 @@ ComputeAllocation is a normalized **read projection**, not an independent durabl
 | `clusterId`, `provider`, `providerBindingGeneration` | yes | Resolved by the server from the frozen pool/cluster binding, never trusted solely from the request body. |
 | `state` | yes | `REQUESTED`, `ALLOCATING`, `ALLOCATED`, `RELEASING`, `RELEASED`, or `UNKNOWN`. This is resource lifecycle, not Agent Run outcome. |
 | `observedGeneration` | yes | Latest desired generation actually processed by the observer/reconciler; it does not alone imply readiness. |
-| `providerRefs` | yes | Zero or more object references. Once observed, bind kind/namespace/name to API-server-issued UID, resourceVersion and generation. Labels/name alone are not ownership proof. |
-| `conditions` | yes | Independent condition snapshots such as quota reservation, admission, Pod readiness, failure and cleanup; include status/reason/observation time. Run success and resource release remain separate facts. |
+| `providerRefs` | yes | Zero or more observed, bound object references. Each reference must include API-server-issued UID, resourceVersion, generation, and an immutable `ownershipProofRef`; Kubernetes Job/Pod references must also include the resolved image digest. The proof binds the request ID, Workload ID, desired generation, provider binding generation, provider object UID, and either the Kubernetes owner chain or the adapter's documented authoritative binding evidence. Labels/name/Ready alone are not ownership proof. |
+| `conditions` | yes | Independent condition snapshots such as quota reservation, admission, Pod readiness, failure and cleanup; include status/reason/observation time. An `ALLOCATED` projection requires `OwnershipProven=TRUE` for the current desired generation. A `RELEASED` projection requires `CleanupComplete=TRUE` after independent absence and finalization checks. Run success and resource release remain separate facts. |
 | `evidenceRefs` | yes | Stable references/digests to the records supporting the projection. An evidence pointer does not imply the provider object still exists. |
 
 State meaning:
@@ -97,6 +97,14 @@ Allowed state transitions are intentionally constrained:
 | `RELEASED` | none for this allocation generation | A new lifecycle requires a separately accepted new-generation create path and a new request/receipt. The current public Management API rejects ID reuse while a tombstone exists, so this transition is not currently claimed as implemented. |
 
 A task may fail while its allocation is still present; represent that with a condition and continue cleanup. For DRA mode, Job deletion must be observed before deleting the workload-owned ResourceClaim, and the Workload is not RELEASED until both are gone. Shared pool resources (for example ResourceFlavor) and externally owned Workspace/PVC data are not released as Workload side effects.
+
+### Required output-state conformance
+
+JSON Schema now rejects an `ALLOCATED` object with no provider reference, no `OwnershipProven=TRUE` condition, or no evidence reference; it rejects a `RELEASED` object without `CleanupComplete=TRUE` and immutable evidence. Each provider reference carries an `ownershipProofRef`; Kubernetes Job/Pod references also carry an immutable image digest.
+
+These structural constraints are necessary but not sufficient. Before setting `ALLOCATED`, the semantic validator must verify that the proof's request ID, Workload ID, current desired generation, provider binding generation, cluster, and API-server-issued provider UID match the current authoritative records; reject stale `observedGeneration` (for `ALLOCATED`, it must equal `generation`). Before setting `RELEASED`, verify that every Workload-owned provider object required by the selected mode is independently absent and its finalizer/tombstone cleanup has committed. On a missing, stale, unverifiable, or mismatched proof, return `UNKNOWN`; do not infer either state from a name, label, quota/admission, readiness, HTTP ACK, or provider delete ACK alone.
+
+The contract tests include invalid-state vectors for these negative cases. They validate the v0.1 wire contract; end-to-end provider ownership and cleanup are still separately gated by the real-provider acceptance matrix.
 
 ## 4. Error envelope and retry semantics
 
