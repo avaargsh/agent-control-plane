@@ -83,6 +83,17 @@ State meaning:
 - `RELEASED`: every workload-owned provider resource required by the selected mode is independently observed absent, cleanup/finalization is complete, and the current generation/tombstone fence is committed.
 - `UNKNOWN`: provider or persistence observations are insufficient to make a safe claim. Fail closed and reconcile; do not silently map UNKNOWN to success or absence.
 
+Allowed state transitions are intentionally constrained:
+
+| Current state | Allowed next state(s) | Guard |
+|---|---|---|
+| `REQUESTED` | `ALLOCATING`, `RELEASING`, `UNKNOWN` | Durable request/receipt exists; cancellation must persist release intent before provider cleanup. |
+| `ALLOCATING` | `ALLOCATED`, `RELEASING`, `UNKNOWN` | `ALLOCATED` requires fresh, current-generation ownership evidence; quota/admission alone is insufficient. |
+| `ALLOCATED` | `RELEASING`, `UNKNOWN` | Release intent must be durable before any delete side effect. |
+| `RELEASING` | `RELEASED`, `UNKNOWN` | `RELEASED` requires independent absence and finalization evidence; ACK is insufficient. |
+| `UNKNOWN` | `ALLOCATING`, `ALLOCATED`, `RELEASING`, `RELEASED` | Only after reconciliation proves the destination state from authoritative receipts and fresh provider observations. Otherwise remain `UNKNOWN`. |
+| `RELEASED` | none for this allocation generation | A new lifecycle requires a separately accepted new-generation create path and a new request/receipt. The current public Management API rejects ID reuse while a tombstone exists, so this transition is not currently claimed as implemented. |
+
 A task may fail while its allocation is still present; represent that with a condition and continue cleanup. For DRA mode, Job deletion must be observed before deleting the workload-owned ResourceClaim, and the Workload is not RELEASED until both are gone. Shared pool resources (for example ResourceFlavor) and externally owned Workspace/PVC data are not released as Workload side effects.
 
 ## 4. Error envelope and retry semantics
@@ -94,7 +105,7 @@ The normalized error envelope is defined in the accompanying JSON Schema. Implem
 | `INVALID_ARGUMENT` | Malformed payload or invalid field | `REJECTED`; do not retry without changing the payload and generating a new logical request. |
 | `UNAUTHENTICATED` | Missing, expired, revoked, or invalid caller credential | `REJECTED`; obtain valid identity, then re-authorize. |
 | `PERMISSION_DENIED` | Caller lacks current project/resource permission | `REJECTED`; do not retry until authorization changes. |
-| `GENERATION_CONFLICT` | Stale generation, mutation of immutable same-generation intent, or active tombstone | `REJECTED`; recover current state and follow delete/finalize/recreate contract. |
+| `GENERATION_CONFLICT` | Stale CAS precondition, mutation of immutable Workload intent, or active/finalized tombstone whose reuse path is not supported by the current public Management API | `REJECTED`; do not forge a generation or fall back to an internal route. Recreate remains blocked until a higher-generation public lifecycle path is separately implemented and accepted. |
 | `IDEMPOTENCY_CONFLICT` | Original idempotency key reused with a different canonical request digest | `REJECTED`; never reinterpret as a second request. |
 | `PROFILE_UNSUPPORTED` | Requested profile/resource mode is not supported by the selected executor/provider binding | `REJECTED`; do not silently substitute CPU/GPU or another provider. |
 | `QUOTA_EXCEEDED` | Policy or quota refuses the request | `REJECTED` if refusal is proven; retry only after policy/resource state changes. |
@@ -127,7 +138,7 @@ Errors must include a safe correlation/request ID, must not leak raw tokens, cre
 This contract is a **design/contract PR**, not evidence that the vertical slice is already complete.
 
 1. **Contract:** schema and document review; map every field to an owner and prove request/profile version compatibility.
-2. **Compute Golden Path:** real authenticated Management API + PostgreSQL + kind/Kueue: submit, read receipt, observe quota/admission/Pod, fail a Workload, delete, observe absence, finalize/tombstone, recreate at a higher generation.
+2. **Compute Golden Path:** real authenticated Management API + PostgreSQL + kind/Kueue: submit a first-generation Workload with `expectedGeneration=0`, read the operation receipt and resulting generation, observe quota/admission/Pod, exercise success and failure, then delete, independently observe absence, and finalize/tombstone. A subsequent higher-generation recreate is a separate blocking slice: test it only through an accepted public API; the current Management endpoint intentionally rejects tombstone reuse, so do not silently treat recreation as passing.
 3. **Fault injection on the same candidate SHA:** kill the caller after durable request persistence and after the server may have committed but before ACK; kill/restart the Agent/controller between provider side effect, observation, delete and finalize; replay the same request/key. Assert stable logical IDs, no second logical resource, UNKNOWN on ambiguity, and eventual cleanup without weakening ownership checks.
 4. **Provider mismatch/ownership:** same-name foreign Job/Pod, matching labels but different UID/OwnerReference, changed generation/binding, replaced Job UID, failed observer and deletion/recreation must never be promoted to verified success or silently deleted.
 5. **Non-GPU path:** prove `worker` / `sandbox` profiles execute without contacting the Compute API; then prove GPU path uses the exact same Session/Run references and lifecycle contract without GPU-specific identity.
