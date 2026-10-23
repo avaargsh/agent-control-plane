@@ -219,3 +219,65 @@ def test_compute_request_requires_immutable_digest_pinned_image() -> None:
     assert validation_errors(
         compute_request("registry.example.test/model:latest"), REQUEST_VALIDATOR
     )
+
+
+
+def error(
+    code: str,
+    outcome: str,
+    retryable: bool,
+    *,
+    retry_after_seconds: int | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "apiVersion": "compute.error/v0.1",
+        "code": code,
+        "outcome": outcome,
+        "retryable": retryable,
+        "requestId": "0123456789abcdef0123456789abcdef",
+    }
+    if retry_after_seconds is not None:
+        result["retryAfterSeconds"] = retry_after_seconds
+    return result
+
+
+def test_compute_error_codes_freeze_outcome_and_retry_meaning() -> None:
+    valid = [
+        error("INVALID_ARGUMENT", "REJECTED", False),
+        error("IDEMPOTENCY_CONFLICT", "REJECTED", False),
+        error("QUOTA_EXCEEDED", "REJECTED", True, retry_after_seconds=30),
+        error("RESOURCE_UNAVAILABLE", "NOT_COMMITTED", True),
+        error("RESOURCE_UNAVAILABLE", "UNKNOWN", True),
+        error("UNAVAILABLE", "UNKNOWN", True),
+        error("OWNERSHIP_UNPROVEN", "UNKNOWN", True),
+        error("PROVIDER_STATE_CONFLICT", "UNKNOWN", False),
+        error("CLEANUP_PENDING", "UNKNOWN", True, retry_after_seconds=5),
+    ]
+    for document in valid:
+        assert validation_errors(document, Draft202012Validator(
+            {
+                "$schema": SCHEMA["$schema"],
+                "$defs": SCHEMA["$defs"],
+                "$ref": "#/$defs/ComputeError",
+            },
+            format_checker=FormatChecker(),
+        )) == []
+
+    invalid = [
+        error("INVALID_ARGUMENT", "UNKNOWN", True),
+        error("IDEMPOTENCY_CONFLICT", "REJECTED", True),
+        error("DEADLINE_EXCEEDED", "NOT_COMMITTED", True),
+        error("PROVIDER_STATE_CONFLICT", "UNKNOWN", True),
+        error("CLEANUP_PENDING", "COMMITTED", False),
+        error("UNAVAILABLE", "UNKNOWN", False, retry_after_seconds=5),
+    ]
+    validator = Draft202012Validator(
+        {
+            "$schema": SCHEMA["$schema"],
+            "$defs": SCHEMA["$defs"],
+            "$ref": "#/$defs/ComputeError",
+        },
+        format_checker=FormatChecker(),
+    )
+    for document in invalid:
+        assert validation_errors(document, validator)
