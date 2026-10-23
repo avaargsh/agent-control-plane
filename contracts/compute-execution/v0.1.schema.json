@@ -657,7 +657,195 @@
           "type": "string",
           "maxLength": 512
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "INVALID_ARGUMENT",
+                  "UNAUTHENTICATED",
+                  "PERMISSION_DENIED",
+                  "GENERATION_CONFLICT",
+                  "IDEMPOTENCY_CONFLICT",
+                  "PROFILE_UNSUPPORTED"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "REJECTED"
+              },
+              "retryable": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "QUOTA_EXCEEDED"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "REJECTED"
+              },
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "RESOURCE_UNAVAILABLE"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "NOT_COMMITTED",
+                  "UNKNOWN"
+                ]
+              },
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "DEADLINE_EXCEEDED",
+                  "UNAVAILABLE"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "UNKNOWN"
+              },
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "OWNERSHIP_UNPROVEN"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "UNKNOWN"
+              },
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "PROVIDER_STATE_CONFLICT"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "UNKNOWN"
+              },
+              "retryable": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "CLEANUP_PENDING"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "UNKNOWN"
+              },
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "retryable": {
+                "const": false
+              }
+            },
+            "required": [
+              "retryable"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "retryAfterSeconds"
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
