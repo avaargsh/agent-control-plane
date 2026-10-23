@@ -144,15 +144,38 @@ class FakeStore:
             "expires_at": cred["expires_at"],
         }
 
-    def revoke_credential(self, credential_id, *, now):
+    def revoke_credential(self, credential_id, *, event_id, actor_role, now):
+        prior = self.revocation_events.get(event_id)
+        if prior:
+            if prior["resource_type"] != "credential" or prior["resource_id"] != credential_id:
+                raise CredentialAuthorityConflict("event ID rebound")
+            return prior["count"] > 0
+        changed = False
         for record in self.credentials.values():
-            if record["credential_id"] == credential_id:
-                was_active = record["revoked_at"] is None
-                record["revoked_at"] = record["revoked_at"] or now
-                return was_active
-        return False
+            if record["credential_id"] == credential_id and record["revoked_at"] is None:
+                record["revoked_at"] = now
+                record["revoke_event_id"] = event_id
+                record["revoked_by"] = actor_role
+                changed = True
+                break
+        self.revocation_events[event_id] = {
+            "resource_type": "credential",
+            "resource_id": credential_id,
+            "actor_role": actor_role,
+            "count": int(changed),
+        }
+        return changed
 
-    def revoke_run(self, run_id, *, sandbox_revision, now):
+    def revoke_run(self, run_id, *, sandbox_revision, event_id, actor_role, now):
+        prior = self.revocation_events.get(event_id)
+        if prior:
+            if (
+                prior["resource_type"] != "run"
+                or prior["resource_id"] != run_id
+                or prior["sandbox_revision"] != sandbox_revision
+            ):
+                raise CredentialAuthorityConflict("event ID rebound")
+            return prior["count"]
         count = 0
         for record in self.credentials.values():
             if (
@@ -161,13 +184,22 @@ class FakeStore:
                 and record["revoked_at"] is None
             ):
                 record["revoked_at"] = now
+                record["revoke_event_id"] = event_id
+                record["revoked_by"] = actor_role
                 count += 1
+        self.revocation_events[event_id] = {
+            "resource_type": "run",
+            "resource_id": run_id,
+            "sandbox_revision": sandbox_revision,
+            "actor_role": actor_role,
+            "count": count,
+        }
         return count
 
-    def revoke_approval(self, approval_id, *, event_id, now):
+    def revoke_approval(self, approval_id, *, event_id, actor_role, now):
         prior = self.revocation_events.get(event_id)
         if prior:
-            if prior["approval_id"] != approval_id:
+            if prior["resource_type"] != "approval" or prior["resource_id"] != approval_id:
                 raise CredentialAuthorityConflict("event ID rebound")
             return prior["version"], prior["count"]
         grant = self.approvals.get(approval_id)
@@ -180,9 +212,12 @@ class FakeStore:
             if record.get("approval_id") == approval_id and record["revoked_at"] is None:
                 record["revoked_at"] = now
                 record["revoke_event_id"] = event_id
+                record["revoked_by"] = actor_role
                 count += 1
         self.revocation_events[event_id] = {
-            "approval_id": approval_id,
+            "resource_type": "approval",
+            "resource_id": approval_id,
+            "actor_role": actor_role,
             "version": version,
             "count": count,
         }
@@ -423,7 +458,10 @@ def test_sensitive_scope_requires_exact_active_approval_and_is_revoked_immediate
     assert active["active"] is True
 
     version, revoked_count = store.revoke_approval(
-        grant.approval_id, event_id="approval-revoked-1", now=clock()
+        grant.approval_id,
+        event_id="approval-revoked-1",
+        actor_role="approval.revoker",
+        now=clock(),
     )
     assert version == 2
     assert revoked_count == 1
@@ -474,8 +512,13 @@ def test_binding_deactivation_or_policy_version_bump_invalidates_existing_tokens
 def test_run_and_credential_revocation_are_immediate_and_idempotent():
     clock, _, _, _, _, _, authority, body = make_fixture()
     issued = authority.issue(body)["credential"]
-    assert authority.revoke_credential({"credential_id": issued["credential_id"]})["revoked"] is True
-    assert authority.revoke_credential({"credential_id": issued["credential_id"]})["revoked"] is False
+    revoke_body = {
+        "credential_id": issued["credential_id"],
+        "event_id": "revoke-credential-1",
+        "_authenticated_service_role": "credential.revoker",
+    }
+    assert authority.revoke_credential(revoke_body)["revoked"] is True
+    assert authority.revoke_credential(revoke_body)["revoked"] is True
     assert authority.introspect({
         "access_token": issued["access_token"],
         "audience": issued["audience"],
@@ -484,7 +527,12 @@ def test_run_and_credential_revocation_are_immediate_and_idempotent():
 
     _, _, _, _, store, _, authority, body = make_fixture()
     issued = authority.issue(body)["credential"]
-    assert authority.revoke_run({"run_id": "run-a", "sandbox_revision": 3})["revoked_count"] == 1
+    assert authority.revoke_run({
+        "run_id": "run-a",
+        "sandbox_revision": 3,
+        "event_id": "revoke-run-1",
+        "_authenticated_service_role": "credential.revoker",
+    })["revoked_count"] == 1
     assert authority.introspect({
         "access_token": issued["access_token"],
         "audience": issued["audience"],
@@ -502,7 +550,11 @@ def test_revocation_outbox_retries_and_acks_only_after_publish():
     grant = make_approval(run, clock())
     store.approvals["approval-a"] = grant
     authority.issue(body)
-    authority.revoke_approval({"approval_id": "approval-a", "event_id": "revocation-evt"})
+    authority.revoke_approval({
+        "approval_id": "approval-a",
+        "event_id": "revocation-evt",
+        "_authenticated_service_role": "credential.revoker",
+    })
     assert store.outbox["revocation-evt"]["delivered_at"] is None
 
     class FlakyPublisher:
