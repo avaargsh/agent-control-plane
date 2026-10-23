@@ -716,3 +716,77 @@ def test_cross_repo_introspection_invalidates_after_sandbox_rebind_and_reader_ou
         assert inactive_after_outage["active"] is False
     finally:
         runtime_store.close()
+
+
+def test_cross_repo_authority_can_use_authenticated_read_only_runtime_endpoint(
+    pg_runtime, tmp_path
+):
+    _, _, canonical, _, authority, make_request = pg_runtime
+    from cloud_agent_runtime.canonical_runtime_identity import (
+        CANONICAL_RUN_ROUTE_PREFIX,
+        HttpsRuntimeStoreRunAuthorityReader,
+        RuntimeCanonicalIdentityWSGI,
+        RuntimeStoreRunAuthorityReader,
+    )
+
+    runtime_store, local_reader = _runtime_store_reader(tmp_path, canonical)
+
+    class Authenticator:
+        def authorize(self, environ, *, required_role):
+            return (
+                environ.get("wsgi.url_scheme") == "https"
+                and required_role == "runtime.identity.reader"
+            )
+
+    class WsgiTransport:
+        """Contract-level transport for the read-only WSGI endpoint; not TLS evidence."""
+
+        def __init__(self, app):
+            self.app = app
+            self.calls = []
+
+        def request(self, method, path, body=None):
+            self.calls.append((method, path, body))
+            env = {
+                "REQUEST_METHOD": method,
+                "PATH_INFO": path,
+                "QUERY_STRING": "",
+                "wsgi.url_scheme": "https",
+            }
+            response = {}
+
+            def start_response(status, headers):
+                response["status"] = status
+                response["headers"] = dict(headers)
+
+            encoded = b"".join(self.app(env, start_response))
+            response["payload"] = json.loads(encoded)
+            if not response["status"].startswith("2"):
+                error = RuntimeError("read-only Runtime endpoint rejected request")
+                error.status = int(response["status"].split(" ", 1)[0])
+                raise error
+            return response["payload"]
+
+    app = RuntimeCanonicalIdentityWSGI(
+        reader=local_reader,
+        authenticator=Authenticator(),
+    )
+    transport = WsgiTransport(app)
+    try:
+        authority._runs = HttpsRuntimeStoreRunAuthorityReader(transport)
+        issued = authority.issue(make_request(
+            request_id=f"runtime-http-golden-{uuid.uuid4().hex}"
+        ))["credential"]
+        active = authority.introspect({
+            "access_token": issued["access_token"],
+            "audience": issued["audience"],
+            "required_scopes": ["github:read"],
+        })["credential"]
+        assert active["active"] is True
+        assert transport.calls[0] == (
+            "GET", CANONICAL_RUN_ROUTE_PREFIX + canonical.run_id, None
+        )
+        assert all(call[0] == "GET" for call in transport.calls)
+        assert all(call[2] is None for call in transport.calls)
+    finally:
+        runtime_store.close()
