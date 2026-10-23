@@ -41,22 +41,23 @@ ComputeRequest is a durable logical request envelope around the existing Compute
 | Field | Required | Authority / invariant |
 |---|---:|---|
 | `apiVersion` | yes | Literal `compute.request/v0.1`. |
-| `requestId` | yes | Stable logical request ID created and persisted before the first side-effecting call. Reuse it after caller/worker restart. |
-| `idempotencyKey` | yes | 32 lowercase hexadecimal characters, sent as the existing Management API `Idempotency-Key`. Persist before send; all retries for the same logical request use the same key. |
-| `requestDigest` | yes | SHA-256 digest of the canonical normalized request intent, prefixed `sha256:`. Same key with a different digest is a conflict, never a new operation. |
+| `requestId` | yes | Exactly 32 lowercase hexadecimal characters. Generate with a cryptographically secure 128-bit source, persist before the first side effect, and reuse it after caller/worker restart. It is also the existing Management API `Idempotency-Key` and is returned as `OperationReceipt.requestId`; there is no second independently generated key. |
+| `intentDigest` | yes | Local envelope integrity digest in `sha256:<64 lowercase hex>` form, computed over the canonical ComputeRequest intent with this field omitted. Persist it with the exact request body and reject same-ID replay if the intent differs. It is **not** the server-generated `OperationReceipt.requestDigest`; retain that backend value separately as receipt evidence. |
 | `projectId`, `computePoolId` | yes | Requested scope/target. Management must revalidate current Project authorization and resolve pool/cluster/provider binding server-side; caller values are not authority. |
 | `profileRef.profileId + revision` | yes | Pins the exact GPU ExecutionProfile revision that justified the request. |
 | `correlation.agentId/sessionId/runId` | yes | Opaque canonical identity references for trace/audit correlation. They are not caller authorization claims and do not become Compute-owned identity. |
-| `workload.id + generation` | yes | Stable Workload identity and desired generation. Same-generation intent is immutable; changed intent uses the existing delete/finalize/tombstone/recreate lifecycle. |
+| `workload.id + expectedGeneration` | yes | Stable Workload ID plus the Management API CAS precondition. For the current v0.1 public create path, `expectedGeneration=0`; the server assigns the resulting generation and the operation receipt returns it. Never let the adapter invent the result generation. The current public Management path rejects reuse of an ID while a tombstone exists; do not claim delete/recreate is supported until its higher-generation lifecycle path is separately wired and accepted. |
 | `workload.image` | yes | Image reference requested by the Workload. Production supply-chain acceptance must resolve/pin and verify an immutable digest; a mutable tag alone is not release evidence. |
 | `workload.accelerator.class + quota` | yes | Must agree with the pinned profile and selected ComputePool binding. Provider-specific resource names are resolved inside the Compute layer. |
 | `workload.command` | no | Explicit command vector, if used; never accept arbitrary privilege/configuration fields outside the existing reviewed Workload contract. |
 
-The v0.1 adapter maps the `workload` fields to the existing Go `domain.Workload` / Management API representation; it must not bypass the authenticated Management ingress by calling Agent/internal endpoints. Do not create a separate idempotency database if the Management operation receipt is the authoritative write receipt.
+The v0.1 adapter maps this envelope to the existing authenticated Management API mutation:
+`PUT /api/v1/management/clusters/{resolvedCluster}/projects/{projectId}/resources/Workload/{workload.id}`,
+header `Idempotency-Key: requestId`, and JSON body `{expectedGeneration, poolId: computePoolId, spec: {image, command?, accelerator}}`. The server resolves the project/pool/cluster/provider binding and assigns the resulting generation. After HTTP 204, fetch the scoped operation receipt by the original requestId; that receipt's `resultingGeneration` and the authorized Desired read establish the committed generation. Do not bypass the authenticated Management ingress by calling Agent/internal endpoints. Do not create a second durable operation-receipt database when the Management receipt is authoritative. If a new-generation recreation is not supported by the current public endpoint, fail closed rather than forging a generation or routing around Management.
 
 ### Ambiguous submission outcome
 
-A timeout, connection loss, 5xx after send, or process death before the acknowledgement is observed means **UNKNOWN**, not rejected and not successful. Recover by the original `requestId` and `idempotencyKey`, query the owner-scoped operation receipt, then re-read authorized Desired state and independent execution observations. Never mint a new key merely because the caller did not receive ACK. HTTP 204 / a committed receipt means the desired write was accepted; it does not mean Kueue admitted it, a Pod became ready, inference succeeded, or resources were durably released.
+A timeout, connection loss, 5xx after send, or process death before the acknowledgement is observed means **UNKNOWN**, not rejected and not successful. Recover using the original `requestId` (the same value as `Idempotency-Key`), query the owner-scoped operation receipt, then re-read authorized Desired state and independent execution observations. Never mint a new ID/key merely because the caller did not receive ACK. HTTP 204 / a committed receipt means the desired write was accepted; it does not mean Kueue admitted it, a Pod became ready, inference succeeded, or resources were durably released.
 
 ## 3. ComputeAllocation
 
@@ -65,8 +66,8 @@ ComputeAllocation is a normalized **read projection**, not an independent durabl
 | Field | Required | Authority / invariant |
 |---|---:|---|
 | `apiVersion` | yes | Literal `compute.allocation/v0.1`. |
-| `requestId` | yes | Echoes the stable logical ComputeRequest ID. |
-| `projectId`, `computePoolId`, `workloadId`, `generation` | yes | Resolved Workload identities and exact desired generation; server-derived or validated. |
+| `requestId` | yes | Echoes the same 32-hex operation ID that was sent as `Idempotency-Key`. |
+| `projectId`, `computePoolId`, `workloadId`, `generation` | yes | Resolved Workload identities and committed desired generation; the generation is taken from the server receipt and authorized Desired record, not from the incoming ComputeRequest. |
 | `clusterId`, `provider`, `providerBindingGeneration` | yes | Resolved by the server from the frozen pool/cluster binding, never trusted solely from the request body. |
 | `state` | yes | `REQUESTED`, `ALLOCATING`, `ALLOCATED`, `RELEASING`, `RELEASED`, or `UNKNOWN`. This is resource lifecycle, not Agent Run outcome. |
 | `observedGeneration` | yes | Latest desired generation actually processed by the observer/reconciler; it does not alone imply readiness. |
@@ -112,8 +113,8 @@ Errors must include a safe correlation/request ID, must not leak raw tokens, cre
 | Profile contents and immutable revision | ACP profile/config authority |
 | Agent / Session / Run identity | Owning Agent runtime; this contract carries references only |
 | Current user/project authorization and project-to-pool binding | Authenticated Management API + server-side grants/bindings |
-| Logical request ID and client idempotency key | Durable ACP request record; same values survive retry/restart |
-| Whether a Desired write committed | Owner-scoped durable Management operation receipt, reconciled with Desired state |
+| Logical request ID / Management `Idempotency-Key` | One durable ACP request ID (32-hex); same value survives retry/restart and is echoed by the Management operation receipt |
+| Whether a Desired write committed | Owner-scoped durable Management operation receipt (`requestId`, server `requestDigest`, `resultingGeneration`), reconciled with authorized Desired state. The receipt's `requestDigest` is not the adapter-local `intentDigest`. |
 | Workload desired spec, generation, deletion intent, finalizer and tombstone | Compute platform persistent store |
 | Current cluster/provider for a pool | Server-resolved, frozen pool/cluster/provider binding |
 | Quota/admission/device allocation/Pod state | Kueue/Kubernetes/provider, consumed as fresh independent observations |
