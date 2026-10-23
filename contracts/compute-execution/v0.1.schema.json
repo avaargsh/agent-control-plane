@@ -1,0 +1,851 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:avaargsh:execution-resource-contract:v0.1",
+  "title": "Agent execution resource integration contract v0.1",
+  "description": "Versioned adapter envelope. It does not change the frozen ACP v0.1 authority kernel. Runtime enforcement and end-to-end acceptance are separate gates.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ExecutionProfile"
+    },
+    {
+      "$ref": "#/$defs/ComputeRequest"
+    },
+    {
+      "$ref": "#/$defs/ComputeAllocation"
+    },
+    {
+      "$ref": "#/$defs/ComputeError"
+    }
+  ],
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "KubernetesSafeID": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+      "maxLength": 63
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "ExecutionProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "profileId",
+        "revision",
+        "projectId",
+        "environment",
+        "resources",
+        "accelerator",
+        "persistence",
+        "networkPolicyRef",
+        "credentialBindingRefs"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "agent.execution-profile/v0.1"
+        },
+        "profileId": {
+          "$ref": "#/$defs/KubernetesSafeID"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "projectId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "environment": {
+          "enum": [
+            "worker",
+            "sandbox",
+            "workspace",
+            "gpu-workload"
+          ]
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cpuMilli",
+            "memoryMiB",
+            "ephemeralStorageMiB",
+            "timeoutSeconds",
+            "maxConcurrency"
+          ],
+          "properties": {
+            "cpuMilli": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "memoryMiB": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ephemeralStorageMiB": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxConcurrency": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "accelerator": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "none"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "class",
+                "quota"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "required"
+                },
+                "class": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "quota": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          ]
+        },
+        "persistence": {
+          "enum": [
+            "ephemeral",
+            "session",
+            "durable"
+          ]
+        },
+        "networkPolicyRef": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "credentialBindingRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "budgetRef": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "environment": {
+                "const": "gpu-workload"
+              }
+            },
+            "required": [
+              "environment"
+            ]
+          },
+          "then": {
+            "properties": {
+              "accelerator": {
+                "properties": {
+                  "mode": {
+                    "const": "required"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "environment": {
+                "enum": [
+                  "worker",
+                  "sandbox",
+                  "workspace"
+                ]
+              }
+            },
+            "required": [
+              "environment"
+            ]
+          },
+          "then": {
+            "properties": {
+              "accelerator": {
+                "properties": {
+                  "mode": {
+                    "const": "none"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ProfileRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profileId",
+        "revision"
+      ],
+      "properties": {
+        "profileId": {
+          "$ref": "#/$defs/KubernetesSafeID"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ComputeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "requestId",
+        "intentDigest",
+        "projectId",
+        "computePoolId",
+        "profileRef",
+        "correlation",
+        "workload"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "compute.request/v0.1"
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "projectId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "computePoolId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "profileRef": {
+          "$ref": "#/$defs/ProfileRef"
+        },
+        "correlation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agentId",
+            "sessionId",
+            "runId"
+          ],
+          "properties": {
+            "agentId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "sessionId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "runId": {
+              "$ref": "#/$defs/Identifier"
+            }
+          }
+        },
+        "workload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "expectedGeneration",
+            "image",
+            "accelerator"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/KubernetesSafeID"
+            },
+            "image": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "^[^\\s@]+@sha256:[0-9a-f]{64}$",
+              "description": "Immutable OCI image reference pinned to a sha256 digest; mutable tags alone are not accepted as execution input."
+            },
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "maxItems": 128
+            },
+            "accelerator": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "class",
+                "quota"
+              ],
+              "properties": {
+                "class": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "quota": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "expectedGeneration": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "CAS precondition; 0 for the current public API's initial create. This is not the resulting Desired generation."
+            }
+          }
+        },
+        "intentDigest": {
+          "$ref": "#/$defs/Digest",
+          "description": "Local canonical envelope digest; exclude this field when hashing. Not the server-generated Management OperationReceipt.requestDigest."
+        }
+      }
+    },
+    "ProviderRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "namespace",
+        "name",
+        "uid",
+        "resourceVersion",
+        "generation",
+        "ownershipProofRef"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "name": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "uid": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "resourceVersion": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imageDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "ownershipProofRef": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "description": "An observed, bound provider object only. Each reference includes API-server-issued UID, resourceVersion and generation plus an immutable ownershipProofRef. The proof binds the request, current desired generation, provider binding and object UID; Job/Pod refs also bind the resolved image digest. Unobserved or unbound objects are omitted rather than represented as owned allocations.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "Job",
+                  "Pod"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "imageDigest"
+            ]
+          }
+        }
+      ]
+    },
+    "Condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "status",
+        "observedAt"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "status": {
+          "enum": [
+            "TRUE",
+            "FALSE",
+            "UNKNOWN"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ComputeAllocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "requestId",
+        "projectId",
+        "computePoolId",
+        "workloadId",
+        "generation",
+        "clusterId",
+        "provider",
+        "providerBindingGeneration",
+        "state",
+        "observedGeneration",
+        "providerRefs",
+        "conditions",
+        "evidenceRefs"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "compute.allocation/v0.1"
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "projectId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "computePoolId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "workloadId": {
+          "$ref": "#/$defs/KubernetesSafeID"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "clusterId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "providerBindingGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "REQUESTED",
+            "ALLOCATING",
+            "ALLOCATED",
+            "RELEASING",
+            "RELEASED",
+            "UNKNOWN"
+          ]
+        },
+        "observedGeneration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "providerRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderRef"
+          }
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Condition"
+          }
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "ALLOCATED"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "providerRefs": {
+                "minItems": 1
+              },
+              "conditions": {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "status"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "OwnershipProven"
+                    },
+                    "status": {
+                      "const": "TRUE"
+                    }
+                  }
+                },
+                "minContains": 1
+              },
+              "evidenceRefs": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "RELEASED"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "conditions": {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "status"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "CleanupComplete"
+                    },
+                    "status": {
+                      "const": "TRUE"
+                    }
+                  }
+                },
+                "minContains": 1
+              },
+              "evidenceRefs": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ComputeError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "code",
+        "outcome",
+        "retryable",
+        "requestId"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "compute.error/v0.1"
+        },
+        "code": {
+          "enum": [
+            "INVALID_ARGUMENT",
+            "UNAUTHENTICATED",
+            "PERMISSION_DENIED",
+            "GENERATION_CONFLICT",
+            "IDEMPOTENCY_CONFLICT",
+            "PROFILE_UNSUPPORTED",
+            "QUOTA_EXCEEDED",
+            "RESOURCE_UNAVAILABLE",
+            "DEADLINE_EXCEEDED",
+            "UNAVAILABLE",
+            "OWNERSHIP_UNPROVEN",
+            "PROVIDER_STATE_CONFLICT",
+            "CLEANUP_PENDING"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "REJECTED",
+            "NOT_COMMITTED",
+            "COMMITTED",
+            "UNKNOWN"
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "retryAfterSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "safeMessage": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "INVALID_ARGUMENT",
+                  "UNAUTHENTICATED",
+                  "PERMISSION_DENIED",
+                  "GENERATION_CONFLICT",
+                  "IDEMPOTENCY_CONFLICT",
+                  "PROFILE_UNSUPPORTED"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "REJECTED"
+              },
+              "retryable": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "QUOTA_EXCEEDED"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "REJECTED"
+              },
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "RESOURCE_UNAVAILABLE"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "NOT_COMMITTED",
+                  "UNKNOWN"
+                ]
+              },
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "DEADLINE_EXCEEDED",
+                  "UNAVAILABLE"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "UNKNOWN"
+              },
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "OWNERSHIP_UNPROVEN"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "UNKNOWN"
+              },
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "PROVIDER_STATE_CONFLICT"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "UNKNOWN"
+              },
+              "retryable": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "CLEANUP_PENDING"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "UNKNOWN"
+              },
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "retryable": {
+                "const": false
+              }
+            },
+            "required": [
+              "retryable"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "retryAfterSeconds"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
