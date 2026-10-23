@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS public.acp_workload_credentials (
     expires_at DOUBLE PRECISION NOT NULL CHECK (expires_at > issued_at),
     approval_id TEXT REFERENCES public.acp_workload_approval_grants(approval_id),
     approval_version BIGINT,
+    binding_version BIGINT NOT NULL CHECK (binding_version > 0),
     revoked_at DOUBLE PRECISION,
     revoke_event_id TEXT,
     created_at DOUBLE PRECISION NOT NULL DEFAULT EXTRACT(EPOCH FROM clock_timestamp())

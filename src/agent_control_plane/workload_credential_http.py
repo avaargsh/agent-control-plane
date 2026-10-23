@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 import re
-from typing import Callable, Mapping
+from typing import Mapping
 from urllib.parse import unquote
 from wsgiref.types import WSGIEnvironment, StartResponse
 
@@ -107,7 +107,9 @@ class WorkloadCredentialWSGI:
         stream = environ.get("wsgi.input")
         if stream is None:
             raise CredentialAuthorityProtocolError("request body is missing")
-        raw = stream.read(length + 1)
+        # Read exactly Content-Length; attempting length+1 can block on
+        # WSGI streams whose server waits for more request-body bytes.
+        raw = stream.read(length)
         if len(raw) != length:
             raise CredentialAuthorityProtocolError("request body length mismatch")
         try:

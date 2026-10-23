@@ -579,6 +579,7 @@ class PostgresCredentialAuthorityStore:
                         json.dumps(list(record["allowed_scopes"])),
                         json.dumps(list(record["scopes"])), record["issued_at"],
                         record["expires_at"], approval_id, approval_version,
+                        binding_version,
                     ),
                 )
                 conn.execute(
