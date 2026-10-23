@@ -210,7 +210,7 @@ def test_postgres_approval_revoke_is_transactional_idempotent_and_has_outbox(pg_
         transition_hash="sha256:" + "c" * 64,
         policy_decision_hash="sha256:" + "d" * 64,
     )
-    store.register_approval(grant)
+    store._insert_verified_approval(grant)
     request = request_factory(
         request_id="pg-request-write",
         scopes=("github:write",),
@@ -404,7 +404,7 @@ def test_postgres_outbox_reclaim_after_lost_ack_reuses_stable_event_id(pg_runtim
         transition_hash="sha256:" + "c" * 64,
         policy_decision_hash="sha256:" + "d" * 64,
     )
-    store.register_approval(grant)
+    store._insert_verified_approval(grant)
     issued = authority.issue(request_factory(
         request_id=f"pg-outbox-request-{uuid.uuid4().hex}",
         scopes=("github:write",),
