@@ -7,6 +7,7 @@ import json
 import secrets
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .state_transition_protocol import ActionIntent, ProtocolViolation
@@ -984,7 +985,7 @@ class CredentialApprovalVerifier(Protocol):
         self,
         signed: SignedTransitionApproval,
         *,
-        now: Any,
+        now: datetime,
     ) -> TransitionApproval:
         ...
 
@@ -996,7 +997,7 @@ def register_credential_approval_from_transition(
     signed_approval: SignedTransitionApproval,
     approval_verifier: CredentialApprovalVerifier,
     action: ActionIntent,
-    now: Any,
+    now: datetime,
 ) -> ApprovalGrantRecord:
     """Project a verified ACP transition approval into the credential authority.
 
@@ -1007,7 +1008,11 @@ def register_credential_approval_from_transition(
     place where an agent can create an approval. No HTTP route exposes this
     function.
     """
-    if getattr(now, "tzinfo", None) is None or now.utcoffset() is None:
+    if (
+        not isinstance(now, datetime)
+        or now.tzinfo is None
+        or now.utcoffset() is None
+    ):
         raise CredentialAuthorityProtocolError("approval registration time must be timezone-aware")
     action.verify()
     approval = approval_verifier.verify(signed_approval, now=now)
