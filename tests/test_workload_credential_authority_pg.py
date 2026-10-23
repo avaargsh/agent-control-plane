@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from dataclasses import replace
 
 import pytest
@@ -18,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from agent_control_plane.workload_credentials import (
     ApprovalGrantRecord,
     CanonicalRunBinding,
+    CredentialAuthorityConflict,
     CredentialRequestReplay,
     PinnedEd25519AssertionVerifier,
     PostgresCredentialAuthorityStore,
@@ -240,3 +243,206 @@ def test_postgres_approval_revoke_is_transactional_idempotent_and_has_outbox(pg_
             (body["event_id"],),
         ).fetchall()
     assert len(rows) == 1
+
+
+def test_postgres_concurrent_duplicate_issue_persists_exactly_one_credential(pg_runtime):
+    clock, store, run, binding, authority, request_factory = pg_runtime
+    request_id = f"pg-concurrent-{uuid.uuid4().hex}"
+    request = request_factory(request_id=request_id)
+    barrier = Barrier(2)
+
+    def issue_after_barrier():
+        barrier.wait(timeout=10)
+        try:
+            return ("issued", authority.issue(request)["credential"])
+        except CredentialRequestReplay:
+            return ("replay", None)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(issue_after_barrier) for _ in range(2)]
+        outcomes = [future.result(timeout=20) for future in futures]
+
+    assert sorted(kind for kind, _ in outcomes) == ["issued", "replay"]
+    issued = next(value for kind, value in outcomes if kind == "issued")
+    assert isinstance(issued["credential_id"], str) and issued["credential_id"]
+
+    with psycopg.connect(os.environ["ACP_WORKLOAD_CREDENTIAL_DATABASE_URL"]) as conn:
+        request_rows = conn.execute(
+            """
+            SELECT count(*) AS n
+            FROM public.acp_workload_credential_requests
+            WHERE issuer = %s AND run_id = %s
+              AND binding_id = %s AND request_id = %s
+            """,
+            ("runtime-prod", run.run_id, binding.binding_id, request_id),
+        ).fetchone()["n"]
+        credential_rows = conn.execute(
+            """
+            SELECT count(*) AS n
+            FROM public.acp_workload_credentials
+            WHERE workload_issuer = %s AND run_id = %s
+              AND binding_id = %s
+              AND credential_id IN (
+                  SELECT credential_id
+                  FROM public.acp_workload_credential_requests
+                  WHERE issuer = %s AND run_id = %s
+                    AND binding_id = %s AND request_id = %s
+              )
+            """,
+            (
+                "runtime-prod", run.run_id, binding.binding_id,
+                "runtime-prod", run.run_id, binding.binding_id, request_id,
+            ),
+        ).fetchone()["n"]
+
+    assert request_rows == 1
+    assert credential_rows == 1
+
+
+def test_postgres_lost_issue_response_reconciles_without_returning_raw_token(pg_runtime):
+    clock, store, run, binding, authority, request_factory = pg_runtime
+    request_id = f"pg-lost-ack-{uuid.uuid4().hex}"
+    request = request_factory(request_id=request_id)
+
+    def issue_then_drop_response():
+        # The service commits the credential; the caller loses the response.
+        authority.issue(request)
+        raise ConnectionError("injected response loss after successful issuance")
+
+    with pytest.raises(ConnectionError, match="injected response loss"):
+        issue_then_drop_response()
+
+    recovered = store.lookup_issue_request(
+        issuer="runtime-prod",
+        run_id=run.run_id,
+        binding_id=binding.binding_id,
+        request_id=request_id,
+        now=clock(),
+    )
+    assert recovered is not None
+    assert recovered["state"] == "ISSUED"
+    assert recovered["request_id"] == request_id
+    assert recovered["run_id"] == run.run_id
+    assert "access_token" not in recovered
+    assert "token_digest" not in recovered
+
+    # Retrying the mutating request is denied; reconciliation must be read-only.
+    with pytest.raises(CredentialRequestReplay):
+        authority.issue(request)
+
+    with psycopg.connect(os.environ["ACP_WORKLOAD_CREDENTIAL_DATABASE_URL"]) as conn:
+        count = conn.execute(
+            """
+            SELECT count(*) AS n
+            FROM public.acp_workload_credential_requests
+            WHERE issuer = %s AND run_id = %s
+              AND binding_id = %s AND request_id = %s
+            """,
+            ("runtime-prod", run.run_id, binding.binding_id, request_id),
+        ).fetchone()["n"]
+    assert count == 1
+
+
+def test_postgres_revocation_event_id_cannot_be_rebound_to_another_resource(pg_runtime):
+    clock, store, run, binding, authority, request_factory = pg_runtime
+    first = authority.issue(request_factory(
+        request_id=f"pg-revoke-a-{uuid.uuid4().hex}"
+    ))["credential"]
+    second = authority.issue(request_factory(
+        request_id=f"pg-revoke-b-{uuid.uuid4().hex}"
+    ))["credential"]
+    event_id = f"pg-revoke-event-{uuid.uuid4().hex}"
+
+    assert store.revoke_credential(
+        first["credential_id"],
+        event_id=event_id,
+        actor_role="credential.revoker",
+        now=clock(),
+    ) is True
+
+    with pytest.raises(CredentialAuthorityConflict):
+        store.revoke_credential(
+            second["credential_id"],
+            event_id=event_id,
+            actor_role="credential.revoker",
+            now=clock(),
+        )
+
+    with pytest.raises(CredentialAuthorityConflict):
+        store.revoke_run(
+            run.run_id,
+            sandbox_revision=run.sandbox_revision,
+            event_id=event_id,
+            actor_role="credential.revoker",
+            now=clock(),
+        )
+
+
+def test_postgres_outbox_reclaim_after_lost_ack_reuses_stable_event_id(pg_runtime):
+    clock, store, run, binding, authority, request_factory = pg_runtime
+    approval_id = f"pg-outbox-{uuid.uuid4().hex}"
+    grant = ApprovalGrantRecord(
+        approval_id=approval_id,
+        tenant_id=run.tenant_id,
+        agent_id=run.agent_id,
+        session_id=run.session_id,
+        run_id=run.run_id,
+        binding_id=binding.binding_id,
+        audience=binding.audience,
+        scopes=("github:write",),
+        approved_by="human:security",
+        issued_at=clock() - 1,
+        expires_at=clock() + 60,
+        state="ACTIVE",
+        version=1,
+    )
+    store.register_approval(grant)
+    issued = authority.issue(request_factory(
+        request_id=f"pg-outbox-request-{uuid.uuid4().hex}",
+        scopes=("github:write",),
+        approval_id=approval_id,
+        ttl=60,
+    ))["credential"]
+    event_id = f"pg-outbox-event-{uuid.uuid4().hex}"
+    authority.revoke_approval_authority(
+        approval_id,
+        {
+            "event_id": event_id,
+            "_authenticated_service_role": "approval.revoker",
+        },
+    )
+
+    first_claim = store.claim_revocation_outbox(
+        claim_id=f"claim-{uuid.uuid4().hex}",
+        now=clock(),
+        lease_seconds=5,
+        limit=10,
+    )
+    first = next(item for item in first_claim if item["event_id"] == event_id)
+    published_payload = dict(first["payload"])
+    # Simulate publish succeeding, then the worker dies before persisting ACK.
+    clock.now += 6
+    second_claim_id = f"claim-{uuid.uuid4().hex}"
+    second_claim = store.claim_revocation_outbox(
+        claim_id=second_claim_id,
+        now=clock(),
+        lease_seconds=5,
+        limit=10,
+    )
+    replayed = next(item for item in second_claim if item["event_id"] == event_id)
+
+    assert replayed["event_id"] == event_id
+    assert dict(replayed["payload"]) == published_payload
+    assert replayed["attempts"] == first["attempts"] + 1
+    assert store.acknowledge_revocation_outbox(
+        event_id=event_id,
+        claim_id=second_claim_id,
+        delivered_at=clock(),
+    ) is True
+
+    # Receiver-side deduplication still needs a live publisher/consumer test.
+    assert authority.introspect({
+        "access_token": issued["access_token"],
+        "audience": issued["audience"],
+        "required_scopes": ["github:write"],
+    })["credential"]["active"] is False
