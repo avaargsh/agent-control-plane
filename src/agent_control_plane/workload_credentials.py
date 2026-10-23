@@ -1233,6 +1233,8 @@ class WorkloadCredentialAuthority:
             canonical = self._runs.get_run_binding(claims["run_id"])
         except CredentialAuthorityError:
             raise
+        except LookupError:
+            raise CredentialAuthorityDenied("canonical Run does not exist") from None
         except Exception:
             raise CredentialAuthorityUnavailable("canonical Run authority is unavailable") from None
         self._assert_current_run(claims, canonical, require_running=True)
@@ -1366,10 +1368,13 @@ class WorkloadCredentialAuthority:
 
         try:
             canonical = self._runs.get_run_binding(record["run_id"])
-        except CredentialAuthorityNotFound:
+        except LookupError:
             return {"credential": {"active": False}}
         except Exception:
-            raise CredentialAuthorityUnavailable("canonical Run authority is unavailable") from None
+            # Introspection is a boolean authorization boundary. A missing or
+            # unavailable canonical Runtime source must never preserve an old
+            # permit; callers receive inactive instead of a fail-open fallback.
+            return {"credential": {"active": False}}
         claims = {
             "sub": record["subject"],
             "tenant_id": record["tenant_id"],
