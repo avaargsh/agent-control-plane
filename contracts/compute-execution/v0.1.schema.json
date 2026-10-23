@@ -349,7 +349,8 @@
         "name",
         "uid",
         "resourceVersion",
-        "generation"
+        "generation",
+        "ownershipProofRef"
       ],
       "properties": {
         "kind": {
@@ -374,9 +375,34 @@
         },
         "imageDigest": {
           "$ref": "#/$defs/Digest"
+        },
+        "ownershipProofRef": {
+          "$ref": "#/$defs/Identifier"
         }
       },
-      "description": "An observed provider object only. References must include API-server-issued UID, resourceVersion and generation; unobserved or unbound objects are omitted rather than represented as owned allocations."
+      "description": "An observed, bound provider object only. Each reference includes API-server-issued UID, resourceVersion and generation plus an immutable ownershipProofRef. The proof binds the request, current desired generation, provider binding and object UID; Job/Pod refs also bind the resolved image digest. Unobserved or unbound objects are omitted rather than represented as owned allocations.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "Job",
+                  "Pod"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "imageDigest"
+            ]
+          }
+        }
+      ]
     },
     "Condition": {
       "type": "object",
@@ -494,7 +520,86 @@
             "$ref": "#/$defs/Identifier"
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "ALLOCATED"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "providerRefs": {
+                "minItems": 1
+              },
+              "conditions": {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "status"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "OwnershipProven"
+                    },
+                    "status": {
+                      "const": "TRUE"
+                    }
+                  }
+                },
+                "minContains": 1
+              },
+              "evidenceRefs": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "RELEASED"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "conditions": {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "status"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "CleanupComplete"
+                    },
+                    "status": {
+                      "const": "TRUE"
+                    }
+                  }
+                },
+                "minContains": 1
+              },
+              "evidenceRefs": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
     },
     "ComputeError": {
       "type": "object",
