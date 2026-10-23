@@ -381,6 +381,34 @@ def test_postgres_revocation_event_id_cannot_be_rebound_to_another_resource(pg_r
             now=clock(),
         )
 
+    approval_id = f"pg-rebound-approval-{uuid.uuid4().hex}"
+    store._insert_verified_approval(ApprovalGrantRecord(
+        approval_id=approval_id,
+        tenant_id=run.tenant_id,
+        agent_id=run.agent_id,
+        session_id=run.session_id,
+        run_id=run.run_id,
+        binding_id=binding.binding_id,
+        audience=binding.audience,
+        scopes=("github:write",),
+        approved_by="human:security",
+        issued_at=clock() - 1,
+        expires_at=clock() + 60,
+        state="ACTIVE",
+        version=1,
+        approval_hash="sha256:" + "e" * 64,
+        action_hash="sha256:" + "f" * 64,
+        transition_hash="sha256:" + "1" * 64,
+        policy_decision_hash="sha256:" + "2" * 64,
+    ))
+    with pytest.raises(CredentialAuthorityConflict):
+        store.revoke_approval(
+            approval_id,
+            event_id=event_id,
+            actor_role="credential.revoker",
+            now=clock(),
+        )
+
 
 def test_postgres_outbox_reclaim_after_lost_ack_reuses_stable_event_id(pg_runtime):
     clock, store, run, binding, authority, request_factory = pg_runtime
@@ -428,6 +456,20 @@ def test_postgres_outbox_reclaim_after_lost_ack_reuses_stable_event_id(pg_runtim
     )
     first = next(item for item in first_claim if item["event_id"] == event_id)
     published_payload = dict(first["payload"])
+
+    # A downstream consumer deduplicates by stable event ID; the side effect
+    # succeeds on first delivery even though the producer loses its ACK.
+    receiver_seen: set[str] = set()
+    receiver_effects: list[dict[str, object]] = []
+
+    def receiver_accept(payload):
+        stable_id = payload["event_id"]
+        if stable_id in receiver_seen:
+            return
+        receiver_seen.add(stable_id)
+        receiver_effects.append(dict(payload))
+
+    receiver_accept(published_payload)
     # Simulate publish succeeding, then the worker dies before persisting ACK.
     clock.now += 6
     second_claim_id = f"claim-{uuid.uuid4().hex}"
@@ -442,13 +484,17 @@ def test_postgres_outbox_reclaim_after_lost_ack_reuses_stable_event_id(pg_runtim
     assert replayed["event_id"] == event_id
     assert dict(replayed["payload"]) == published_payload
     assert replayed["attempts"] == first["attempts"] + 1
+    receiver_accept(dict(replayed["payload"]))
+    assert len(receiver_effects) == 1
+    assert receiver_effects[0]["event_id"] == event_id
     assert store.acknowledge_revocation_outbox(
         event_id=event_id,
         claim_id=second_claim_id,
         delivered_at=clock(),
     ) is True
 
-    # Receiver-side deduplication still needs a live publisher/consumer test.
+    # The receiver-side exercise is deterministic; a real network publisher
+    # and independently deployed receiver remain a separate acceptance gate.
     assert authority.introspect({
         "access_token": issued["access_token"],
         "audience": issued["audience"],
