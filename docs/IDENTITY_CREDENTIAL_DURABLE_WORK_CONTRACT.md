@@ -29,7 +29,43 @@ The first consumer remains the existing GitHub PR Watch Golden Slice. General Ag
 | `Run` | One execution attempt/incarnation associated with a business Task and workflow | The business Task itself |
 | `Task` | Durable business intent and authoritative lifecycle state | A copy of Temporal Workflow History |
 
-Every authorization decision must resolve the current trusted binding; matching IDs alone is not authorization. A session may survive while workloads are replaced, and every replacement must authenticate as a new workload incarnation.
+Identity invariants:
+
+- `AgentIdentity` is stable across process, worker, and sandbox replacement. It is never derived from a PID, pod name, hostname, or ephemeral token.
+- `SessionIdentity` remains stable across restart when continuing the same logical session; a new session is created only for a new logical conversation/work context.
+- Each distinct execution incarnation receives a new `WorkloadIdentity`; replacement must not inherit the old workload's credentials.
+- A `Run` has an immutable canonical ID. Temporal Workflow ID/Run ID and sandbox/provider IDs are references with explicit lineage, not substitutes for the canonical Run ID.
+- Retries/recovery of the same logical Run must be distinguished from a deliberately created new Run. A retry may create a new attempt/incarnation ID while retaining the parent Run/Task correlation.
+- Matching identifiers alone never authorize an operation.
+
+## Run lifecycle contract
+
+The canonical Run state machine is:
+
+```text
+Pending -> Running -> Waiting -> Running
+   |          |         |
+   |          |         +----> Failed / Cancelled (only when resolved)
+   |          +--------------> Succeeded / Failed / Cancelled
+   +-------------------------> Cancelled
+```
+
+Allowed transitions:
+
+| From | To | Required condition |
+|---|---|---|
+| `Pending` | `Running` | Durable claim/lease acquired; identity and authority checks pass |
+| `Pending` | `Cancelled` | Cancellation wins before execution claim |
+| `Running` | `Waiting` | A durable wait reason is recorded (timer, approval, external event, or retryable dependency) |
+| `Waiting` | `Running` | Wait condition is satisfied and current authority is revalidated |
+| `Running` | `Succeeded` | Required result is persisted and independently verified; a provider ACK alone is insufficient |
+| `Running` | `Failed` | Failure is known and terminal; ambiguous side effects remain `UNKNOWN` pending reconciliation |
+| `Running` | `Cancelled` | Cancellation is confirmed at a safe boundary and any in-flight side effect is reconciled |
+| `Waiting` | `Cancelled` | Cancellation is durably accepted and no unresolved effect is falsely reported as absent |
+
+No implicit transitions are allowed from terminal states (`Succeeded`, `Failed`, `Cancelled`). Corrections require a separately audited reconciliation/compensation operation or a new Run. A timeout is an event/policy decision, not proof that an external operation did not happen: persist the timeout, then either enter `Waiting` for bounded retry/reconciliation or finish `Failed` only when the outcome is known. If the outcome is ambiguous, retain `UNKNOWN` in the operation/evidence record and do not replay the side effect automatically.
+
+Every state transition must be an atomic compare-and-set against the expected prior state/version and append a durable audit record containing at least: event ID, canonical Agent/Session/Task/Run IDs, prior and next state, reason/trigger, attempt/incarnation reference, timestamp, actor/worker identity, policy/authority revision where applicable, workflow reference, correlation/causation IDs, and redacted evidence references. Replayed event IDs are idempotent and must not append a second logical transition. Audit records are append-only; corrections reference the original event rather than rewriting it.
 
 ## Credential handling requirements
 
@@ -40,7 +76,7 @@ Every authorization decision must resolve the current trusted binding; matching 
 5. Credential issuer outages, unknown keys, revoked identities, stale policy, expiry, wrong audience/scope and ambiguous authority reads fail closed before an effect. If an external effect may already have happened, record UNKNOWN and reconcile; never claim NOT_APPLIED without evidence.
 6. Key trust, issuance, rotation, revocation, audit ownership and recovery are operator/deployer responsibilities until an explicit, tested issuer integration exists. Offline DSSE signature validation alone does not prove the signer was authorized or the observation is fresh.
 
-## Durable work and recovery
+## Durable work, idempotency, and recovery
 
 - Use the existing ACP business Task/Goal record and PG16 Inbox as the business source of truth. Do not introduce a second Task table or copy Temporal history into PostgreSQL.
 - Use Temporal for durable orchestration, timers, signals, retry/backoff, and worker recovery. Use deterministic workflow code and keep external side effects behind idempotent, authority-checked activities.
@@ -49,6 +85,14 @@ Every authorization decision must resolve the current trusted binding; matching 
 - Approval is a scoped, expiring input to a specific operation and target. Delayed, revoked, stale, cross-project or mismatched approval is denied at the effect boundary.
 - A worker/session/sandbox replacement resumes the same Task identity but creates a distinct execution incarnation; recovery must not silently transfer old workload credentials.
 - Distinguish retryable known failure from ambiguous provider outcome. Preserve UNKNOWN until independent observation or durable provider reconciliation resolves it.
+
+Idempotency key invariant for every externally effectful operation:
+
+1. Compute the uniqueness scope from tenant/project, provider/application, immutable target identity (including resource UID/generation when available), and immutable operation ID. The caller cannot weaken or omit this scope.
+2. Bind the idempotency key to a canonical request/payload digest and the authorization/approval binding. Same scope + same key + same digest returns/reconciles the existing operation; it must not issue a second side effect. Same scope + same key + different digest is a hard conflict and fails closed.
+3. Enforce uniqueness atomically in durable storage before dispatch. Persist the operation state (`PREPARED`, `COMMITTED`, `ABORTED`, or `UNKNOWN`) and reconcile an unresolved `PREPARED`/`UNKNOWN` operation before any retry. Do not infer non-execution from a timeout, missing ACK, missing history, or worker death.
+4. Dedupe retention must outlive the maximum credential validity, provider retry/reconciliation window, and accepted delayed-event window. Do not expire an unresolved operation's key. If records must be compacted, retain a durable tombstone/digest sufficient to reject replay; expiration is not permission to re-execute.
+5. Scope collisions across tenants/providers/targets must not deduplicate unrelated operations or authorize cross-scope reuse. A process restart must preserve the same key binding and operation record.
 
 ## Business outcome and evidence
 
@@ -70,12 +114,14 @@ At minimum, test:
 - wrong principal, workload, tenant, project, application, audience, scope or target;
 - expired, not-yet-valid, revoked or rotated-away credential and signer;
 - duplicate delivery, conflicting delivery ID, replayed nonce and same-name resource recreated with a different UID;
+- same idempotency scope/key/digest (no duplicate effect); same key with a different digest (fail closed); cross-tenant/provider/target key collision; replay after restart and after the nominal dedupe window;
 - session retained across worker restart while old workload credentials are rejected;
 - stale or withdrawn approval and policy change immediately before effect;
 - worker SIGKILL, lost ACK, Temporal/observer outage, PostgreSQL connection loss, retry and process restart;
 - provider outcome ambiguity and independent observer disagreement;
 - evidence referring to a different Task, Run, operation, resource UID/generation or tenant;
-- unauthorized read/write attempts and redaction of secrets from logs/history/evidence.
+- unauthorized read/write attempts and redaction of secrets from logs/history/evidence;
+- duplicate/out-of-order state transition events, stale compare-and-set version, cancellation racing with claim/effect, timeout racing with completion, and audit append failure.
 
 ## Acceptance grades and sequencing
 
