@@ -136,7 +136,7 @@ class CanonicalRunBinding:
     sandbox_revision: int
     workspace_ref: str
     status: str
-    session_status: str = "ACTIVE"
+    session_status: str
 
 
 class WorkloadAssertionVerifier(Protocol):
