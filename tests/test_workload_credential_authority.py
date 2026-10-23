@@ -684,3 +684,24 @@ def test_http_service_roles_are_separated_and_errors_are_sanitized():
     )
     assert status == 400
     assert "workload_assertion" not in json.dumps(payload)
+
+def test_unrecognized_scope_verbs_require_approval_even_when_binding_allows_them():
+    _, binding, _, claims, store, _, authority, body = make_fixture()
+    store.bindings["github-api"] = replace(
+        binding,
+        allowed_scopes=("github:owner",),
+    )
+    claims["allowed_scopes"] = ["github:owner"]
+    claims["scopes"] = ["github:owner"]
+    body["scopes"] = ["github:owner"]
+    # The signed caller cannot classify a new provider-specific verb as safe.
+    with pytest.raises(CredentialAuthorityDenied, match="exact approval reference"):
+        authority.issue(body)
+
+
+def test_assertion_subject_must_be_the_canonical_run_subject():
+    _, _, _, claims, _, _, authority, body = make_fixture()
+    claims["sub"] = "run:another-agent-run"
+    with pytest.raises(CredentialAuthorityDenied, match="subject"):
+        authority.issue(body)
+
