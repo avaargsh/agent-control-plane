@@ -239,12 +239,18 @@ class WorkloadCredentialWSGI:
             status, payload = 400, {
                 "error": {"code": "invalid_request", "message": "request is invalid"}
             }
-        except Exception:
-            # No exception text is serialized: DB details, bearer values, signed
-            # assertions, and token digests must never leak through API errors.
-            status, payload = 500, {
-                "error": {"code": "internal_error", "message": "internal authority error"}
-            }
+        except Exception as exc:
+            # A concurrent event-ID insert can lose a uniqueness race after a
+            # competing transaction commits. Surface a sanitized retry/reconcile
+            # response; never serialize DB details or credential material.
+            if getattr(exc, "sqlstate", None) == "23505":
+                status, payload = 409, {
+                    "error": {"code": "authority_conflict", "message": "authoritative state changed; reconcile and retry safely"}
+                }
+            else:
+                status, payload = 500, {
+                    "error": {"code": "internal_error", "message": "internal authority error"}
+                }
 
         try:
             encoded = json.dumps(

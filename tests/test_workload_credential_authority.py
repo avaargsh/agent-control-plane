@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import io
 import json
 from dataclasses import replace
@@ -364,7 +363,7 @@ def make_approval(run, now, *, approval_id="approval-a", expires_at=None):
 
 
 def test_issue_and_introspection_bind_credential_to_canonical_run_and_revision():
-    clock, _, run, claims, store, runs, authority, body = make_fixture()
+    clock, _, run, claims, _, runs, authority, body = make_fixture()
     issued = authority.issue(body)["credential"]
     assert issued["run_id"] == run.run_id
     assert issued["sandbox_id"] == run.sandbox_id
@@ -389,7 +388,7 @@ def test_issue_and_introspection_bind_credential_to_canonical_run_and_revision()
 
 
 def test_issue_denies_unsigned_claim_mismatch_and_cross_tenant_rebind():
-    _, _, run, claims, store, runs, authority, body = make_fixture()
+    _, _, run, claims, _, runs, authority, body = make_fixture()
     claims["tenant_id"] = "tenant-b"
     with pytest.raises(CredentialAuthorityDenied, match="canonical Run"):
         authority.issue(body)
@@ -413,7 +412,7 @@ def test_signed_request_fields_cannot_change_audience_or_scope():
 
 
 def test_duplicate_request_id_is_durable_replay_rejection():
-    _, _, _, _, store, _, authority, body = make_fixture()
+    _, _, _, _, _, _, authority, body = make_fixture()
     authority.issue(body)
     with pytest.raises(CredentialRequestReplay):
         authority.issue(body)
@@ -510,7 +509,7 @@ def test_binding_deactivation_or_policy_version_bump_invalidates_existing_tokens
 
 
 def test_run_and_credential_revocation_are_immediate_and_idempotent():
-    clock, _, _, _, _, _, authority, body = make_fixture()
+    _, _, _, _, _, _, authority, body = make_fixture()
     issued = authority.issue(body)["credential"]
     revoke_body = {
         "credential_id": issued["credential_id"],
@@ -652,7 +651,7 @@ def _invoke_wsgi(app, *, method, path, token, body=None, query=""):
 
 
 def test_http_service_roles_are_separated_and_errors_are_sanitized():
-    clock, _, _, _, store, _, authority, _ = make_fixture()
+    clock, _, _, _, _, _, authority, _ = make_fixture()
     tokens = {
         role: ServiceRoleAuthenticator.digest_token("long-test-token-" + role + "-0123456789")
         for role in (
