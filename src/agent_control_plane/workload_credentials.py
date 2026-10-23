@@ -562,11 +562,11 @@ class PostgresCredentialAuthorityStore:
                         tenant_id, agent_id, release_id, session_id, run_id,
                         sandbox_id, sandbox_revision, workspace_ref, binding_id,
                         capability, audience, allowed_scopes, scopes, issued_at,
-                        expires_at, approval_id, approval_version, revoked_at,
+                        expires_at, approval_id, approval_version, binding_version, revoked_at,
                         revoke_event_id
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, NULL, NULL
+                        %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, NULL, NULL
                     )
                     """,
                     (
