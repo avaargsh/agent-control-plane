@@ -12,6 +12,22 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = ROOT / "contracts" / "compute-execution" / "v0.1.schema.json"
 SCHEMA = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
+PROFILE_VALIDATOR = Draft202012Validator(
+    {
+        "$schema": SCHEMA["$schema"],
+        "$defs": SCHEMA["$defs"],
+        "$ref": "#/$defs/ExecutionProfile",
+    },
+    format_checker=FormatChecker(),
+)
+REQUEST_VALIDATOR = Draft202012Validator(
+    {
+        "$schema": SCHEMA["$schema"],
+        "$defs": SCHEMA["$defs"],
+        "$ref": "#/$defs/ComputeRequest",
+    },
+    format_checker=FormatChecker(),
+)
 
 
 def allocation() -> dict[str, Any]:
@@ -51,11 +67,61 @@ def allocation() -> dict[str, Any]:
     }
 
 
-def validation_errors(document: dict[str, Any]) -> list[str]:
+def validation_errors(
+    document: dict[str, Any],
+    validator: Draft202012Validator = VALIDATOR,
+) -> list[str]:
     return [
         error.message
-        for error in sorted(VALIDATOR.iter_errors(document), key=lambda item: list(item.path))
+        for error in sorted(
+            validator.iter_errors(document),
+            key=lambda item: tuple(str(part) for part in item.path),
+        )
     ]
+
+
+def profile(environment: str, accelerator: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "apiVersion": "agent.execution-profile/v0.1",
+        "profileId": "profile-a",
+        "revision": 1,
+        "projectId": "project-a",
+        "environment": environment,
+        "resources": {
+            "cpuMilli": 500,
+            "memoryMiB": 512,
+            "ephemeralStorageMiB": 1024,
+            "timeoutSeconds": 300,
+            "maxConcurrency": 2,
+        },
+        "accelerator": accelerator,
+        "persistence": "ephemeral",
+        "networkPolicyRef": "default-deny",
+        "credentialBindingRefs": [],
+    }
+
+
+def compute_request(image: str) -> dict[str, Any]:
+    return {
+        "apiVersion": "compute.request/v0.1",
+        "requestId": "0123456789abcdef0123456789abcdef",
+        "intentDigest": "sha256:" + ("b" * 64),
+        "projectId": "project-a",
+        "computePoolId": "pool-a",
+        "profileRef": {"profileId": "gpu-profile", "revision": 2},
+        "correlation": {
+            "agentId": "agent-a",
+            "sessionId": "session-a",
+            "runId": "run-a",
+        },
+        "workload": {
+            "id": "workload-a",
+            "expectedGeneration": 0,
+            "image": image,
+            "command": ["/bin/sh", "-c", "true"],
+            "accelerator": {"class": "accelerator-a", "quota": 1},
+        },
+    }
 
 
 def test_execution_resource_schema_is_valid_draft_2020_12() -> None:
@@ -120,3 +186,36 @@ def test_unknown_can_represent_missing_provider_observation() -> None:
     unknown["conditions"] = []
     unknown["evidenceRefs"] = []
     assert validation_errors(unknown) == []
+
+
+
+def test_execution_profile_never_treats_non_gpu_as_gpu_workload() -> None:
+    # Ordinary workers, sandboxes and workspaces explicitly declare no
+    # accelerator and therefore do not request a GPU allocation.
+    for environment in ("worker", "sandbox", "workspace"):
+        assert validation_errors(
+            profile(environment, {"mode": "none"}), PROFILE_VALIDATOR
+        ) == []
+        assert validation_errors(
+            profile(environment, {"mode": "required", "class": "gpu", "quota": 1}),
+            PROFILE_VALIDATOR,
+        )
+
+    assert validation_errors(
+        profile("gpu-workload", {"mode": "required", "class": "gpu", "quota": 1}),
+        PROFILE_VALIDATOR,
+    ) == []
+    assert validation_errors(
+        profile("gpu-workload", {"mode": "none"}), PROFILE_VALIDATOR
+    )
+
+
+def test_compute_request_requires_immutable_digest_pinned_image() -> None:
+    digest = "a" * 64
+    assert validation_errors(
+        compute_request(f"registry.example.test/model@sha256:{digest}"),
+        REQUEST_VALIDATOR,
+    ) == []
+    assert validation_errors(
+        compute_request("registry.example.test/model:latest"), REQUEST_VALIDATOR
+    )
