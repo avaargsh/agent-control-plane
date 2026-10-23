@@ -238,8 +238,7 @@
       "required": [
         "apiVersion",
         "requestId",
-        "idempotencyKey",
-        "requestDigest",
+        "intentDigest",
         "projectId",
         "computePoolId",
         "profileRef",
@@ -251,14 +250,8 @@
           "const": "compute.request/v0.1"
         },
         "requestId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "idempotencyKey": {
           "type": "string",
           "pattern": "^[0-9a-f]{32}$"
-        },
-        "requestDigest": {
-          "$ref": "#/$defs/Digest"
         },
         "projectId": {
           "$ref": "#/$defs/Identifier"
@@ -294,17 +287,13 @@
           "additionalProperties": false,
           "required": [
             "id",
-            "generation",
+            "expectedGeneration",
             "image",
             "accelerator"
           ],
           "properties": {
             "id": {
               "$ref": "#/$defs/KubernetesSafeID"
-            },
-            "generation": {
-              "type": "integer",
-              "minimum": 1
             },
             "image": {
               "type": "string",
@@ -337,8 +326,17 @@
                   "minimum": 1
                 }
               }
+            },
+            "expectedGeneration": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "CAS precondition; 0 for the current public API's initial create. This is not the resulting Desired generation."
             }
           }
+        },
+        "intentDigest": {
+          "$ref": "#/$defs/Digest",
+          "description": "Local canonical envelope digest; exclude this field when hashing. Not the server-generated Management OperationReceipt.requestDigest."
         }
       }
     },
@@ -431,7 +429,8 @@
           "const": "compute.allocation/v0.1"
         },
         "requestId": {
-          "$ref": "#/$defs/Identifier"
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
         },
         "projectId": {
           "$ref": "#/$defs/Identifier"
@@ -536,7 +535,8 @@
           "type": "boolean"
         },
         "requestId": {
-          "$ref": "#/$defs/Identifier"
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
         },
         "retryAfterSeconds": {
           "type": "integer",
