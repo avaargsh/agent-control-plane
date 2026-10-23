@@ -359,6 +359,10 @@ def make_approval(run, now, *, approval_id="approval-a", expires_at=None):
         expires_at=expires_at if expires_at is not None else now + 30,
         state="ACTIVE",
         version=1,
+        approval_hash="sha256:" + "a" * 64,
+        action_hash="sha256:" + "b" * 64,
+        transition_hash="sha256:" + "c" * 64,
+        policy_decision_hash="sha256:" + "d" * 64,
     )
 
 
