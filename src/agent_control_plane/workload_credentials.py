@@ -1178,8 +1178,10 @@ class WorkloadCredentialAuthority:
         grant = self._store.get_approval(approval_id)
         if grant is None:
             raise CredentialAuthorityNotFound("approval does not exist")
-        if grant.state != "ACTIVE" or grant.expires_at <= self._clock():
+        if grant.state != "ACTIVE":
             return {"state": grant.state, "version": grant.version}
+        if grant.expires_at <= self._clock():
+            return {"state": "EXPIRED", "version": grant.version}
         return {
             "state": "ACTIVE",
             "version": grant.version,
