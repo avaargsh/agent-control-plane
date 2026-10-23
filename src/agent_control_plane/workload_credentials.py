@@ -1371,6 +1371,7 @@ class WorkloadCredentialAuthority:
         except Exception:
             raise CredentialAuthorityUnavailable("canonical Run authority is unavailable") from None
         claims = {
+            "sub": record["subject"],
             "tenant_id": record["tenant_id"],
             "agent_id": record["agent_id"],
             "release_id": record["release_id"],
