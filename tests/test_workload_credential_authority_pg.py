@@ -205,6 +205,10 @@ def test_postgres_approval_revoke_is_transactional_idempotent_and_has_outbox(pg_
         expires_at=clock() + 30,
         state="ACTIVE",
         version=1,
+        approval_hash="sha256:" + "a" * 64,
+        action_hash="sha256:" + "b" * 64,
+        transition_hash="sha256:" + "c" * 64,
+        policy_decision_hash="sha256:" + "d" * 64,
     )
     store.register_approval(grant)
     request = request_factory(
@@ -395,6 +399,10 @@ def test_postgres_outbox_reclaim_after_lost_ack_reuses_stable_event_id(pg_runtim
         expires_at=clock() + 60,
         state="ACTIVE",
         version=1,
+        approval_hash="sha256:" + "a" * 64,
+        action_hash="sha256:" + "b" * 64,
+        transition_hash="sha256:" + "c" * 64,
+        policy_decision_hash="sha256:" + "d" * 64,
     )
     store.register_approval(grant)
     issued = authority.issue(request_factory(
