@@ -9,6 +9,9 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
+from .state_transition_protocol import ActionIntent, ProtocolViolation
+from .transition_approval import ApprovalDecision, SignedTransitionApproval, TransitionApproval
+
 
 SENSITIVE_SCOPE_SUFFIXES = frozenset({"write", "delete", "admin", "mutate"})
 
@@ -126,6 +129,10 @@ class ApprovalGrantRecord:
     expires_at: float
     state: str
     version: int
+    approval_hash: str
+    action_hash: str
+    transition_hash: str
+    policy_decision_hash: str
 
 
 @dataclass(frozen=True)
@@ -389,6 +396,10 @@ class PostgresCredentialAuthorityStore:
             expires_at=float(row["expires_at"]),
             state=row["state"],
             version=int(row["version"]),
+            approval_hash=row["approval_hash"],
+            action_hash=row["action_hash"],
+            transition_hash=row["transition_hash"],
+            policy_decision_hash=row["policy_decision_hash"],
         )
 
     def get_binding(self, binding_id: str) -> CredentialBindingRecord | None:
@@ -410,7 +421,8 @@ class PostgresCredentialAuthorityStore:
                 """
                 SELECT approval_id, tenant_id, agent_id, session_id, run_id,
                        binding_id, audience, scopes, approved_by, issued_at,
-                       expires_at, state, version
+                       expires_at, state, version, approval_hash, action_hash,
+                       transition_hash, policy_decision_hash
                 FROM public.acp_workload_approval_grants
                 WHERE approval_id = %s
                 """,
@@ -460,8 +472,8 @@ class PostgresCredentialAuthorityStore:
             ).fetchone()
         return self._binding(row)
 
-    def register_approval(self, grant: ApprovalGrantRecord) -> ApprovalGrantRecord:
-        """Trusted application-layer hook after the human/policy approval commits."""
+    def _insert_verified_approval(self, grant: ApprovalGrantRecord) -> ApprovalGrantRecord:
+        """Persist only grants constructed by the signed-transition adapter."""
         if grant.state != "ACTIVE" or grant.version != 1:
             raise ValueError("new approval grants must start ACTIVE at version 1")
         if grant.expires_at <= grant.issued_at:
@@ -472,18 +484,22 @@ class PostgresCredentialAuthorityStore:
                 INSERT INTO public.acp_workload_approval_grants
                     (approval_id, tenant_id, agent_id, session_id, run_id,
                      binding_id, audience, scopes, approved_by, issued_at,
-                     expires_at, state, version)
+                     expires_at, state, version, approval_hash, action_hash,
+                    transition_hash, policy_decision_hash)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb,
-                        %s, %s, %s, 'ACTIVE', 1)
+                        %s, %s, %s, 'ACTIVE', 1, %s, %s, %s, %s)
                 RETURNING approval_id, tenant_id, agent_id, session_id, run_id,
                           binding_id, audience, scopes, approved_by, issued_at,
-                          expires_at, state, version
+                          expires_at, state, version, approval_hash, action_hash,
+                          transition_hash, policy_decision_hash
                 """,
                 (
                     grant.approval_id, grant.tenant_id, grant.agent_id,
                     grant.session_id, grant.run_id, grant.binding_id,
                     grant.audience, json.dumps(list(grant.scopes)),
                     grant.approved_by, grant.issued_at, grant.expires_at,
+                    grant.approval_hash, grant.action_hash, grant.transition_hash,
+                    grant.policy_decision_hash,
                 ),
             ).fetchone()
         return self._approval(row)
