@@ -194,7 +194,10 @@ class WorkloadCredentialWSGI:
         if method == "GET":
             return 200, self._authority.get_approval(operation[1])
 
-        body = self._body(environ)
+        body = dict(self._body(environ))
+        # Never trust a caller-supplied role claim; the authenticated route role
+        # overwrites any field with the same name.
+        body["_authenticated_service_role"] = role
         if isinstance(operation, tuple):
             return 200, getattr(self._authority, operation[0])(operation[1], body)
 

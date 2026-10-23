@@ -187,10 +187,15 @@ class CredentialAuthorityStore(Protocol):
     ) -> Mapping[str, Any] | None:
         ...
 
-    def revoke_credential(self, credential_id: str, *, now: float) -> bool:
+    def revoke_credential(
+        self, credential_id: str, *, event_id: str, actor_role: str, now: float
+    ) -> bool:
         ...
 
-    def revoke_run(self, run_id: str, *, sandbox_revision: int, now: float) -> int:
+    def revoke_run(
+        self, run_id: str, *, sandbox_revision: int, event_id: str,
+        actor_role: str, now: float
+    ) -> int:
         ...
 
     def revoke_approval(
@@ -198,6 +203,7 @@ class CredentialAuthorityStore(Protocol):
         approval_id: str,
         *,
         event_id: str,
+        actor_role: str,
         now: float,
     ) -> tuple[int, int]:
         ...
@@ -658,55 +664,150 @@ class PostgresCredentialAuthorityStore:
             "expires_at": float(row["expires_at"]),
         }
 
-    def revoke_credential(self, credential_id: str, *, now: float) -> bool:
+    def revoke_credential(
+        self,
+        credential_id: str,
+        *,
+        event_id: str,
+        actor_role: str,
+        now: float,
+    ) -> bool:
+        if not event_id.strip() or not actor_role.strip():
+            raise ValueError("stable event ID and authenticated actor role are required")
+        request_digest = hashlib.sha256(
+            _canonical_json({"resource_type": "credential", "resource_id": credential_id})
+        ).hexdigest()
         with self._connect() as conn:
-            row = conn.execute(
+            prior = conn.execute(
+                """
+                SELECT resource_type, resource_id, request_digest, revoked_count
+                FROM public.acp_workload_credential_revocations
+                WHERE event_id = %s FOR UPDATE
+                """,
+                (event_id,),
+            ).fetchone()
+            if prior is not None:
+                if (
+                    prior["resource_type"] != "credential"
+                    or prior["resource_id"] != credential_id
+                    or prior["request_digest"] != request_digest
+                ):
+                    raise CredentialAuthorityConflict("revocation event ID was reused for another operation")
+                return int(prior["revoked_count"]) > 0
+
+            changed = conn.execute(
                 """
                 UPDATE public.acp_workload_credentials
-                SET revoked_at = COALESCE(revoked_at, %s)
-                WHERE credential_id = %s
+                SET revoked_at = %s, revoke_event_id = %s, revoked_by = %s
+                WHERE credential_id = %s AND revoked_at IS NULL
                 RETURNING credential_id
                 """,
-                (now, credential_id),
+                (now, event_id, actor_role, credential_id),
             ).fetchone()
-        return row is not None
+            count = 1 if changed is not None else 0
+            conn.execute(
+                """
+                INSERT INTO public.acp_workload_credential_revocations
+                    (event_id, resource_type, resource_id, actor_role,
+                     request_digest, revoked_count, approval_version, created_at)
+                VALUES (%s, 'credential', %s, %s, %s, %s, NULL, %s)
+                """,
+                (event_id, credential_id, actor_role, request_digest, count, now),
+            )
+        return count > 0
 
-    def revoke_run(self, run_id: str, *, sandbox_revision: int, now: float) -> int:
+    def revoke_run(
+        self,
+        run_id: str,
+        *,
+        sandbox_revision: int,
+        event_id: str,
+        actor_role: str,
+        now: float,
+    ) -> int:
+        if not event_id.strip() or not actor_role.strip():
+            raise ValueError("stable event ID and authenticated actor role are required")
+        request_digest = hashlib.sha256(
+            _canonical_json({
+                "resource_type": "run",
+                "resource_id": run_id,
+                "sandbox_revision": sandbox_revision,
+            })
+        ).hexdigest()
         with self._connect() as conn:
+            prior = conn.execute(
+                """
+                SELECT resource_type, resource_id, request_digest, revoked_count
+                FROM public.acp_workload_credential_revocations
+                WHERE event_id = %s FOR UPDATE
+                """,
+                (event_id,),
+            ).fetchone()
+            if prior is not None:
+                if (
+                    prior["resource_type"] != "run"
+                    or prior["resource_id"] != run_id
+                    or prior["request_digest"] != request_digest
+                ):
+                    raise CredentialAuthorityConflict("revocation event ID was reused for another operation")
+                return int(prior["revoked_count"])
+
             rows = conn.execute(
                 """
                 UPDATE public.acp_workload_credentials
-                SET revoked_at = %s
+                SET revoked_at = %s, revoke_event_id = %s, revoked_by = %s
                 WHERE run_id = %s AND sandbox_revision <= %s
                   AND revoked_at IS NULL
                 RETURNING credential_id
                 """,
-                (now, run_id, sandbox_revision),
+                (now, event_id, actor_role, run_id, sandbox_revision),
             ).fetchall()
-        return len(rows)
+            count = len(rows)
+            conn.execute(
+                """
+                INSERT INTO public.acp_workload_credential_revocations
+                    (event_id, resource_type, resource_id, actor_role,
+                     request_digest, revoked_count, approval_version, created_at)
+                VALUES (%s, 'run', %s, %s, %s, %s, NULL, %s)
+                """,
+                (event_id, run_id, actor_role, request_digest, count, now),
+            )
+        return count
 
     def revoke_approval(
         self,
         approval_id: str,
         *,
         event_id: str,
+        actor_role: str,
         now: float,
     ) -> tuple[int, int]:
-        if not event_id.strip():
-            raise ValueError("stable approval revocation event_id is required")
+        if not event_id.strip() or not actor_role.strip():
+            raise ValueError("stable event ID and authenticated actor role are required")
+        request_digest = hashlib.sha256(
+            _canonical_json({"resource_type": "approval", "resource_id": approval_id})
+        ).hexdigest()
         with self._connect() as conn:
-            prior = conn.execute(
+            prior_operation = conn.execute(
                 """
-                SELECT approval_id, approval_version, revoked_count
-                FROM public.acp_workload_approval_revocation_events
+                SELECT resource_type, resource_id, request_digest,
+                       revoked_count, approval_version
+                FROM public.acp_workload_credential_revocations
                 WHERE event_id = %s FOR UPDATE
                 """,
                 (event_id,),
             ).fetchone()
-            if prior is not None:
-                if prior["approval_id"] != approval_id:
-                    raise CredentialAuthorityConflict("revocation event ID was reused for another approval")
-                return int(prior["approval_version"]), int(prior["revoked_count"])
+            if prior_operation is not None:
+                if (
+                    prior_operation["resource_type"] != "approval"
+                    or prior_operation["resource_id"] != approval_id
+                    or prior_operation["request_digest"] != request_digest
+                ):
+                    raise CredentialAuthorityConflict("revocation event ID was reused for another operation")
+                return (
+                    int(prior_operation["approval_version"] or 0),
+                    int(prior_operation["revoked_count"]),
+                )
 
             approval = conn.execute(
                 """
@@ -733,20 +834,30 @@ class PostgresCredentialAuthorityStore:
                 """
                 UPDATE public.acp_workload_credentials
                 SET revoked_at = COALESCE(revoked_at, %s),
-                    revoke_event_id = COALESCE(revoke_event_id, %s)
+                    revoke_event_id = COALESCE(revoke_event_id, %s),
+                    revoked_by = COALESCE(revoked_by, %s)
                 WHERE approval_id = %s AND revoked_at IS NULL
                 RETURNING credential_id
                 """,
-                (now, event_id, approval_id),
+                (now, event_id, actor_role, approval_id),
             ).fetchall()
             count = len(updated)
             conn.execute(
                 """
-                INSERT INTO public.acp_workload_approval_revocation_events
-                    (event_id, approval_id, approval_version, revoked_count, created_at)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO public.acp_workload_credential_revocations
+                    (event_id, resource_type, resource_id, actor_role,
+                     request_digest, revoked_count, approval_version, created_at)
+                VALUES (%s, 'approval', %s, %s, %s, %s, %s, %s)
                 """,
-                (event_id, approval_id, version, count, now),
+                (event_id, approval_id, actor_role, request_digest, count, version, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO public.acp_workload_approval_revocation_events
+                    (event_id, approval_id, approval_version, revoked_count, actor_role, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (event_id, approval_id, version, count, actor_role, now),
             )
             conn.execute(
                 """
@@ -1142,13 +1253,22 @@ class WorkloadCredentialAuthority:
 
     def revoke_credential(self, body: Mapping[str, Any]) -> Mapping[str, Any]:
         credential_id = _string(body, "credential_id")
+        event_id = _string(body, "event_id")
+        actor_role = _string(body, "_authenticated_service_role")
         return {
-            "revoked": self._store.revoke_credential(credential_id, now=self._clock())
+            "revoked": self._store.revoke_credential(
+                credential_id,
+                event_id=event_id,
+                actor_role=actor_role,
+                now=self._clock(),
+            )
         }
 
     def revoke_run(self, body: Mapping[str, Any]) -> Mapping[str, Any]:
         run_id = _string(body, "run_id")
         sandbox_revision = _positive_int(body, "sandbox_revision")
+        event_id = _string(body, "event_id")
+        actor_role = _string(body, "_authenticated_service_role")
         try:
             canonical = self._runs.get_run_binding(run_id)
         except CredentialAuthorityError:
@@ -1161,6 +1281,8 @@ class WorkloadCredentialAuthority:
             "revoked_count": self._store.revoke_run(
                 run_id,
                 sandbox_revision=sandbox_revision,
+                event_id=event_id,
+                actor_role=actor_role,
                 now=self._clock(),
             )
         }
@@ -1168,9 +1290,11 @@ class WorkloadCredentialAuthority:
     def revoke_approval(self, body: Mapping[str, Any]) -> Mapping[str, Any]:
         approval_id = _string(body, "approval_id")
         event_id = _string(body, "event_id")
+        actor_role = _string(body, "_authenticated_service_role")
         _, count = self._store.revoke_approval(
             approval_id,
             event_id=event_id,
+            actor_role=actor_role,
             now=self._clock(),
         )
         return {"revoked_count": count}
@@ -1205,9 +1329,11 @@ class WorkloadCredentialAuthority:
         self, approval_id: str, body: Mapping[str, Any]
     ) -> Mapping[str, Any]:
         event_id = _string(body, "event_id")
+        actor_role = _string(body, "_authenticated_service_role")
         version, _ = self._store.revoke_approval(
             approval_id,
             event_id=event_id,
+            actor_role=actor_role,
             now=self._clock(),
         )
         return {"state": "REVOKED", "version": version}

@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS public.acp_workload_credentials (
     binding_version BIGINT NOT NULL CHECK (binding_version > 0),
     revoked_at DOUBLE PRECISION,
     revoke_event_id TEXT,
+    revoked_by TEXT,
     created_at DOUBLE PRECISION NOT NULL DEFAULT EXTRACT(EPOCH FROM clock_timestamp())
 );
 
@@ -73,6 +74,61 @@ CREATE INDEX IF NOT EXISTS acp_workload_credentials_run_idx
 CREATE INDEX IF NOT EXISTS acp_workload_credentials_approval_idx
     ON public.acp_workload_credentials(approval_id)
     WHERE approval_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.acp_workload_credential_revocations (
+    event_id TEXT PRIMARY KEY CHECK (length(btrim(event_id)) > 0),
+    resource_type TEXT NOT NULL CHECK (resource_type IN ('credential', 'run', 'approval')),
+    resource_id TEXT NOT NULL CHECK (length(btrim(resource_id)) > 0),
+    actor_role TEXT NOT NULL CHECK (length(btrim(actor_role)) > 0),
+    request_digest TEXT NOT NULL CHECK (request_digest ~ '^[0-9a-f]{64}
+    issuer TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    binding_id TEXT NOT NULL REFERENCES public.acp_workload_credential_bindings(binding_id),
+    request_id TEXT NOT NULL CHECK (length(btrim(request_id)) BETWEEN 1 AND 200),
+    request_digest TEXT NOT NULL CHECK (request_digest ~ '^[0-9a-f]{64}$'),
+    credential_id TEXT NOT NULL UNIQUE REFERENCES public.acp_workload_credentials(credential_id),
+    created_at DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (issuer, run_id, binding_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.acp_workload_approval_revocation_events (
+    event_id TEXT PRIMARY KEY CHECK (length(btrim(event_id)) > 0),
+    approval_id TEXT NOT NULL REFERENCES public.acp_workload_approval_grants(approval_id),
+    approval_version BIGINT NOT NULL CHECK (approval_version > 0),
+    revoked_count INTEGER NOT NULL CHECK (revoked_count >= 0),
+    actor_role TEXT NOT NULL,
+    created_at DOUBLE PRECISION NOT NULL,
+    UNIQUE (event_id, approval_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.acp_workload_credential_revocation_outbox (
+    event_id TEXT PRIMARY KEY REFERENCES public.acp_workload_approval_revocation_events(event_id),
+    approval_id TEXT NOT NULL REFERENCES public.acp_workload_approval_grants(approval_id),
+    approval_version BIGINT NOT NULL CHECK (approval_version > 0),
+    payload JSONB NOT NULL CHECK (jsonb_typeof(payload) = 'object'),
+    created_at DOUBLE PRECISION NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    available_at DOUBLE PRECISION NOT NULL,
+    claim_id TEXT,
+    lease_until DOUBLE PRECISION,
+    delivered_at DOUBLE PRECISION,
+    last_error TEXT CHECK (last_error IS NULL OR length(last_error) <= 256),
+    CHECK ((claim_id IS NULL) = (lease_until IS NULL))
+);
+
+CREATE INDEX IF NOT EXISTS acp_workload_credential_revocation_pending_idx
+    ON public.acp_workload_credential_revocation_outbox(available_at, created_at)
+    WHERE delivered_at IS NULL;
+
+COMMIT;
+),
+    revoked_count INTEGER NOT NULL CHECK (revoked_count >= 0),
+    approval_version BIGINT,
+    created_at DOUBLE PRECISION NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS acp_workload_credential_revocations_resource_idx
+    ON public.acp_workload_credential_revocations(resource_type, resource_id, created_at);
 
 CREATE TABLE IF NOT EXISTS public.acp_workload_credential_requests (
     issuer TEXT NOT NULL,
@@ -90,6 +146,7 @@ CREATE TABLE IF NOT EXISTS public.acp_workload_approval_revocation_events (
     approval_id TEXT NOT NULL REFERENCES public.acp_workload_approval_grants(approval_id),
     approval_version BIGINT NOT NULL CHECK (approval_version > 0),
     revoked_count INTEGER NOT NULL CHECK (revoked_count >= 0),
+    actor_role TEXT NOT NULL,
     created_at DOUBLE PRECISION NOT NULL,
     UNIQUE (event_id, approval_id)
 );
