@@ -298,7 +298,9 @@
             "image": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 1024
+              "maxLength": 1024,
+              "pattern": "^[^\\\\s@]+@sha256:[0-9a-f]{64}$",
+              "description": "Immutable OCI image reference pinned to a sha256 digest; mutable tags alone are not accepted as execution input."
             },
             "command": {
               "type": "array",
