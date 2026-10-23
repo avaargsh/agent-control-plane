@@ -558,7 +558,7 @@ def _rewrite_signed_claim(request, signer, **overrides):
 def test_cross_repo_golden_path_issues_from_actual_runtime_store_and_rechecks_live_state(
     pg_runtime, tmp_path
 ):
-    clock, store, canonical, binding, authority, make_request = pg_runtime
+    _clock, _store, canonical, _binding, authority, make_request = pg_runtime
     runtime_store, reader = _runtime_store_reader(tmp_path, canonical)
     try:
         authority._runs = reader
@@ -651,7 +651,9 @@ def test_cross_repo_authority_denies_non_running_run_or_inactive_session(
 def test_cross_repo_introspection_invalidates_after_sandbox_rebind_and_reader_outage(
     pg_runtime, tmp_path
 ):
-    clock, _, canonical, _, authority, make_request = pg_runtime
+    _clock, _, canonical, _, authority, make_request = pg_runtime
+    from cloud_agent_runtime.canonical_runtime_identity import RuntimeStoreRunAuthorityReader
+    from cloud_agent_runtime.models import Run, RunStatus, SandboxBinding
     runtime_store, reader = _runtime_store_reader(tmp_path, canonical)
     try:
         authority._runs = reader
