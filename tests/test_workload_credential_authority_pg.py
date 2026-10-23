@@ -21,6 +21,8 @@ from agent_control_plane.workload_credentials import (
     ApprovalGrantRecord,
     CanonicalRunBinding,
     CredentialAuthorityConflict,
+    CredentialAuthorityDenied,
+    CredentialAuthorityUnavailable,
     CredentialRequestReplay,
     PinnedEd25519AssertionVerifier,
     PostgresCredentialAuthorityStore,
@@ -508,3 +510,207 @@ def test_postgres_outbox_reclaim_after_lost_ack_reuses_stable_event_id(pg_runtim
         "audience": issued["audience"],
         "required_scopes": ["github:write"],
     })["credential"]["active"] is False
+
+
+def _runtime_store_reader(tmp_path, canonical, *, run_status=None,
+                          session_status=None, sandbox_id=None, revision=None):
+    pytest.importorskip("cloud_agent_runtime.canonical_runtime_identity")
+    from cloud_agent_runtime.canonical_runtime_identity import RuntimeStoreRunAuthorityReader
+    from cloud_agent_runtime.models import Run, RunStatus, SandboxBinding, Session, SessionStatus
+    from cloud_agent_runtime.store import SQLiteStore
+
+    store = SQLiteStore(tmp_path / f"runtime-{uuid.uuid4().hex}.sqlite")
+    current_session_status = session_status or canonical.session_status.lower()
+    current_run_status = run_status or canonical.status.lower()
+    actual_sandbox_id = sandbox_id or canonical.sandbox_id
+    actual_revision = canonical.sandbox_revision if revision is None else revision
+    workspace_ref = f"sandbox://kubernetes/{actual_sandbox_id}"
+    store.save_session(Session(
+        session_id=canonical.session_id,
+        agent_id=canonical.agent_id,
+        release_id=canonical.release_id,
+        tenant_id=canonical.tenant_id,
+        status=SessionStatus(current_session_status),
+    ))
+    store.save_run(Run(
+        run_id=canonical.run_id,
+        session_id=canonical.session_id,
+        status=RunStatus(current_run_status),
+        sandbox_ref=workspace_ref,
+        sandbox_binding=SandboxBinding(
+            provider="kubernetes",
+            sandbox_id=actual_sandbox_id,
+            sandbox_ref=workspace_ref,
+            revision=actual_revision,
+        ),
+    ))
+    return store, RuntimeStoreRunAuthorityReader(store)
+
+
+def _rewrite_signed_claim(request, signer, **overrides):
+    parts = request["workload_assertion"].split(".")
+    claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+    claims.update(overrides)
+    request["workload_assertion"] = signer(claims)
+    return request
+
+
+def test_cross_repo_golden_path_issues_from_actual_runtime_store_and_rechecks_live_state(
+    pg_runtime, tmp_path
+):
+    clock, store, canonical, binding, authority, make_request = pg_runtime
+    runtime_store, reader = _runtime_store_reader(tmp_path, canonical)
+    try:
+        authority._runs = reader
+        issued = authority.issue(make_request(
+            request_id=f"runtime-golden-{uuid.uuid4().hex}"
+        ))["credential"]
+        active = authority.introspect({
+            "access_token": issued["access_token"],
+            "audience": issued["audience"],
+            "required_scopes": ["github:read"],
+        })["credential"]
+        assert active["active"] is True
+        assert active["workload_identity"]["tenant_id"] == canonical.tenant_id
+        assert active["workload_identity"]["agent_id"] == canonical.agent_id
+        assert active["workload_identity"]["session_id"] == canonical.session_id
+        assert active["workload_identity"]["run_id"] == canonical.run_id
+        assert active["workload_identity"]["sandbox_id"] == canonical.sandbox_id
+        assert active["workload_identity"]["sandbox_revision"] == canonical.sandbox_revision
+
+        session = runtime_store.get_session(canonical.session_id)
+        from cloud_agent_runtime.models import SessionStatus
+        session.status = SessionStatus.PAUSED
+        runtime_store.save_session(session)
+        inactive = authority.introspect({
+            "access_token": issued["access_token"],
+            "audience": issued["audience"],
+            "required_scopes": ["github:read"],
+        })["credential"]
+        assert inactive["active"] is False
+    finally:
+        runtime_store.close()
+
+
+@pytest.mark.parametrize(
+    ("claim", "forged_value"),
+    [
+        ("tenant_id", "attacker-tenant"),
+        ("agent_id", "attacker-agent"),
+        ("release_id", "attacker-release"),
+        ("session_id", "attacker-session"),
+        ("run_id", "attacker-run"),
+        ("sandbox_id", "attacker-sandbox"),
+        ("sandbox_revision", 2),
+        ("workspace_ref", "sandbox://kubernetes/attacker-sandbox"),
+        ("sub", "run:attacker-run"),
+    ],
+)
+def test_cross_repo_authority_rejects_signed_identity_claims_that_disagree_with_runtime_store(
+    pg_runtime, tmp_path, claim, forged_value
+):
+    _, _, canonical, _, authority, make_request = pg_runtime
+    runtime_store, reader = _runtime_store_reader(tmp_path, canonical)
+    try:
+        authority._runs = reader
+        request = make_request(request_id=f"runtime-forgery-{uuid.uuid4().hex}")
+        _rewrite_signed_claim(request, make_request.sign_claims, **{claim: forged_value})
+        with pytest.raises(CredentialAuthorityDenied):
+            authority.issue(request)
+    finally:
+        runtime_store.close()
+
+
+@pytest.mark.parametrize(
+    ("run_status", "session_status"),
+    [
+        ("paused", "active"),
+        ("succeeded", "active"),
+        ("cancelled", "active"),
+        ("running", "paused"),
+        ("running", "closed"),
+    ],
+)
+def test_cross_repo_authority_denies_non_running_run_or_inactive_session(
+    pg_runtime, tmp_path, run_status, session_status
+):
+    _, _, canonical, _, authority, make_request = pg_runtime
+    runtime_store, reader = _runtime_store_reader(
+        tmp_path, canonical, run_status=run_status, session_status=session_status
+    )
+    try:
+        authority._runs = reader
+        with pytest.raises(CredentialAuthorityDenied):
+            authority.issue(make_request(
+                request_id=f"runtime-status-{uuid.uuid4().hex}"
+            ))
+    finally:
+        runtime_store.close()
+
+
+def test_cross_repo_introspection_invalidates_after_sandbox_rebind_and_reader_outage(
+    pg_runtime, tmp_path
+):
+    clock, _, canonical, _, authority, make_request = pg_runtime
+    runtime_store, reader = _runtime_store_reader(tmp_path, canonical)
+    try:
+        authority._runs = reader
+        issued = authority.issue(make_request(
+            request_id=f"runtime-rebind-{uuid.uuid4().hex}"
+        ))["credential"]
+
+        from cloud_agent_runtime.models import SandboxBinding
+        run = runtime_store.get_run(canonical.run_id)
+        new_ref = "sandbox://kubernetes/replacement-sandbox"
+        run.sandbox_ref = new_ref
+        run.sandbox_binding = SandboxBinding(
+            provider="kubernetes",
+            sandbox_id="replacement-sandbox",
+            sandbox_ref=new_ref,
+            revision=canonical.sandbox_revision + 1,
+        )
+        runtime_store.save_run(run)
+        inactive_after_rebind = authority.introspect({
+            "access_token": issued["access_token"],
+            "audience": issued["audience"],
+            "required_scopes": [],
+        })["credential"]
+        assert inactive_after_rebind["active"] is False
+
+        # A separate credential exercises the dependency-outage path.
+        runtime_store.save_run(Run(
+            run_id=canonical.run_id,
+            session_id=canonical.session_id,
+            status=RunStatus.RUNNING,
+            sandbox_ref=f"sandbox://kubernetes/{canonical.sandbox_id}",
+            sandbox_binding=SandboxBinding(
+                provider="kubernetes",
+                sandbox_id=canonical.sandbox_id,
+                sandbox_ref=f"sandbox://kubernetes/{canonical.sandbox_id}",
+                revision=canonical.sandbox_revision,
+            ),
+        ))
+        issued2 = authority.issue(make_request(
+            request_id=f"runtime-outage-{uuid.uuid4().hex}"
+        ))["credential"]
+
+        class BrokenStore:
+            def get_run(self, run_id):
+                raise OSError("database connection details")
+
+            def get_session(self, session_id):
+                raise AssertionError("the failed Run read must stop the lookup")
+
+        authority._runs = RuntimeStoreRunAuthorityReader(BrokenStore())
+        with pytest.raises(CredentialAuthorityUnavailable):
+            authority.issue(make_request(
+                request_id=f"runtime-outage-issue-{uuid.uuid4().hex}"
+            ))
+        inactive_after_outage = authority.introspect({
+            "access_token": issued2["access_token"],
+            "audience": issued2["audience"],
+            "required_scopes": [],
+        })["credential"]
+        assert inactive_after_outage["active"] is False
+    finally:
+        runtime_store.close()
