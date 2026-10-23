@@ -136,6 +136,7 @@ class CanonicalRunBinding:
     sandbox_revision: int
     workspace_ref: str
     status: str
+    session_status: str = "ACTIVE"
 
 
 class WorkloadAssertionVerifier(Protocol):
@@ -603,10 +604,14 @@ class PostgresCredentialAuthorityStore:
                 SELECT c.*,
                        a.state AS current_approval_state,
                        a.version AS current_approval_version,
-                       a.expires_at AS current_approval_expires_at
+                       a.expires_at AS current_approval_expires_at,
+                       b.active AS current_binding_active,
+                       b.version AS current_binding_version
                 FROM public.acp_workload_credentials AS c
                 LEFT JOIN public.acp_workload_approval_grants AS a
                   ON a.approval_id = c.approval_id
+                JOIN public.acp_workload_credential_bindings AS b
+                  ON b.binding_id = c.binding_id
                 WHERE c.token_digest = %s
                 """,
                 (token_digest,),
@@ -870,8 +875,11 @@ class WorkloadCredentialAuthority:
         *,
         require_running: bool,
     ) -> None:
-        if require_running and canonical.status.lower() != "running":
-            raise CredentialAuthorityDenied("credentials are available only to a running Run")
+        if require_running and (
+            canonical.status.lower() != "running"
+            or canonical.session_status.lower() != "active"
+        ):
+            raise CredentialAuthorityDenied("credentials require a running Run in an active Session")
         expected = {
             "tenant_id": canonical.tenant_id,
             "agent_id": canonical.agent_id,
@@ -1010,6 +1018,7 @@ class WorkloadCredentialAuthority:
             "workload_issuer": claims["workload_issuer"],
             "approval_id": approval_id,
             "approval_version": grant.version if grant is not None else None,
+            "binding_version": binding.version,
         }
         request_digest = hashlib.sha256(
             _canonical_json({
@@ -1066,6 +1075,8 @@ class WorkloadCredentialAuthority:
             record["revoked_at"] is not None
             or float(record["expires_at"]) <= now
             or record["audience"] != audience
+            or record["current_binding_active"] is not True
+            or int(record["current_binding_version"]) != int(record["binding_version"])
             or set(required_scopes) - set(scopes)
         ):
             return {"credential": {"active": False}}
