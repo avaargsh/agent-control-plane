@@ -42,7 +42,7 @@ ComputeRequest is a durable logical request envelope around the existing Compute
 |---|---:|---|
 | `apiVersion` | yes | Literal `compute.request/v0.1`. |
 | `requestId` | yes | Exactly 32 lowercase hexadecimal characters. Generate with a cryptographically secure 128-bit source, persist before the first side effect, and reuse it after caller/worker restart. It is also the existing Management API `Idempotency-Key` and is returned as `OperationReceipt.requestId`; there is no second independently generated key. |
-| `intentDigest` | yes | Local envelope integrity digest in `sha256:<64 lowercase hex>` form, computed over the canonical ComputeRequest intent with this field omitted. Persist it with the exact request body and reject same-ID replay if the intent differs. It is **not** the server-generated `OperationReceipt.requestDigest`; retain that backend value separately as receipt evidence. |
+| `intentDigest` | yes | Local envelope integrity digest in `sha256:<64 lowercase hex>` form, computed as SHA-256 over UTF-8 RFC 8785 JSON Canonicalization Scheme (JCS) bytes of the complete ComputeRequest with this field omitted. Reject duplicate JSON keys and non-finite numbers before canonicalization. Persist it with the exact request body and reject same-ID replay if the intent differs. It is **not** the server-generated `OperationReceipt.requestDigest`; retain that backend value separately as receipt evidence. |
 | `projectId`, `computePoolId` | yes | Requested scope/target. Management must revalidate current Project authorization and resolve pool/cluster/provider binding server-side; caller values are not authority. |
 | `profileRef.profileId + revision` | yes | Pins the exact GPU ExecutionProfile revision that justified the request. |
 | `correlation.agentId/sessionId/runId` | yes | Opaque canonical identity references for trace/audit correlation. They are not caller authorization claims and do not become Compute-owned identity. |
@@ -50,6 +50,8 @@ ComputeRequest is a durable logical request envelope around the existing Compute
 | `workload.image` | yes | Image reference requested by the Workload. Production supply-chain acceptance must resolve/pin and verify an immutable digest; a mutable tag alone is not release evidence. |
 | `workload.accelerator.class + quota` | yes | Must agree with the pinned profile and selected ComputePool binding. Provider-specific resource names are resolved inside the Compute layer. |
 | `workload.command` | no | Explicit command vector, if used; never accept arbitrary privilege/configuration fields outside the existing reviewed Workload contract. |
+
+Cross-field validation is mandatory before submission and on replay: `projectId` must equal the pinned profile's project; `profileRef` must resolve to the exact immutable revision; only `gpu-workload + accelerator.mode=required` is accepted by this adapter; requested accelerator class/quota must be a subset of the pinned profile and the server-resolved ComputePool binding; `computePoolId` must be bound to that project and the server-selected cluster/provider; and the stored `intentDigest` must match a recomputed JCS digest. JSON Schema validates shape only and does not replace these authorization/binding checks.
 
 The v0.1 adapter maps this envelope to the existing authenticated Management API mutation:
 `PUT /api/v1/management/clusters/{resolvedCluster}/projects/{projectId}/resources/Workload/{workload.id}`,
