@@ -145,6 +145,14 @@ def pg_runtime():
             "workload_assertion": token,
         }
 
+    def sign_claims(claims):
+        return _jwt(
+            private_key,
+            {"alg": "EdDSA", "typ": "JWT", "kid": "pg-test-key"},
+            claims,
+        )
+
+    make_request.sign_claims = sign_claims  # type: ignore[attr-defined]
     yield clock, store, run, binding, authority, make_request
 
     with psycopg.connect(dsn) as conn:
