@@ -977,6 +977,144 @@ class PostgresCredentialAuthorityStore:
         return row is not None
 
 
+class CredentialApprovalVerifier(Protocol):
+    """Verifies the existing ACP signed transition approval contract."""
+
+    def verify(
+        self,
+        signed: SignedTransitionApproval,
+        *,
+        now: Any,
+    ) -> TransitionApproval:
+        ...
+
+
+def register_credential_approval_from_transition(
+    *,
+    store: PostgresCredentialAuthorityStore,
+    run_authority: RunAuthorityReader,
+    signed_approval: SignedTransitionApproval,
+    approval_verifier: CredentialApprovalVerifier,
+    action: ActionIntent,
+    now: Any,
+) -> ApprovalGrantRecord:
+    """Project a verified ACP transition approval into the credential authority.
+
+    The signed ActionIntent itself must be specifically about a workload
+    credential issuance and carry every identity/scope field. This adapter is
+    called after the ACP's existing approval decision has been committed; the
+    approval table is a versioned credential-authority projection, not a second
+    place where an agent can create an approval. No HTTP route exposes this
+    function.
+    """
+    if getattr(now, "tzinfo", None) is None or now.utcoffset() is None:
+        raise CredentialAuthorityProtocolError("approval registration time must be timezone-aware")
+    action.verify()
+    approval = approval_verifier.verify(signed_approval, now=now)
+    if approval.decision is not ApprovalDecision.APPROVE:
+        raise CredentialAuthorityDenied("credential issuance requires an APPROVE decision")
+    if (
+        action.provider != "agent-control-plane"
+        or action.operation != "issue_workload_credential"
+        or approval.action_hash != action.action_hash
+        or approval.transition_hash != action.transition_hash
+        or not approval.approval_hash.startswith("sha256:")
+        or not approval.policy_decision_hash.startswith("sha256:")
+    ):
+        raise CredentialAuthorityDenied("signed approval is not for this exact credential action")
+
+    params = action.parameters
+    required = (
+        "tenant_id",
+        "agent_id",
+        "release_id",
+        "session_id",
+        "run_id",
+        "sandbox_id",
+        "sandbox_revision",
+        "workspace_ref",
+        "binding_id",
+        "capability",
+        "audience",
+        "scopes",
+        "execution_principal_type",
+        "execution_principal_subject",
+    )
+    for key in required:
+        if key not in params:
+            raise CredentialAuthorityProtocolError(f"signed credential action omits {key}")
+
+    text_fields = required[:6] + required[7:8] + required[8:9] + required[9:11] + required[12:14]
+    if any(not isinstance(params[key], str) or not params[key].strip() for key in text_fields):
+        raise CredentialAuthorityProtocolError("signed credential action contains an empty identity field")
+    if type(params["sandbox_revision"]) is not int or params["sandbox_revision"] <= 0:
+        raise CredentialAuthorityProtocolError("signed sandbox revision must be positive")
+    if not isinstance(params["scopes"], list) or not params["scopes"] or any(
+        not isinstance(scope, str) or not scope.strip() for scope in params["scopes"]
+    ) or len(set(params["scopes"])) != len(params["scopes"]):
+        raise CredentialAuthorityProtocolError("signed credential scopes are invalid")
+    scopes = tuple(sorted(params["scopes"]))
+    if not any(_scope_needs_approval(scope) for scope in scopes):
+        raise CredentialAuthorityDenied("approval projection is only for approval-gated scopes")
+    if (
+        approval.execution_principal.type != params["execution_principal_type"]
+        or approval.execution_principal.subject != params["execution_principal_subject"]
+    ):
+        raise CredentialAuthorityDenied("approval execution principal does not match the signed action")
+
+    try:
+        canonical = run_authority.get_run_binding(params["run_id"])
+    except CredentialAuthorityError:
+        raise
+    except Exception:
+        raise CredentialAuthorityUnavailable("canonical Run authority is unavailable") from None
+    expected = {
+        "tenant_id": canonical.tenant_id,
+        "agent_id": canonical.agent_id,
+        "release_id": canonical.release_id,
+        "session_id": canonical.session_id,
+        "run_id": canonical.run_id,
+        "sandbox_id": canonical.sandbox_id,
+        "sandbox_revision": canonical.sandbox_revision,
+        "workspace_ref": canonical.workspace_ref,
+    }
+    if any(params[key] != value for key, value in expected.items()):
+        raise CredentialAuthorityDenied("signed approval target differs from canonical Run binding")
+    if canonical.status.lower() != "running" or canonical.session_status.lower() != "active":
+        raise CredentialAuthorityDenied("credential approval requires an active Session and running Run")
+
+    binding = store.get_binding(params["binding_id"])
+    if (
+        binding is None
+        or not binding.active
+        or binding.capability != params["capability"]
+        or binding.audience != params["audience"]
+        or set(scopes) - set(binding.allowed_scopes)
+    ):
+        raise CredentialAuthorityDenied("signed approval target is outside the current credential binding")
+
+    grant = ApprovalGrantRecord(
+        approval_id=approval.approval_id,
+        tenant_id=canonical.tenant_id,
+        agent_id=canonical.agent_id,
+        session_id=canonical.session_id,
+        run_id=canonical.run_id,
+        binding_id=binding.binding_id,
+        audience=binding.audience,
+        scopes=scopes,
+        approved_by=f"{approval.approver.type}:{approval.approver.subject}",
+        issued_at=approval.issued_at.timestamp(),
+        expires_at=approval.expires_at.timestamp(),
+        state="ACTIVE",
+        version=1,
+        approval_hash=approval.approval_hash,
+        action_hash=approval.action_hash,
+        transition_hash=approval.transition_hash,
+        policy_decision_hash=approval.policy_decision_hash,
+    )
+    return store._insert_verified_approval(grant)
+
+
 class WorkloadCredentialAuthority:
     """Fail-closed credential issuer/introspector backed by operator-owned state."""
 
