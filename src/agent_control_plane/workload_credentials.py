@@ -75,7 +75,10 @@ def _scopes(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
 
 
 def _scope_needs_approval(scope: str) -> bool:
-    return scope.rsplit(":", 1)[-1].lower() in SENSITIVE_SCOPE_SUFFIXES
+    # Fail closed for unknown scope classes: only explicitly recognized read
+    # scopes avoid human approval. New write-capable verbs cannot slip through
+    # merely because they were missing from an allowlist of sensitive suffixes.
+    return scope.rsplit(":", 1)[-1].lower() not in {"read", "list", "metadata"}
 
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:
@@ -992,6 +995,8 @@ class WorkloadCredentialAuthority:
             or canonical.session_status.lower() != "active"
         ):
             raise CredentialAuthorityDenied("credentials require a running Run in an active Session")
+        if claims.get("sub") != f"run:{canonical.run_id}":
+            raise CredentialAuthorityDenied("workload subject does not match canonical Run")
         expected = {
             "tenant_id": canonical.tenant_id,
             "agent_id": canonical.agent_id,
