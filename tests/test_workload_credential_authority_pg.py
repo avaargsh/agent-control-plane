@@ -275,7 +275,7 @@ def test_postgres_concurrent_duplicate_issue_persists_exactly_one_credential(pg_
               AND binding_id = %s AND request_id = %s
             """,
             ("runtime-prod", run.run_id, binding.binding_id, request_id),
-        ).fetchone()["n"]
+        ).fetchone()[0]
         credential_rows = conn.execute(
             """
             SELECT count(*) AS n
@@ -293,7 +293,7 @@ def test_postgres_concurrent_duplicate_issue_persists_exactly_one_credential(pg_
                 "runtime-prod", run.run_id, binding.binding_id,
                 "runtime-prod", run.run_id, binding.binding_id, request_id,
             ),
-        ).fetchone()["n"]
+        ).fetchone()[0]
 
     assert request_rows == 1
     assert credential_rows == 1
@@ -339,7 +339,7 @@ def test_postgres_lost_issue_response_reconciles_without_returning_raw_token(pg_
               AND binding_id = %s AND request_id = %s
             """,
             ("runtime-prod", run.run_id, binding.binding_id, request_id),
-        ).fetchone()["n"]
+        ).fetchone()[0]
     assert count == 1
 
 
