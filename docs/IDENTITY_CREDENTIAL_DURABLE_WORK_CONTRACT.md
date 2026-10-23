@@ -40,30 +40,34 @@ Identity invariants:
 
 ## Run lifecycle contract
 
-The canonical Run state machine is:
+The normative Run state machine is:
 
 ```text
 Pending -> Running -> Waiting -> Running
-   |          |         |
-   |          |         +----> Failed / Cancelled (only when resolved)
-   |          +--------------> Succeeded / Failed / Cancelled
-   +-------------------------> Cancelled
+   |          |          |  \\
+   |          |          |   +----> Failed (only after wait is resolved as terminal)
+   |          |          +--------> Cancelled (only after cancellation/effects are reconciled)
+   |          +-------------------> Succeeded / Failed / Cancelled
+   +------------------------------> Cancelled
 ```
 
-Allowed transitions:
+The transition table below is normative; no edge not listed here is legal. Terminal states are immutable. Reconciliation or compensation is a separate audited operation and does not rewrite a terminal Run.
 
 | From | To | Required condition |
 |---|---|---|
-| `Pending` | `Running` | Durable claim/lease acquired; identity and authority checks pass |
-| `Pending` | `Cancelled` | Cancellation wins before execution claim |
-| `Running` | `Waiting` | A durable wait reason is recorded (timer, approval, external event, or retryable dependency) |
-| `Waiting` | `Running` | Wait condition is satisfied and current authority is revalidated |
+| `Pending` | `Running` | Atomic compare-and-set (CAS) from the expected version after durable claim/lease acquisition and identity/authority checks |
+| `Pending` | `Cancelled` | Cancellation CAS wins before execution claim; no effect has been dispatched |
+| `Running` | `Waiting` | Wait reason, deadline/policy (if any), and unresolved operation references are durably recorded |
+| `Waiting` | `Running` | Wait condition is satisfied; CAS wins at the expected version and current identity/authority is revalidated |
 | `Running` | `Succeeded` | Required result is persisted and independently verified; a provider ACK alone is insufficient |
-| `Running` | `Failed` | Failure is known and terminal; ambiguous side effects remain `UNKNOWN` pending reconciliation |
-| `Running` | `Cancelled` | Cancellation is confirmed at a safe boundary and any in-flight side effect is reconciled |
-| `Waiting` | `Cancelled` | Cancellation is durably accepted and no unresolved effect is falsely reported as absent |
+| `Running` | `Failed` | Failure is known terminal and every dispatched side effect is resolved as applied, not applied, or explicitly compensated; no operation remains ambiguous |
+| `Running` | `Cancelled` | Cancellation CAS wins at the expected version; execution reaches a safe boundary and every in-flight effect is reconciled |
+| `Waiting` | `Failed` | Only a persisted wait deadline/policy or dependency result proves terminal failure, and all associated side effects are resolved; an ambiguous operation remains `Waiting` for reconciliation |
+| `Waiting` | `Cancelled` | Cancellation CAS wins at the expected version and no unresolved effect is falsely reported as absent; unresolved effects remain explicitly tracked until reconciled |
 
-No implicit transitions are allowed from terminal states (`Succeeded`, `Failed`, `Cancelled`). Corrections require a separately audited reconciliation/compensation operation or a new Run. A timeout is an event/policy decision, not proof that an external operation did not happen: persist the timeout, then either enter `Waiting` for bounded retry/reconciliation or finish `Failed` only when the outcome is known. If the outcome is ambiguous, retain `UNKNOWN` in the operation/evidence record and do not replay the side effect automatically.
+Every competing state-changing event (including timeout, cancellation, worker completion, and recovery) must use the same durable state version/CAS boundary. Only one competing transition can win for a given version. A losing event reloads state and reconciles; it must not overwrite the winner or emit a contradictory terminal result. Event IDs are deduplicated durably. If the audit append cannot be committed atomically with the transition (or through a transactional outbox), the transition must not be exposed as committed.
+
+A timeout is an event/policy decision, not proof that an external operation did not happen. Persist it and move to `Waiting` when execution/effect outcome is ambiguous. `Waiting -> Failed` is allowed only after a durable deadline/policy or dependency result establishes terminal failure and every dispatched effect has a known/reconciled outcome. Unknown outcome is not terminal failure and never authorizes automatic replay.
 
 Every state transition must be an atomic compare-and-set against the expected prior state/version and append a durable audit record containing at least: event ID, canonical Agent/Session/Task/Run IDs, prior and next state, reason/trigger, attempt/incarnation reference, timestamp, actor/worker identity, policy/authority revision where applicable, workflow reference, correlation/causation IDs, and redacted evidence references. Replayed event IDs are idempotent and must not append a second logical transition. Audit records are append-only; corrections reference the original event rather than rewriting it.
 
