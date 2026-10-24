@@ -209,6 +209,26 @@ class WorkloadCredentialWSGI:
         environ: WSGIEnvironment,
         start_response: StartResponse,
     ) -> list[bytes]:
+        # Defense in depth only: production must terminate and verify TLS/mTLS
+        # at a trusted listener and configure its WSGI scheme accordingly. Do
+        # not infer trust from caller-controlled forwarded headers.
+        if environ.get("wsgi.url_scheme") != "https":
+            encoded = (
+                b'{"error":{"code":"secure_transport_required",'
+                b'"message":"secure transport required"}}'
+            )
+            start_response(
+                "403 Forbidden",
+                [
+                    ("Content-Type", "application/json; charset=utf-8"),
+                    ("Content-Length", str(len(encoded))),
+                    ("Cache-Control", "no-store"),
+                    ("Pragma", "no-cache"),
+                    ("X-Content-Type-Options", "nosniff"),
+                ],
+            )
+            return [encoded]
+
         try:
             status, payload = self._dispatch(environ)
         except CredentialRequestReplay:
