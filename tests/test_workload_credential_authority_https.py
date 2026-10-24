@@ -116,19 +116,21 @@ def _write_cert(path: Path, cert) -> None:
     path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
 
 
-class _HttpsRequestHandler(WSGIRequestHandler):
-    def get_scheme(self):
-        return "https"
+class _TrustedTlsIngressScheme:
+    """Model the trusted TLS ingress sitting in front of the WSGI application.
 
-    def get_environ(self):
-        environ = super().get_environ()
-        # This handler is only installed on the socket wrapped by the test TLS
-        # server below, so the scheme reflects the actual HTTPS connection.
-        environ["wsgi.url_scheme"] = "https"
-        return environ
+    The socket accepts HTTPS only (with a required client certificate). This
+    adapter models the ingress setting the trusted WSGI scheme after TLS
+    termination; it does not trust an arbitrary X-Forwarded-Proto header.
+    """
 
-    def log_message(self, _format, *_args):
-        return
+    def __init__(self, app):
+        self.app = app
+
+    def __call__(self, environ, start_response):
+        trusted_environ = dict(environ)
+        trusted_environ["wsgi.url_scheme"] = "https"
+        return self.app(trusted_environ, start_response)
 
 
 class _RoleAuthenticator:
@@ -231,10 +233,11 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
 
     store = _make_store()
     authenticator = _RoleAuthenticator(SERVICE_TOKEN)
-    wsgi_app = _RecordingApp(RuntimeCanonicalIdentityWSGI(
+    recording_app = _RecordingApp(RuntimeCanonicalIdentityWSGI(
         reader=RuntimeStoreRunAuthorityReader(store),
         authenticator=authenticator,
     ))
+    wsgi_app = _TrustedTlsIngressScheme(recording_app)
 
     server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server_context.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -247,7 +250,7 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         0,
         wsgi_app,
         server_class=WSGIServer,
-        handler_class=_HttpsRequestHandler,
+        handler_class=WSGIRequestHandler,
     )
     server.socket = server_context.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -271,7 +274,7 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         except Exception as exc:
             pytest.fail(
                 f"first HTTPS read failed: {type(exc).__name__}: {exc}; "
-                f"calls={wsgi_app.calls!r}; statuses={wsgi_app.statuses!r}; "
+                f"calls={recording_app.calls!r}; statuses={recording_app.statuses!r}; "
                 f"roles={authenticator.roles!r}"
             )
         assert binding.tenant_id == "tenant-tls"
@@ -280,10 +283,10 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         assert binding.sandbox_id == "tls-sandbox-1"
         assert binding.sandbox_revision == 7
         assert binding.status == "running"
-        assert wsgi_app.calls == [(
+        assert recording_app.calls == [(
             "GET", f"Bearer {SERVICE_TOKEN}", CANONICAL_RUN_ROUTE_PREFIX + RUN_ID, "https"
         )]
-        assert wsgi_app.statuses == ["200 OK"]
+        assert recording_app.statuses == ["200 OK"]
         assert authenticator.roles == ["runtime.identity.reader"]
 
         # The TLS server requires a client certificate: a trusted server CA
@@ -297,7 +300,7 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         )
         with pytest.raises(RuntimeIdentityUnavailableError):
             HttpsRuntimeStoreRunAuthorityReader(no_client_cert_transport).get_run_binding(RUN_ID)
-        assert len(wsgi_app.calls) == 1
+        assert len(recording_app.calls) == 1
 
         # A valid client certificate cannot substitute for the narrow service
         # role/token check performed by the WSGI application.
@@ -309,10 +312,10 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         )
         with pytest.raises(RuntimeIdentityUnavailableError):
             HttpsRuntimeStoreRunAuthorityReader(denied_transport).get_run_binding(RUN_ID)
-        assert wsgi_app.calls[-1] == (
+        assert recording_app.calls[-1] == (
             "GET", "Bearer wrong-service-token", CANONICAL_RUN_ROUTE_PREFIX + RUN_ID, "https"
         )
-        assert wsgi_app.statuses[-1] == "403 Forbidden"
+        assert recording_app.statuses[-1] == "403 Forbidden"
 
         # A peer certificate not rooted in the configured trust store is also
         # rejected even when the client presents its own valid test certificate.
@@ -327,7 +330,7 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         )
         with pytest.raises(RuntimeIdentityUnavailableError):
             HttpsRuntimeStoreRunAuthorityReader(untrusted_transport).get_run_binding(RUN_ID)
-        assert len(wsgi_app.calls) == 2
+        assert len(recording_app.calls) == 2
     finally:
         server.shutdown()
         server.server_close()
