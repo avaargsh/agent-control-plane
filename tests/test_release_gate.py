@@ -239,3 +239,70 @@ def test_generic_evidence_gate_does_not_imply_provenance():
     )
     assert result.passed is True
     assert result.decision == "PROMOTE"
+
+
+def test_expected_release_and_run_accept_only_the_exact_evidence_target():
+    result = evaluate_release_gate(
+        GATE,
+        {"recovery_success_rate": 1.0, "false_automation_rate": 0.0},
+        evidence(),
+        expected_authority_digest="sha256:" + "a" * 64,
+        expected_release_ref="checkout-sre-golden-v1",
+        expected_runtime_run_id="run-001",
+    )
+    assert result.passed is True
+    assert result.reason == "EVAL_GATE_PASSED"
+
+
+def test_sealed_evidence_from_another_release_cannot_promote_target():
+    foreign = dict(evidence())
+    foreign.pop("replay_digest")
+    foreign["release_ref"] = "some-other-release"
+    result = evaluate_release_gate(
+        GATE,
+        {"recovery_success_rate": 1.0, "false_automation_rate": 0.0},
+        seal_release_evidence(foreign),
+        expected_authority_digest="sha256:" + "a" * 64,
+        expected_release_ref="checkout-sre-golden-v1",
+        expected_runtime_run_id="run-001",
+    )
+    assert result.passed is False
+    assert result.decision == "BLOCK"
+    assert result.reason == "RELEASE_REF_MISMATCH"
+
+
+def test_sealed_evidence_from_another_run_cannot_promote_target():
+    foreign = dict(evidence())
+    foreign.pop("replay_digest")
+    foreign["runtime_run_id"] = "run-foreign"
+    result = evaluate_release_gate(
+        GATE,
+        {"recovery_success_rate": 1.0, "false_automation_rate": 0.0},
+        seal_release_evidence(foreign),
+        expected_authority_digest="sha256:" + "a" * 64,
+        expected_release_ref="checkout-sre-golden-v1",
+        expected_runtime_run_id="run-001",
+    )
+    assert result.passed is False
+    assert result.decision == "BLOCK"
+    assert result.reason == "RUNTIME_RUN_ID_MISMATCH"
+
+
+def test_target_pinning_requires_valid_evidence_even_if_gate_marks_it_optional():
+    optional_evidence_gate = {
+        **GATE,
+        "spec": {**GATE["spec"], "evidenceRequired": False},
+    }
+    unsealed = dict(evidence())
+    unsealed.pop("replay_digest")
+    result = evaluate_release_gate(
+        optional_evidence_gate,
+        {"recovery_success_rate": 1.0, "false_automation_rate": 0.0},
+        unsealed,
+        expected_authority_digest="sha256:" + "a" * 64,
+        expected_release_ref="checkout-sre-golden-v1",
+        expected_runtime_run_id="run-001",
+    )
+    assert result.passed is False
+    assert result.decision == "BLOCK"
+    assert result.reason == "INVALID_RELEASE_EVIDENCE"

@@ -70,6 +70,8 @@ def main() -> None:
         "--authority-digest",
         required=False,
     )
+    gate.add_argument("--expected-release-ref", required=False)
+    gate.add_argument("--expected-runtime-run-id", required=False)
 
     inventory = subparsers.add_parser(
         "authority-inventory"
@@ -319,6 +321,11 @@ def main() -> None:
         )
 
     if args.command == "gate":
+        if (
+            args.expected_release_ref is not None
+            or args.expected_runtime_run_id is not None
+        ) and not args.evidence:
+            raise SystemExit("target-bound gate requires --evidence")
         gates = documents.by_kind(
             "EvalGate"
         )
@@ -340,6 +347,8 @@ def main() -> None:
                 expected_authority_digest=(
                     args.authority_digest
                 ),
+                expected_release_ref=args.expected_release_ref,
+                expected_runtime_run_id=args.expected_runtime_run_id,
             )
         else:
             result = evaluate_gate(
