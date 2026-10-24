@@ -31,6 +31,13 @@ The plan stage:
 
 It performs no external mutation.
 
+A referenced ContextProjectionPolicy is included in the resolved plan so a
+provider adapter can consume the exact selected policy document. Compilation
+only resolves and validates the desired-state reference: it does not itself
+apply redaction, restrict a live session's context, or emit projection
+evidence. Those behaviors require Runtime/provider enforcement and their own
+observable acceptance tests.
+
 ## Provider dry-run
 
 ```bash
