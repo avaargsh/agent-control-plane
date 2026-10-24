@@ -61,14 +61,28 @@ def _call_wsgi(app, *, path, token, body):
 
 
 def test_production_config_validates_pinned_keys_and_separate_role_tokens():
-    config = WorkloadCredentialServiceConfig.from_environment(_environment())
+    env = _environment()
+    config = WorkloadCredentialServiceConfig.from_environment(env)
     assert config.assertion_issuer == "https://runtime.example.test"
     assert config.assertion_audience == "urn:acp:workload-credential-authority"
     assert config.assertion_public_keys["runtime-key-v1"] == bytes.fromhex("11" * 32)
     assert config.runtime_identity_timeout_seconds == 2.5
     assert len(set(config.service_role_tokens.values())) == 5
 
-    env = _environment()
+    # Config reprs are routinely logged on startup/debug paths; never disclose
+    # the database DSN or any credential material through that representation.
+    rendered = repr(config)
+    for secret in (
+        env["ACP_WORKLOAD_CREDENTIAL_DATABASE_URL"],
+        env["ACP_RUNTIME_IDENTITY_SERVICE_TOKEN"],
+        env["ACP_CREDENTIAL_ISSUER_TOKEN"],
+        env["ACP_CREDENTIAL_INTROSPECTOR_TOKEN"],
+        env["ACP_CREDENTIAL_REVOKER_TOKEN"],
+        env["ACP_APPROVAL_READER_TOKEN"],
+        env["ACP_APPROVAL_REVOKER_TOKEN"],
+    ):
+        assert secret not in rendered
+
     env["ACP_APPROVAL_REVOKER_TOKEN"] = env["ACP_RUNTIME_IDENTITY_SERVICE_TOKEN"]
     with pytest.raises(ValueError, match="distinct tokens"):
         WorkloadCredentialServiceConfig.from_environment(env)
