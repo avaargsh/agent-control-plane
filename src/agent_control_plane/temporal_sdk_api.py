@@ -35,6 +35,14 @@ class TemporalSDKApi:
     ) -> None:
         if not target_host or not namespace or rpc_timeout_seconds <= 0:
             raise ValueError("Temporal target, namespace and positive timeout required")
+        # This reference transport has deliberately no TLS or auth configuration.
+        # Prevent it from silently sending Workflow payloads over remote plaintext.
+        hostname = target_host.rpartition(":")[0].strip("[]")
+        if hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError(
+                "reference Temporal SDK transport is loopback-only; "
+                "use an independently authenticated TLS transport for remote clusters"
+            )
         self.target_host = target_host
         self.namespace = namespace
         self.rpc_timeout = timedelta(seconds=rpc_timeout_seconds)
