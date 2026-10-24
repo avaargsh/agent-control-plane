@@ -67,6 +67,59 @@ not infer ownership from Workflow ID or RUNNING status alone.
 This deterministic reference identity is an idempotency/ownership fence, not an
 authorization credential or proof that a provider-side effect completed.
 
+#### Official Temporal Python SDK transport (opt-in developer reference)
+
+Install the optional dependency with `pip install -e '.[temporal]'`. A
+small synchronous transport now delegates to the official Temporal Python SDK:
+
+```python
+from agent_control_plane.temporal_sdk_api import TemporalSDKApi
+from agent_control_plane.temporal_runtime_client import TemporalWorkflowClient
+
+api = TemporalSDKApi(target_host="127.0.0.1:7233", namespace="default")
+controller = TemporalWorkflowClient(api)
+result = controller.ensure_workflow({
+    "release": "example-release",
+    "workflow_type": "ExistingWorkerWorkflow",
+    "task_queue": "existing-worker-task-queue",
+    "input": {"request_id": "request-123"},
+})
+```
+
+The Workflow type and Worker are **external** and must already be deployed;
+ACP does not host or implement them. The adapter persists the deterministic
+ACP `operationId` in a server-visible Workflow Memo
+(`acp_operation_id`) and re-reads it from Temporal after starting. Existing
+RUNNING workflows can be attached only when the Memo matches. SDK
+`WorkflowIDConflictPolicy.FAIL` and
+`WorkflowIDReusePolicy.REJECT_DUPLICATE` prevent a duplicate or terminal
+Workflow ID from silently starting a replacement.
+
+This simple reference uses a fresh SDK connection per operation because the
+ACP API is synchronous. Do not call it on an asyncio event-loop thread
+(use `asyncio.to_thread`), and do not deploy it as a high-throughput shared
+transport without a proper async lifecycle.
+
+Termination is *only* a transport request: it must be entered through an
+already-authorized ACP exact-plan boundary. The adapter first requires
+server-visible ACP ownership metadata and then targets the observed
+Temporal Run ID; it returns `terminationRequested`, not an independently
+verified outcome. Provider ACK/lost ACK remains subject to reconciliation.
+Do not use this adapter directly as a public unauthenticated mutation API.
+
+The focused integration test starts the Temporal SDK local test server (not
+Temporal Cloud or a production server):
+
+```sh
+python -m pip install -e '.[dev,temporal]'
+pytest -q tests/test_temporal_sdk_api.py
+```
+
+This verifies SDK transport interoperability, memo identity, duplicate-ID
+conflicts and the request path. It does not prove a real Worker executed,
+production auth/TLS, persisted Temporal server restart, or v0.1 independent
+execution proof.
+
 ### Kubernetes Agent Sandbox
 
 Owns isolated execution environment lifecycle. A binding may express portable intent such as isolation class, warm-pool preference and placement constraints.
