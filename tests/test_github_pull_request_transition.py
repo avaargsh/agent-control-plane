@@ -6,6 +6,12 @@ import pytest
 from agent_control_plane.github_pull_request_transition import (
     GitHubPullRequestMergeProvider,
 )
+from agent_control_plane.live_effect_boundary import (
+    CurrentEffectAuthority,
+    EffectScope,
+    LiveEffectAdmissionDenied,
+    LiveEffectBoundaryGate,
+)
 from agent_control_plane.provable_execution import (
     ReconciliationStatus,
     VerificationStatus,
@@ -15,9 +21,13 @@ from agent_control_plane.runtime_clients import (
     RuntimeMutationUncertain,
 )
 from agent_control_plane.state_transition_protocol import (
+    ActionIntent,
+    AuthorizationBinding,
+    ExecutionLease,
     Principal,
     ProtocolViolation,
     ResourceIdentity,
+    StateTransition,
 )
 
 
@@ -150,6 +160,121 @@ def build_plan(api=None):
     return api, provider, observation, plan
 
 
+
+
+
+class GitHubAuthorityReaderFixture:
+    """Test fake for the current-authority row; production uses an operator-owned reader."""
+
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+        self.calls = []
+
+    def read_current(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.snapshot
+
+
+def _authorized_apply(
+    provider, plan, *, operation_id, actor, now,
+    authority_approval_state="ACTIVE",
+    action_parameters=None,
+    caller=None,
+):
+    """Exercise the merge through the same current-authority gate as other effects."""
+    caller = actor if caller is None else caller
+    transition = StateTransition.seal(
+        transition_id=f"github-transition-{operation_id}",
+        subject=plan.subject,
+        expected_generation=1,
+        before=plan.before,
+        desired=plan.desired,
+        evidence_hash="sha256:" + "a" * 64,
+        outcome_contract_hash="sha256:" + "b" * 64,
+        created_at=NOW,
+    )
+    action = ActionIntent.seal(
+        action_id=f"github-action-{operation_id}",
+        transition_hash=transition.transition_hash,
+        provider=plan.provider,
+        operation=plan.operation,
+        parameters=(
+            plan.parameters if action_parameters is None else action_parameters
+        ),
+    )
+    authorization = AuthorizationBinding.seal(
+        transition=transition,
+        action=action,
+        policy_version="github-test-policy/v1",
+        policy_decision_hash="sha256:" + "d" * 64,
+        approval_hash="sha256:" + "c" * 64,
+        principal=actor,
+        expires_at=NOW + timedelta(minutes=5),
+    )
+    active_lease = ExecutionLease(
+        lease_id=f"github-lease-{operation_id}",
+        resource_uid=plan.subject.resource_uid,
+        holder=actor,
+        epoch=1,
+        acquired_at=NOW,
+        expires_at=NOW + timedelta(minutes=10),
+    )
+    policy_input_hash = "sha256:" + "e" * 64
+    scope = EffectScope(
+        tenant_id="github-test-tenant",
+        project_id="acme/payments",
+        cluster_id="github-adapter-test",
+        nonce=f"github-nonce-{operation_id}",
+    )
+    snapshot = CurrentEffectAuthority(
+        tenant_id=scope.tenant_id,
+        project_id=scope.project_id,
+        cluster_id=scope.cluster_id,
+        work_id="github-pr-work",
+        operation_id=operation_id,
+        nonce=scope.nonce,
+        resource_uid=plan.subject.resource_uid,
+        principal=authorization.principal,
+        executor=actor,
+        resource_generation=transition.expected_generation,
+        lease_id=active_lease.lease_id,
+        lease_epoch=active_lease.epoch,
+        transition_hash=transition.transition_hash,
+        action_hash=action.action_hash,
+        authorization_hash=authorization.authorization_hash,
+        approval_hash=authorization.approval_hash,
+        policy_version=authorization.policy_version,
+        policy_input_hash=policy_input_hash,
+        policy_decision_hash=authorization.policy_decision_hash,
+        policy_effect="PERMIT",
+        approval_state=authority_approval_state,
+        principal_state="ACTIVE",
+        operation_state="ACTIVE",
+        observed_at=now,
+        valid_until=now + timedelta(minutes=1),
+        version=1,
+    )
+    reader = GitHubAuthorityReaderFixture(snapshot)
+    provider._effect_gate = LiveEffectBoundaryGate(
+        scope=scope,
+        reader=reader,
+        clock=lambda: now,
+    )
+    return provider.apply(
+        plan,
+        operation_id=operation_id,
+        actor=actor,
+        now=now,
+        transition=transition,
+        action=action,
+        authorization=authorization,
+        active_lease=active_lease,
+        caller=caller,
+        work_id="github-pr-work",
+        policy_input_hash=policy_input_hash,
+    )
+
+
 def test_plan_binds_exact_approved_head_sha():
     _, _, observation, plan = build_plan()
 
@@ -171,10 +296,8 @@ def test_plan_binds_exact_approved_head_sha():
 def test_merge_uses_head_cas_and_operation_ownership_marker():
     api, provider, _, plan = build_plan()
 
-    receipt = provider.apply(
-        plan,
-        operation_id="op-123",
-        actor=ACTOR,
+    receipt = _authorized_apply(
+        provider, plan, operation_id="op-123", actor=ACTOR,
         now=NOW + timedelta(seconds=2),
     )
 
@@ -199,10 +322,8 @@ def test_head_drift_is_rejected_before_merge_side_effect():
         ProtocolViolation,
         match="head changed before execution",
     ):
-        provider.apply(
-            plan,
-            operation_id="op-stale",
-            actor=ACTOR,
+        _authorized_apply(
+            provider, plan, operation_id="op-stale", actor=ACTOR,
             now=NOW + timedelta(seconds=2),
         )
 
@@ -248,8 +369,8 @@ def test_merged_matching_markers_with_changed_head_cannot_replay_as_owned():
     )
     assert ownership is VerificationStatus.UNKNOWN
     with pytest.raises(RuntimeMutationOwnershipUncertain, match="ownership is unknown"):
-        provider.apply(
-            plan, operation_id=operation_id, actor=ACTOR,
+        _authorized_apply(
+            provider, plan, operation_id=operation_id, actor=ACTOR,
             now=NOW + timedelta(seconds=4),
         )
     assert api.merge_calls == 0
@@ -258,10 +379,8 @@ def test_lost_ack_reconciles_when_commit_proves_operation_ownership():
     api = LostAckGitHubApi()
     api, provider, _, plan = build_plan(api)
 
-    receipt = provider.apply(
-        plan,
-        operation_id="op-lost-ack",
-        actor=ACTOR,
+    receipt = _authorized_apply(
+        provider, plan, operation_id="op-lost-ack", actor=ACTOR,
         now=NOW + timedelta(seconds=2),
     )
 
@@ -278,10 +397,8 @@ def test_lost_ack_does_not_claim_another_actors_merge():
         RuntimeMutationOwnershipUncertain,
         match="ambiguous after lost ACK",
     ):
-        provider.apply(
-            plan,
-            operation_id="op-not-owner",
-            actor=ACTOR,
+        _authorized_apply(
+            provider, plan, operation_id="op-not-owner", actor=ACTOR,
             now=NOW + timedelta(seconds=2),
         )
 
@@ -311,10 +428,8 @@ def test_open_same_head_reconciles_as_not_applied():
 def test_provider_receipt_is_not_outcome_proof():
     _, provider, _, plan = build_plan()
 
-    receipt = provider.apply(
-        plan,
-        operation_id="op-verify",
-        actor=ACTOR,
+    receipt = _authorized_apply(
+        provider, plan, operation_id="op-verify", actor=ACTOR,
         now=NOW + timedelta(seconds=2),
     )
     after = provider.observe(
@@ -389,8 +504,8 @@ def test_ownership_markers_require_complete_lines(message_case):
     assert result.status is ReconciliationStatus.UNKNOWN
     assert not report.succeeded
     with pytest.raises(RuntimeMutationOwnershipUncertain, match="ownership is unknown"):
-        provider.apply(
-            plan, operation_id=operation_id,
+        _authorized_apply(
+            provider, plan, operation_id=operation_id,
             actor=ACTOR, now=NOW + timedelta(seconds=4),
         )
 
@@ -420,3 +535,72 @@ def test_merge_by_other_actor_is_unknown_even_if_desired_state_exists():
     )
 
     assert result.status is ReconciliationStatus.UNKNOWN
+
+
+
+def test_direct_merge_without_current_authority_gate_is_denied():
+    api, provider, _, plan = build_plan()
+
+    with pytest.raises(
+        ProtocolViolation,
+        match="current effect authority gate is required",
+    ):
+        provider.apply(
+            plan,
+            operation_id="op-untrusted-direct-call",
+            actor=ACTOR,
+            now=NOW + timedelta(seconds=2),
+        )
+
+    assert api.merge_calls == 0
+
+
+
+def test_revoked_current_approval_denies_before_github_merge():
+    api, provider, _, plan = build_plan()
+
+    with pytest.raises(LiveEffectAdmissionDenied, match="revoked or denied"):
+        _authorized_apply(
+            provider, plan,
+            operation_id="op-revoked",
+            actor=ACTOR,
+            now=NOW + timedelta(seconds=2),
+            authority_approval_state="REVOKED",
+        )
+
+    assert api.merge_calls == 0
+
+
+def test_action_parameter_mismatch_denies_before_github_merge():
+    api, provider, _, plan = build_plan()
+
+    with pytest.raises(LiveEffectAdmissionDenied, match="exact-plan execution admission"):
+        _authorized_apply(
+            provider, plan,
+            operation_id="op-parameter-mismatch",
+            actor=ACTOR,
+            now=NOW + timedelta(seconds=2),
+            action_parameters={"merge_method": "merge"},
+        )
+
+    assert api.merge_calls == 0
+
+
+
+def test_executor_substitution_denies_before_github_merge():
+    api, provider, _, plan = build_plan()
+    substituted = Principal(type="controller", subject="github-controller-other")
+
+    with pytest.raises(
+        LiveEffectAdmissionDenied,
+        match="actor must match the lease-holding caller",
+    ):
+        _authorized_apply(
+            provider, plan,
+            operation_id="op-executor-substitution",
+            actor=ACTOR,
+            caller=substituted,
+            now=NOW + timedelta(seconds=2),
+        )
+
+    assert api.merge_calls == 0
