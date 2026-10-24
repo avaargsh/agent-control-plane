@@ -23,6 +23,8 @@ _ROLE_ENV = {
     "approval.revoker": "ACP_APPROVAL_REVOKER_TOKEN",
 }
 _DEFAULT_ASSERTION_AUDIENCE = "urn:acp:workload-credential-authority"
+
+
 def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
