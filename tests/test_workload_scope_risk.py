@@ -43,6 +43,8 @@ def test_explicit_read_only_scope_verbs_do_not_require_approval(scope):
         "read",
         ":read",
         "payments:",
+        " payments:read",
+        "payments: read",
     ],
 )
 def test_mutating_or_unknown_scope_verbs_require_approval(scope):
