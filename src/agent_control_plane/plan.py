@@ -18,3 +18,4 @@ class ResolvedReleasePlan:
     eval_gates: tuple[str, ...] = field(default_factory=tuple)
     rollout: Mapping[str, Any] = field(default_factory=dict)
     placement: Mapping[str, Any] = field(default_factory=dict)
+    context_projection_policies: Mapping[str, dict[str, Any]] = field(default_factory=dict)

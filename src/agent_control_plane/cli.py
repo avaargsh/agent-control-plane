@@ -384,6 +384,7 @@ def main() -> None:
         bindings=bindings,
         capability_intents=capability_intents,
         tool_contracts=tool_contracts,
+        context_projection_policies=documents.by_kind("ContextProjectionPolicy"),
     )
     print(
         json.dumps(

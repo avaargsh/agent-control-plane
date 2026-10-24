@@ -14,7 +14,7 @@
       "version":{"type":"string"},
       "bindings":{"type":"array","items":{"type":"string"},"uniqueItems":true},
       "placement":{"type":"object","additionalProperties":true},
-      "policyRefs":{"type":"array","items":{"type":"string"},"uniqueItems":true},
+      "policyRefs":{"type":"array","items":{"type":"string"},"uniqueItems":true},"contextProjectionPolicyRefs":{"type":"array","items":{"type":"string","minLength":1},"uniqueItems":true},
       "capabilityIntentRefs":{"type":"array","items":{"type":"string","minLength":1},"uniqueItems":true},
       "evidenceRequirements":{"type":"object","additionalProperties":false,"properties":{
         "requireExternalCollector":{"type":"boolean","default":true},

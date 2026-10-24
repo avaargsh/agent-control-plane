@@ -20,6 +20,43 @@ def _documents_by_name(
     }
 
 
+def _resolve_context_projection_policies(
+    refs: tuple[str, ...],
+    policies: list[dict[str, Any]] | None,
+) -> dict[str, dict[str, Any]]:
+    seen: set[str] = set()
+    for ref in refs:
+        if ref in seen:
+            raise ReleaseCompileError(
+                f"duplicate contextProjectionPolicyRef: {ref}"
+            )
+        seen.add(ref)
+
+    available: dict[str, dict[str, Any]] = {}
+    for policy in policies or []:
+        if policy.get("kind") != "ContextProjectionPolicy":
+            raise ReleaseCompileError(
+                "context projection policy input has unexpected kind"
+            )
+        name = policy.get("metadata", {}).get("name")
+        if not isinstance(name, str) or not name:
+            raise ReleaseCompileError(
+                "context projection policy is missing metadata.name"
+            )
+        if name in available:
+            raise ReleaseCompileError(
+                f"duplicate context projection policy: {name}"
+            )
+        available[name] = policy
+
+    missing = [ref for ref in refs if ref not in available]
+    if missing:
+        raise ReleaseCompileError(
+            "unknown contextProjectionPolicyRef: " + ", ".join(missing)
+        )
+    return {ref: available[ref] for ref in refs}
+
+
 def compile_release_plan(
     *,
     release: dict[str, Any],
@@ -27,6 +64,7 @@ def compile_release_plan(
     bindings: list[dict[str, Any]],
     capability_intents: list[dict[str, Any]] | None = None,
     tool_contracts: list[dict[str, Any]] | None = None,
+    context_projection_policies: list[dict[str, Any]] | None = None,
 ) -> ResolvedReleasePlan:
     release_name = release.get("metadata", {}).get("name")
     bundle_ref = release.get("spec", {}).get("bundleRef")
@@ -43,6 +81,22 @@ def compile_release_plan(
     spec = release["spec"]
     resolved = resolve_bindings(release, bindings)
     capability_refs = tuple(spec.get("capabilityIntentRefs", []))
+    raw_context_policy_refs = spec.get("contextProjectionPolicyRefs", [])
+    if (
+        not isinstance(raw_context_policy_refs, list)
+        or any(
+            not isinstance(ref, str) or not ref
+            for ref in raw_context_policy_refs
+        )
+    ):
+        raise ReleaseCompileError(
+            "contextProjectionPolicyRefs must be a list of non-empty strings"
+        )
+    context_policy_refs = tuple(raw_context_policy_refs)
+    resolved_context_policies = _resolve_context_projection_policies(
+        context_policy_refs,
+        context_projection_policies,
+    )
 
     if capability_intents is not None:
         available_capabilities = _documents_by_name(capability_intents)
@@ -86,6 +140,7 @@ def compile_release_plan(
         authority_ref=spec.get("authorityRef"),
         authority_digest=spec.get("authorityDigest"),
         policy_refs=tuple(spec.get("policyRefs", [])),
+        context_projection_policies=resolved_context_policies,
         capability_intent_refs=capability_refs,
         evidence_requirements=dict(
             spec.get("evidenceRequirements", {})

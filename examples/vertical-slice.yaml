@@ -102,8 +102,26 @@ spec:
     - decision-hot-path
   policyRefs:
     - read-only-investigation
+  contextProjectionPolicyRefs:
+    - investigator-context
   evalGates:
     - rca-smoke
   rollout:
     strategy: canary
     percentage: 10
+
+---
+apiVersion: agentplane.io/v1alpha1
+kind: ContextProjectionPolicy
+metadata:
+  name: investigator-context
+spec:
+  sources:
+    - ref: session://summary
+      mode: required
+    - ref: evidence://current-run
+      mode: on-demand
+  limits:
+    maxTokens: 4096
+    maxBytes: 32768
+  recordProjectionEvidence: true
