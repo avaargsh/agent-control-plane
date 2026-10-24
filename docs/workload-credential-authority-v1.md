@@ -52,6 +52,24 @@ Grant separate database roles to the HTTP service and operator provisioning proc
 - Approval revocation commits state and credential invalidation with the outbox record in one PostgreSQL transaction. The outbox worker must use authenticated transport/signing in its ApprovalRevocationPublisher, acknowledge only after confirmed delivery and retry with the same event ID.
 - Online introspection is required at protected resource boundaries for immediate revocation. A self-contained bearer token accepted offline until expiry cannot satisfy immediate revocation by itself. External provider APIs must support token exchange/introspection/revocation or their own fencing layer.
 
+## Production WSGI composition
+
+The production composition entry point is `agent_control_plane.workload_credential_service:create_workload_credential_wsgi`. It builds the credential authority, PostgreSQL store, pinned Ed25519 verifier, Runtime canonical Run reader and five independent HTTP service-role credentials as one fail-closed dependency graph. It has no silent in-memory fallback.
+
+Required environment:
+- `ACP_WORKLOAD_CREDENTIAL_DATABASE_URL`: PostgreSQL DSN for the authority tables.
+- `ACP_WORKLOAD_ASSERTION_ISSUER`: exact signed workload assertion issuer.
+- `ACP_WORKLOAD_ASSERTION_PUBLIC_KEYS_JSON`: JSON object mapping reviewed key IDs to 32-byte Ed25519 public keys encoded as 64 hex characters. Configure private signing material only in the Runtime-side trusted signer/KMS; never put private keys in this service configuration.
+- `ACP_RUNTIME_IDENTITY_BASE_URL`: HTTPS base URL of the canonical Runtime identity endpoint, for example `https://runtime-identity.internal`. HTTP is rejected.
+- `ACP_RUNTIME_IDENTITY_SERVICE_TOKEN`: read-only Runtime identity reader token.
+- `ACP_CREDENTIAL_ISSUER_TOKEN`, `ACP_CREDENTIAL_INTROSPECTOR_TOKEN`, `ACP_CREDENTIAL_REVOKER_TOKEN`, `ACP_APPROVAL_READER_TOKEN`, and `ACP_APPROVAL_REVOKER_TOKEN`: five independent long random service credentials; the factory rejects missing, short or reused values.
+- `ACP_WORKLOAD_ASSERTION_AUDIENCE` (optional): assertion audience; defaults to `urn:acp:workload-credential-authority`.
+- `ACP_RUNTIME_IDENTITY_TIMEOUT_SECONDS` (optional): bounded timeout in the range `(0, 15]` seconds.
+
+Load these settings from the approved secret manager / workload identity injector, not from a checked-in dotenv file. The service factory constructs the existing verified-TLS HTTPS transport and `HttpsRuntimeStoreRunAuthorityReader`; that reader calls the read-only Runtime canonical Run endpoint and fails closed on unavailable, malformed or unsupported-version responses. It does not derive canonical state from credential request claims.
+
+The WSGI object returned by the factory is **not a listener**. Mount it behind the deployment's TLS/mTLS ingress, restrict ingress to trusted service callers, enforce egress/database network policy, use a non-owner PostgreSQL role with least-privilege grants, and redact Authorization headers at the ingress and observability layers. Use a separate migration identity for schema installation; the serving process must not own or mutate the schema. End-to-end loopback mTLS tests cover the Runtime read-only endpoint contract, but deployment certificate issuance, rotation, network policy and secret injection still require environment-specific operational validation.
+
 ## Production acceptance remains open
 
 This implementation and PostgreSQL workflow are the service-side contract, not evidence that an operator deployment is production ready. Do not claim production security acceptance until all of the following have passed on the exact release commit:
