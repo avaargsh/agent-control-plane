@@ -144,3 +144,40 @@ def test_production_factory_configuration_fails_closed(changes):
     else:
         with pytest.raises(ValueError, match="32 characters"):
             create_workload_credential_wsgi(env)
+
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"ACP_WORKLOAD_ASSERTION_AUDIENCE": "   "}, "audience"),
+        ({"ACP_WORKLOAD_ASSERTION_ISSUER": " https://runtime.example.test"}, "issuer"),
+        ({"ACP_RUNTIME_IDENTITY_SERVICE_TOKEN": " runtime-identity-reader-token-0123456789"}, "whitespace"),
+        ({"ACP_CREDENTIAL_ISSUER_TOKEN": "credential-issuer-role-token-0123456789 "}, "whitespace"),
+        (
+            {
+                "ACP_WORKLOAD_ASSERTION_PUBLIC_KEYS_JSON": (
+                    '{"runtime-key-v1":"' + "11" * 32
+                    + '","runtime-key-v1":"' + "22" * 32 + '"}'
+                )
+            },
+            "duplicate",
+        ),
+        (
+            {
+                "ACP_WORKLOAD_ASSERTION_PUBLIC_KEYS_JSON": (
+                    '{" runtime-key-v1":"' + "11" * 32 + '"}'
+                )
+            },
+            "key ID",
+        ),
+    ],
+)
+def test_production_config_rejects_ambiguous_or_unusable_authority_values(
+    changes, message
+):
+    env = _environment()
+    env.update(changes)
+
+    with pytest.raises(ValueError, match=message):
+        WorkloadCredentialServiceConfig.from_environment(env)
