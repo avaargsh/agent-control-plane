@@ -95,3 +95,66 @@ def test_sdk_transport_missing_workflow_is_not_claimed_as_terminated():
                 )
 
     asyncio.run(scenario())
+
+
+def test_sdk_transport_recovers_lost_start_ack_from_server_memo():
+    class AfterCommitAckLoss:
+        def __init__(self, sdk):
+            self.sdk = sdk
+
+        def describe(self, *, workflow_id):
+            return self.sdk.describe(workflow_id=workflow_id)
+
+        def start(self, **kwargs):
+            self.sdk.start(**kwargs)
+            raise RuntimeMutationUncertain("simulated lost start response")
+
+        def terminate(self, **kwargs):
+            return self.sdk.terminate(**kwargs)
+
+    async def scenario() -> None:
+        async with await WorkflowEnvironment.start_local() as env:
+            api = TemporalSDKApi(
+                target_host=env.client.service_client.config.target_host,
+                namespace=env.client.namespace,
+            )
+            workflow = _spec("test-sdk/lost-ack-" + uuid.uuid4().hex)
+            controller = TemporalWorkflowClient(AfterCommitAckLoss(api))
+
+            recovered = await asyncio.to_thread(controller.ensure_workflow, workflow)
+            assert recovered.changed
+            assert recovered.evidence["verifiedAfterUncertainMutation"] is True
+            assert recovered.evidence["runId"]
+            assert recovered.evidence["operationId"] == (
+                await asyncio.to_thread(api.describe, workflow_id=workflow["workflow_id"])
+            )["operationId"]
+            # A second call must attach without running a new Workflow.
+            again = await asyncio.to_thread(controller.ensure_workflow, workflow)
+            assert again.changed is False
+            assert again.evidence["runId"] == recovered.evidence["runId"]
+
+    asyncio.run(scenario())
+
+
+def test_sdk_transport_rejects_workflow_with_foreign_server_memo():
+    async def scenario() -> None:
+        async with await WorkflowEnvironment.start_local() as env:
+            workflow = _spec("test-sdk/foreign-" + uuid.uuid4().hex)
+            await env.client.start_workflow(
+                workflow["workflow_type"],
+                workflow["input"],
+                id=workflow["workflow_id"],
+                task_queue=workflow["task_queue"],
+                memo={"acp_operation_id": "sha256:" + "e" * 64},
+            )
+            api = TemporalSDKApi(
+                target_host=env.client.service_client.config.target_host,
+                namespace=env.client.namespace,
+            )
+            with pytest.raises(RuntimeMutationOwnershipUncertain) as denied:
+                await asyncio.to_thread(
+                    TemporalWorkflowClient(api).ensure_workflow, workflow
+                )
+            assert denied.value.observed_operation_id == "sha256:" + "e" * 64
+
+    asyncio.run(scenario())
