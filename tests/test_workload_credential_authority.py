@@ -734,3 +734,45 @@ def test_assertion_subject_must_be_the_canonical_run_subject():
     with pytest.raises(CredentialAuthorityDenied, match="subject"):
         authority.issue(body)
 
+
+
+def test_credential_revoker_cannot_revoke_approval_authority():
+    class StubAuthority:
+        def revoke_approval(self, body):
+            return {"revoked_count": 0}
+
+    token_by_role = {
+        role: "test-service-token-for-" + role + "-0123456789"
+        for role in (
+            "credential.issuer",
+            "credential.introspector",
+            "credential.revoker",
+            "approval.reader",
+            "approval.revoker",
+        )
+    }
+    authenticator = ServiceRoleAuthenticator({
+        role: ServiceRoleAuthenticator.digest_token(token)
+        for role, token in token_by_role.items()
+    })
+    app = WorkloadCredentialWSGI(StubAuthority(), authenticator=authenticator, clock=lambda: 1.0)
+
+    status, _, payload = _invoke_wsgi(
+        app,
+        method="POST",
+        path="/v1/workload-credentials:revoke-approval",
+        token=token_by_role["credential.revoker"],
+        body={"approval_id": "approval-a", "event_id": "evt-a"},
+    )
+    assert status == 403
+    assert payload["error"]["code"] == "service_role_denied"
+
+    status, _, payload = _invoke_wsgi(
+        app,
+        method="POST",
+        path="/v1/workload-credentials:revoke-approval",
+        token=token_by_role["approval.revoker"],
+        body={"approval_id": "approval-a", "event_id": "evt-a"},
+    )
+    assert status == 200
+    assert payload == {"revoked_count": 0}
