@@ -81,9 +81,11 @@ def _scopes(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
 
 
 def _scope_needs_approval(scope: str) -> bool:
-    """Require exact approval unless the scope ends in a known read-only verb."""
-    action = scope.rsplit(":", 1)[-1].casefold()
-    return action not in READ_ONLY_SCOPE_SUFFIXES
+    """Require approval unless a resource:action scope names a read-only verb."""
+    resource, separator, action = scope.rpartition(":")
+    if not separator or not resource.strip() or not action.strip():
+        return True
+    return action.casefold() not in READ_ONLY_SCOPE_SUFFIXES
 
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:
