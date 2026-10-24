@@ -451,3 +451,86 @@ def test_temporal_termination_ownership_denial_is_never_reconciled_as_success():
 
     with pytest.raises(RuntimeMutationOwnershipUncertain):
         client.terminate_workflow(result.resource_ref)
+
+
+class AckOnlyTemporalApi(FakeTemporalApi):
+    def terminate(self, *, workflow_id, reason, **kwargs):
+        self.terminated.append((workflow_id, reason))
+        return {"terminationRequested": True, "workflowId": workflow_id}
+
+
+class AckAndTerminalTemporalApi(AckOnlyTemporalApi):
+    def terminate(self, *, workflow_id, reason, **kwargs):
+        result = super().terminate(workflow_id=workflow_id, reason=reason, **kwargs)
+        self.workflows[workflow_id] = {
+            **self.workflows[workflow_id],
+            "status": "TERMINATED",
+        }
+        return result
+
+
+def test_temporal_terminate_ack_without_postcondition_is_unknown():
+    api = AckOnlyTemporalApi()
+    controller = TemporalWorkflowClient(api)
+    created = controller.ensure_workflow(desired())
+
+    with pytest.raises(RuntimeMutationUncertain, match="not verified"):
+        controller.terminate_workflow(
+            created.resource_ref,
+            expected_operation_id=created.evidence["operationId"],
+            expected_run_id=created.evidence["runId"],
+        )
+    assert api.workflows[created.evidence["workflowId"]]["status"] == "RUNNING"
+
+
+def test_temporal_terminate_ack_requires_exact_terminal_owner_and_run():
+    api = AckAndTerminalTemporalApi()
+    controller = TemporalWorkflowClient(api)
+    created = controller.ensure_workflow(desired())
+
+    verified = controller.terminate_workflow(
+        created.resource_ref,
+        expected_operation_id=created.evidence["operationId"],
+        expected_run_id=created.evidence["runId"],
+    )
+    assert verified["terminated"] is True
+    assert verified["terminationRequested"] is True
+    assert verified["status"] == "TERMINATED"
+    assert verified["verifiedAfterMutation"] is True
+    assert verified["operationId"] == created.evidence["operationId"]
+    assert verified["runId"] == created.evidence["runId"]
+
+
+class AckWithWrongTerminalRun(AckAndTerminalTemporalApi):
+    def terminate(self, *, workflow_id, reason, **kwargs):
+        result = super().terminate(workflow_id=workflow_id, reason=reason, **kwargs)
+        self.workflows[workflow_id]["runId"] = "foreign-run"
+        return result
+
+
+def test_temporal_terminate_ack_does_not_adopt_foreign_terminal_run():
+    api = AckWithWrongTerminalRun()
+    controller = TemporalWorkflowClient(api)
+    created = controller.ensure_workflow(desired())
+
+    with pytest.raises(RuntimeMutationOwnershipUncertain):
+        controller.terminate_workflow(
+            created.resource_ref,
+            expected_operation_id=created.evidence["operationId"],
+            expected_run_id=created.evidence["runId"],
+        )
+
+
+class AckLostButFailedWorkflow(LostAckTerminateApi):
+    def terminate(self, *, workflow_id, reason):
+        self.workflows[workflow_id]["status"] = "FAILED"
+        raise RuntimeMutationUncertain("termination acknowledgement lost")
+
+
+def test_temporal_terminate_lost_ack_does_not_claim_failed_as_compensation():
+    api = AckLostButFailedWorkflow()
+    controller = TemporalWorkflowClient(api)
+    created = controller.ensure_workflow(desired())
+
+    with pytest.raises(RuntimeMutationUncertain):
+        controller.terminate_workflow(created.resource_ref)

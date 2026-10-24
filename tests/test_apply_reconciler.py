@@ -18,7 +18,11 @@ from agent_control_plane.example_adapters import (
 )
 from agent_control_plane.plan import ResolvedReleasePlan
 from agent_control_plane.registry import ProviderRegistry
-from agent_control_plane.runtime_clients import RuntimeMutationOwnershipUncertain
+from agent_control_plane.runtime_clients import (
+    RuntimeApplyResult,
+    RuntimeMutationOwnershipUncertain,
+)
+from agent_control_plane.runtime_executors import TemporalWorkflowExecutor
 from agent_control_plane.tool_adapter import MCPToolAdapter
 
 
@@ -1084,3 +1088,55 @@ def test_ambiguous_apply_ownership_is_recorded_without_claiming_receipt() -> Non
     }
     assert result.error == "temporal ownership ambiguous after lost ACK"
 
+
+
+def test_apply_gate_fails_closed_when_temporal_rollback_only_acknowledged():
+    class AckOnlyWorkflowClient:
+        def ensure_workflow(self, desired):
+            return RuntimeApplyResult(
+                resource_ref="temporal://workflow/ack-only",
+                changed=True,
+                evidence={
+                    "operationId": "sha256:" + "a" * 64,
+                    "runId": "run-ack-only",
+                },
+            )
+
+        def terminate_workflow(
+            self, resource_ref, *, expected_operation_id, expected_run_id
+        ):
+            assert expected_run_id == "run-ack-only"
+            assert expected_operation_id == "sha256:" + "a" * 64
+            return {"terminationRequested": True}
+
+    executors = ExecutorRegistry()
+    for kind, provider in (
+        ("sandbox", "k8s-agent-sandbox"),
+        ("tool", "mcp"),
+        ("harness", "codex"),
+        ("decision", "decision-gateway"),
+    ):
+        executors.register(InMemoryExecutor(kind, provider))
+    executors.register(TemporalWorkflowExecutor(AckOnlyWorkflowClient()))
+
+    result = ApplyReconciler(
+        providers=provider_registry(),
+        executors=executors,
+    ).reconcile(
+        build_plan(),
+        eval_gates=[ROLLBACK_GATE],
+        metrics={"false_automation_rate": 0.20},
+    )
+
+    assert result.phase == "blocked"
+    assert result.error == "ROLLBACK_INCOMPLETE"
+    workflow_rollback = next(
+        item for item in result.rollback_receipts
+        if item.binding_name == "workflow"
+    )
+    assert workflow_rollback.rolled_back is False
+    assert workflow_rollback.evidence["reason"] == "rollback-error"
+    assert any(
+        row["binding"] == "workflow"
+        for row in result.evidence["rollback_errors"]
+    )

@@ -231,6 +231,51 @@ class TemporalWorkflowClient:
             },
         )
 
+    def _verify_terminated(
+        self,
+        *,
+        workflow_id: str,
+        resource_ref: str,
+        expected_operation_id: str | None,
+        expected_run_id: str | None,
+        after_uncertain_ack: bool,
+    ) -> Mapping[str, Any]:
+        """Never equate a transport ACK or unrelated terminal state with rollback."""
+        observed = self.api.describe(workflow_id=workflow_id)
+        if observed is None or _normalized_workflow_status(
+            observed.get("status")
+        ) != "TERMINATED":
+            raise RuntimeMutationUncertain(
+                "Temporal termination postcondition not verified"
+            )
+        observed_operation_id = observed.get("operationId")
+        if (
+            expected_operation_id is not None
+            and observed_operation_id != expected_operation_id
+        ) or (
+            expected_run_id is not None
+            and observed.get("runId") != expected_run_id
+        ):
+            raise RuntimeMutationOwnershipUncertain(
+                "Temporal termination postcondition belongs to a different execution",
+                resource_ref=resource_ref,
+                operation_id=expected_operation_id,
+                observed_operation_id=(
+                    str(observed_operation_id)
+                    if observed_operation_id is not None else None
+                ),
+            )
+        return {
+            "terminated": True,
+            "terminationRequested": True,
+            "workflowId": workflow_id,
+            "status": observed["status"],
+            "runId": observed.get("runId"),
+            "operationId": observed_operation_id,
+            "verifiedAfterMutation": True,
+            "verifiedAfterUncertainMutation": after_uncertain_ack,
+        }
+
     def terminate_workflow(
         self,
         resource_ref: str,
@@ -244,43 +289,39 @@ class TemporalWorkflowClient:
         workflow_id = resource_ref[len(prefix):]
         try:
             if expected_operation_id is not None or expected_run_id is not None:
-                return self.api.terminate(
+                outcome = self.api.terminate(
                     workflow_id=workflow_id,
                     reason="agent control plane compensation",
                     expected_operation_id=expected_operation_id,
                     expected_run_id=expected_run_id,
                 )
-            return self.api.terminate(
-                workflow_id=workflow_id,
-                reason="agent control plane compensation",
-            )
+            else:
+                outcome = self.api.terminate(
+                    workflow_id=workflow_id,
+                    reason="agent control plane compensation",
+                )
         except RuntimeMutationOwnershipUncertain:
-            # Ownership failure is a denial, never a lost ACK to reconcile.
+            # An explicit ownership denial must not be reconciled to success.
             raise
-        except RuntimeMutationUncertain as exc:
-            observed = self.api.describe(workflow_id=workflow_id)
-            if observed is None or not _workflow_is_terminal(
-                observed.get("status")
-            ):
-                # Not found is not evidence that *this* operation terminated
-                # the Workflow. Do not turn unknown provider state into success.
-                raise
-            if (
-                expected_operation_id is not None
-                and observed.get("operationId") != expected_operation_id
-            ) or (
-                expected_run_id is not None
-                and observed.get("runId") != expected_run_id
-            ):
-                raise RuntimeMutationOwnershipUncertain(
-                    "Temporal terminal state belongs to a different operation",
-                    resource_ref=resource_ref,
-                    operation_id=expected_operation_id,
-                    observed_operation_id=observed.get("operationId"),
-                ) from exc
-            return {
-                "terminated": True,
-                "workflowId": workflow_id,
-                "status": observed["status"],
-                "verifiedAfterUncertainMutation": True,
-            }
+        except RuntimeMutationUncertain:
+            # A lost ACK is not success. Query the *specific* execution and
+            # require TERMINATED rather than just any terminal status.
+            return self._verify_terminated(
+                workflow_id=workflow_id,
+                resource_ref=resource_ref,
+                expected_operation_id=expected_operation_id,
+                expected_run_id=expected_run_id,
+                after_uncertain_ack=True,
+            )
+
+        if outcome.get("terminationRequested") is True and outcome.get("terminated") is not True:
+            # The SDK transport returned a mutation ACK, not a completed
+            # postcondition. Re-read server-visible state before compensation.
+            return self._verify_terminated(
+                workflow_id=workflow_id,
+                resource_ref=resource_ref,
+                expected_operation_id=expected_operation_id,
+                expected_run_id=expected_run_id,
+                after_uncertain_ack=False,
+            )
+        return outcome
