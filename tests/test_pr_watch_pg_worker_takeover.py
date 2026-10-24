@@ -24,9 +24,9 @@ from temporalio.api.enums.v1 import EventType  # noqa: E402
 from temporalio.testing import WorkflowEnvironment  # noqa: E402
 from temporalio.worker import Worker  # noqa: E402
 
-from agent_control_plane.runtime_clients import TerminalRuntimeConflict
-from agent_control_plane.temporal_runtime_client import TemporalWorkflowClient
-from agent_control_plane.temporal_sdk_api import TemporalSDKApi
+from agent_control_plane.runtime_clients import TerminalRuntimeConflict  # noqa: E402
+from agent_control_plane.temporal_runtime_client import TemporalWorkflowClient  # noqa: E402
+from agent_control_plane.temporal_sdk_api import TemporalSDKApi  # noqa: E402
 
 from pr_watch_control_bridge import workflow_id  # noqa: E402
 from pr_watch_harness import PullSnapshot  # noqa: E402
