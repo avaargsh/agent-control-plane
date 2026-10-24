@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=2,<3"]
+temporal = ["temporalio>=1.13,<2"]
 pg-pilot = ["psycopg[binary]>=3.2,<4"]
 proof-verify = ["cryptography>=44,<51"]
 proof-ledger = ["cryptography>=44,<51", "psycopg[binary]>=3.2,<4"]
