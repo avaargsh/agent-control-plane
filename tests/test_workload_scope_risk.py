@@ -93,7 +93,7 @@ class _RunAuthority:
         return self.binding
 
 
-def _build_issuer(scope):
+def _build_issuer(scope, *, approval_id=None):
     now = 1_800_000_000.0
     claims = {
         "sub": "workload-subject",
@@ -113,7 +113,7 @@ def _build_issuer(scope):
         "requested_ttl_seconds": 60,
         "allowed_scopes": [scope],
         "scopes": [scope],
-        "approval_id": None,
+        "approval_id": approval_id,
         "exp": now + 120,
     }
     binding = CredentialBindingRecord(
@@ -152,6 +152,7 @@ def _build_issuer(scope):
         "scopes": [scope],
         "requested_ttl_seconds": 60,
         "workload_assertion": "signed-test-assertion",
+        **({"approval_id": approval_id} if approval_id is not None else {}),
     }
     return authority, store, body
 
@@ -181,11 +182,9 @@ def test_explicit_read_only_scope_can_be_issued_without_approval():
 
 
 def test_unknown_scope_with_unresolvable_approval_is_not_issued():
-    authority, store, body = _build_issuer("payments:transfer")
-    body["approval_id"] = "missing-approval"
-    # Keep the test assertion aligned with the signed claims, so the failure
-    # occurs at the authoritative grant lookup rather than assertion binding.
-    authority._assertions.claims["approval_id"] = "missing-approval"
+    authority, store, body = _build_issuer(
+        "payments:transfer", approval_id="missing-approval"
+    )
 
     with pytest.raises(
         CredentialAuthorityDenied,
