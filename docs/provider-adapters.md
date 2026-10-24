@@ -104,11 +104,26 @@ authenticated TLS transport, proper async client lifecycle, and approval
 before any provider mutation.
 
 Termination is *only* a transport request: it must be entered through an
-already-authorized ACP exact-plan boundary. The adapter first requires
-server-visible ACP ownership metadata and then targets the observed
-Temporal Run ID; it returns `terminationRequested`, not an independently
-verified outcome. Provider ACK/lost ACK remains subject to reconciliation.
-Do not use this adapter directly as a public unauthenticated mutation API.
+already-authorized ACP exact-plan boundary. The SDK transport now requires
+both `expected_operation_id` and `expected_run_id` from the original
+execution receipt and compares them to a fresh Temporal description.
+Missing, foreign or terminal targets fail closed; no termination RPC is sent.
+The normal Temporal executor forwards these identities from its apply receipt.
+For an explicit controller operation, use:
+```python
+controller.terminate_workflow(
+    result.resource_ref,
+    expected_operation_id=result.evidence["operationId"],
+    expected_run_id=result.evidence["runId"],
+)
+```
+The adapter pins the termination RPC to that exact Temporal Run ID and
+returns `terminationRequested`, **not** independently verified completion.
+An ambiguous ACK and missing follow-up observation stay UNKNOWN; an explicit
+ownership denial can never be reconciled into success. These IDs are
+idempotency/ownership fences, not authentication credentials. External ACP
+authorization is still required before invoking the transport. Do not expose
+this adapter directly as a public mutation API.
 
 The focused integration test starts the Temporal SDK local test server (not
 Temporal Cloud or a production server):
