@@ -24,12 +24,13 @@ def _resolve_context_projection_policies(
     refs: tuple[str, ...],
     policies: list[dict[str, Any]] | None,
 ) -> dict[str, dict[str, Any]]:
-    if len(set(refs)) != len(refs):
-        seen: set[str] = set()
-        duplicate = next(ref for ref in refs if ref in seen or seen.add(ref))
-        raise ReleaseCompileError(
-            f"duplicate contextProjectionPolicyRef: {duplicate}"
-        )
+    seen: set[str] = set()
+    for ref in refs:
+        if ref in seen:
+            raise ReleaseCompileError(
+                f"duplicate contextProjectionPolicyRef: {ref}"
+            )
+        seen.add(ref)
 
     available: dict[str, dict[str, Any]] = {}
     for policy in policies or []:
@@ -80,7 +81,18 @@ def compile_release_plan(
     spec = release["spec"]
     resolved = resolve_bindings(release, bindings)
     capability_refs = tuple(spec.get("capabilityIntentRefs", []))
-    context_policy_refs = tuple(spec.get("contextProjectionPolicyRefs", []))
+    raw_context_policy_refs = spec.get("contextProjectionPolicyRefs", [])
+    if (
+        not isinstance(raw_context_policy_refs, list)
+        or any(
+            not isinstance(ref, str) or not ref
+            for ref in raw_context_policy_refs
+        )
+    ):
+        raise ReleaseCompileError(
+            "contextProjectionPolicyRefs must be a list of non-empty strings"
+        )
+    context_policy_refs = tuple(raw_context_policy_refs)
     resolved_context_policies = _resolve_context_projection_policies(
         context_policy_refs,
         context_projection_policies,
