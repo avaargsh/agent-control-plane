@@ -10,7 +10,13 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 
-SENSITIVE_SCOPE_SUFFIXES = frozenset({"write", "delete", "admin", "mutate"})
+# Scope names use the final colon-delimited component as the action verb.
+# Only this explicit read-only allowlist is approval-exempt. Unknown verbs must
+# require an exact approval; maintaining a denylist of write verbs is unsafe
+# because new verbs such as "transfer", "create", or "execute" would fail open.
+READ_ONLY_SCOPE_SUFFIXES = frozenset(
+    {"read", "list", "get", "describe", "inspect"}
+)
 
 
 class CredentialAuthorityError(RuntimeError):
@@ -75,7 +81,17 @@ def _scopes(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
 
 
 def _scope_needs_approval(scope: str) -> bool:
-    return scope.rsplit(":", 1)[-1].lower() in SENSITIVE_SCOPE_SUFFIXES
+    """Require approval unless a canonical resource:action scope is read-only."""
+    resource, separator, action = scope.rpartition(":")
+    if (
+        not separator
+        or not resource.strip()
+        or not action.strip()
+        or resource != resource.strip()
+        or action != action.strip()
+    ):
+        return True
+    return action.casefold() not in READ_ONLY_SCOPE_SUFFIXES
 
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:
@@ -964,7 +980,7 @@ class WorkloadCredentialAuthority:
 
         needs_approval = any(_scope_needs_approval(scope) for scope in requested_scopes)
         if needs_approval != (approval_id is not None):
-            raise CredentialAuthorityDenied("sensitive credentials require an exact approval reference")
+            raise CredentialAuthorityDenied("sensitive credential scopes require a matching scope-approval reference")
         grant = None
         if approval_id is not None:
             grant = self._store.get_approval(approval_id)
