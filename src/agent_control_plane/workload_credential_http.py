@@ -166,7 +166,7 @@ class WorkloadCredentialWSGI:
             role = self.ROLE_REVOKER
             operation = "revoke_run"
         elif method == "POST" and path == "/v1/workload-credentials:revoke-approval":
-            role = self.ROLE_REVOKER
+            role = self.ROLE_APPROVAL_REVOKER
             operation = "revoke_approval"
         elif method == "POST" and path == "/v1/workload-credential-requests:lookup":
             role = self.ROLE_ISSUER
