@@ -4,7 +4,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Any, Mapping
 
 from .workload_credential_http import ServiceRoleAuthenticator, WorkloadCredentialWSGI
 from .workload_credentials import (
@@ -23,11 +23,8 @@ _ROLE_ENV = {
     "approval.revoker": "ACP_APPROVAL_REVOKER_TOKEN",
 }
 _DEFAULT_ASSERTION_AUDIENCE = "urn:acp:workload-credential-authority"
-
-
-
-def _unique_json_object(pairs):
-    result = {}
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
             raise ValueError("JSON configuration object contains a duplicate key")
@@ -94,21 +91,21 @@ class WorkloadCredentialServiceConfig:
 
         assertion_issuer = required("ACP_WORKLOAD_ASSERTION_ISSUER")
         if assertion_issuer != assertion_issuer.strip():
-            raise ValueError("ACP_WORKLOAD_ASSERTION_ISSUER cannot contain surrounding whitespace")
+            raise ValueError("assertion issuer setting cannot contain surrounding whitespace")
 
         audience_raw = env.get(
             "ACP_WORKLOAD_ASSERTION_AUDIENCE",
             _DEFAULT_ASSERTION_AUDIENCE,
         )
         if not isinstance(audience_raw, str) or not audience_raw.strip():
-            raise ValueError("ACP_WORKLOAD_ASSERTION_AUDIENCE must be non-empty")
+            raise ValueError("assertion audience setting must be non-empty")
         if audience_raw != audience_raw.strip():
-            raise ValueError("ACP_WORKLOAD_ASSERTION_AUDIENCE cannot contain surrounding whitespace")
+            raise ValueError("assertion audience setting cannot contain surrounding whitespace")
         assertion_audience = audience_raw
 
         runtime_identity_base_url = required("ACP_RUNTIME_IDENTITY_BASE_URL")
         if runtime_identity_base_url != runtime_identity_base_url.strip():
-            raise ValueError("ACP_RUNTIME_IDENTITY_BASE_URL cannot contain surrounding whitespace")
+            raise ValueError("Runtime identity base URL cannot contain surrounding whitespace")
         runtime_identity_service_token = required("ACP_RUNTIME_IDENTITY_SERVICE_TOKEN")
         role_tokens = {role: required(env_name) for role, env_name in _ROLE_ENV.items()}
         all_service_tokens = [*role_tokens.values(), runtime_identity_service_token]
@@ -121,7 +118,7 @@ class WorkloadCredentialServiceConfig:
 
         database_url = required("ACP_WORKLOAD_CREDENTIAL_DATABASE_URL")
         if database_url != database_url.strip():
-            raise ValueError("ACP_WORKLOAD_CREDENTIAL_DATABASE_URL cannot contain surrounding whitespace")
+            raise ValueError("credential authority database URL cannot contain surrounding whitespace")
 
         timeout_raw = env.get("ACP_RUNTIME_IDENTITY_TIMEOUT_SECONDS", "3")
         try:
