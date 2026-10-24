@@ -7,7 +7,11 @@ import json
 import secrets
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Mapping, Protocol, Sequence
+
+from .state_transition_protocol import ActionIntent, ProtocolViolation
+from .transition_approval import ApprovalDecision, SignedTransitionApproval, TransitionApproval
 
 
 SENSITIVE_SCOPE_SUFFIXES = frozenset({"write", "delete", "admin", "mutate"})
@@ -75,7 +79,10 @@ def _scopes(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
 
 
 def _scope_needs_approval(scope: str) -> bool:
-    return scope.rsplit(":", 1)[-1].lower() in SENSITIVE_SCOPE_SUFFIXES
+    # Fail closed for unknown scope classes: only explicitly recognized read
+    # scopes avoid human approval. New write-capable verbs cannot slip through
+    # merely because they were missing from an allowlist of sensitive suffixes.
+    return scope.rsplit(":", 1)[-1].lower() not in {"read", "list", "metadata"}
 
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:
@@ -123,6 +130,10 @@ class ApprovalGrantRecord:
     expires_at: float
     state: str
     version: int
+    approval_hash: str
+    action_hash: str
+    transition_hash: str
+    policy_decision_hash: str
 
 
 @dataclass(frozen=True)
@@ -136,7 +147,7 @@ class CanonicalRunBinding:
     sandbox_revision: int
     workspace_ref: str
     status: str
-    session_status: str = "ACTIVE"
+    session_status: str
 
 
 class WorkloadAssertionVerifier(Protocol):
@@ -187,10 +198,15 @@ class CredentialAuthorityStore(Protocol):
     ) -> Mapping[str, Any] | None:
         ...
 
-    def revoke_credential(self, credential_id: str, *, now: float) -> bool:
+    def revoke_credential(
+        self, credential_id: str, *, event_id: str, actor_role: str, now: float
+    ) -> bool:
         ...
 
-    def revoke_run(self, run_id: str, *, sandbox_revision: int, now: float) -> int:
+    def revoke_run(
+        self, run_id: str, *, sandbox_revision: int, event_id: str,
+        actor_role: str, now: float
+    ) -> int:
         ...
 
     def revoke_approval(
@@ -198,6 +214,7 @@ class CredentialAuthorityStore(Protocol):
         approval_id: str,
         *,
         event_id: str,
+        actor_role: str,
         now: float,
     ) -> tuple[int, int]:
         ...
@@ -380,6 +397,10 @@ class PostgresCredentialAuthorityStore:
             expires_at=float(row["expires_at"]),
             state=row["state"],
             version=int(row["version"]),
+            approval_hash=row["approval_hash"],
+            action_hash=row["action_hash"],
+            transition_hash=row["transition_hash"],
+            policy_decision_hash=row["policy_decision_hash"],
         )
 
     def get_binding(self, binding_id: str) -> CredentialBindingRecord | None:
@@ -401,7 +422,8 @@ class PostgresCredentialAuthorityStore:
                 """
                 SELECT approval_id, tenant_id, agent_id, session_id, run_id,
                        binding_id, audience, scopes, approved_by, issued_at,
-                       expires_at, state, version
+                       expires_at, state, version, approval_hash, action_hash,
+                       transition_hash, policy_decision_hash
                 FROM public.acp_workload_approval_grants
                 WHERE approval_id = %s
                 """,
@@ -451,8 +473,8 @@ class PostgresCredentialAuthorityStore:
             ).fetchone()
         return self._binding(row)
 
-    def register_approval(self, grant: ApprovalGrantRecord) -> ApprovalGrantRecord:
-        """Trusted application-layer hook after the human/policy approval commits."""
+    def _insert_verified_approval(self, grant: ApprovalGrantRecord) -> ApprovalGrantRecord:
+        """Persist only grants constructed by the signed-transition adapter."""
         if grant.state != "ACTIVE" or grant.version != 1:
             raise ValueError("new approval grants must start ACTIVE at version 1")
         if grant.expires_at <= grant.issued_at:
@@ -463,18 +485,22 @@ class PostgresCredentialAuthorityStore:
                 INSERT INTO public.acp_workload_approval_grants
                     (approval_id, tenant_id, agent_id, session_id, run_id,
                      binding_id, audience, scopes, approved_by, issued_at,
-                     expires_at, state, version)
+                     expires_at, state, version, approval_hash, action_hash,
+                    transition_hash, policy_decision_hash)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb,
-                        %s, %s, %s, 'ACTIVE', 1)
+                        %s, %s, %s, 'ACTIVE', 1, %s, %s, %s, %s)
                 RETURNING approval_id, tenant_id, agent_id, session_id, run_id,
                           binding_id, audience, scopes, approved_by, issued_at,
-                          expires_at, state, version
+                          expires_at, state, version, approval_hash, action_hash,
+                          transition_hash, policy_decision_hash
                 """,
                 (
                     grant.approval_id, grant.tenant_id, grant.agent_id,
                     grant.session_id, grant.run_id, grant.binding_id,
                     grant.audience, json.dumps(list(grant.scopes)),
                     grant.approved_by, grant.issued_at, grant.expires_at,
+                    grant.approval_hash, grant.action_hash, grant.transition_hash,
+                    grant.policy_decision_hash,
                 ),
             ).fetchone()
         return self._approval(row)
@@ -658,55 +684,150 @@ class PostgresCredentialAuthorityStore:
             "expires_at": float(row["expires_at"]),
         }
 
-    def revoke_credential(self, credential_id: str, *, now: float) -> bool:
+    def revoke_credential(
+        self,
+        credential_id: str,
+        *,
+        event_id: str,
+        actor_role: str,
+        now: float,
+    ) -> bool:
+        if not event_id.strip() or not actor_role.strip():
+            raise ValueError("stable event ID and authenticated actor role are required")
+        request_digest = hashlib.sha256(
+            _canonical_json({"resource_type": "credential", "resource_id": credential_id})
+        ).hexdigest()
         with self._connect() as conn:
-            row = conn.execute(
+            prior = conn.execute(
+                """
+                SELECT resource_type, resource_id, request_digest, revoked_count
+                FROM public.acp_workload_credential_revocations
+                WHERE event_id = %s FOR UPDATE
+                """,
+                (event_id,),
+            ).fetchone()
+            if prior is not None:
+                if (
+                    prior["resource_type"] != "credential"
+                    or prior["resource_id"] != credential_id
+                    or prior["request_digest"] != request_digest
+                ):
+                    raise CredentialAuthorityConflict("revocation event ID was reused for another operation")
+                return int(prior["revoked_count"]) > 0
+
+            changed = conn.execute(
                 """
                 UPDATE public.acp_workload_credentials
-                SET revoked_at = COALESCE(revoked_at, %s)
-                WHERE credential_id = %s
+                SET revoked_at = %s, revoke_event_id = %s, revoked_by = %s
+                WHERE credential_id = %s AND revoked_at IS NULL
                 RETURNING credential_id
                 """,
-                (now, credential_id),
+                (now, event_id, actor_role, credential_id),
             ).fetchone()
-        return row is not None
+            count = 1 if changed is not None else 0
+            conn.execute(
+                """
+                INSERT INTO public.acp_workload_credential_revocations
+                    (event_id, resource_type, resource_id, actor_role,
+                     request_digest, revoked_count, approval_version, created_at)
+                VALUES (%s, 'credential', %s, %s, %s, %s, NULL, %s)
+                """,
+                (event_id, credential_id, actor_role, request_digest, count, now),
+            )
+        return count > 0
 
-    def revoke_run(self, run_id: str, *, sandbox_revision: int, now: float) -> int:
+    def revoke_run(
+        self,
+        run_id: str,
+        *,
+        sandbox_revision: int,
+        event_id: str,
+        actor_role: str,
+        now: float,
+    ) -> int:
+        if not event_id.strip() or not actor_role.strip():
+            raise ValueError("stable event ID and authenticated actor role are required")
+        request_digest = hashlib.sha256(
+            _canonical_json({
+                "resource_type": "run",
+                "resource_id": run_id,
+                "sandbox_revision": sandbox_revision,
+            })
+        ).hexdigest()
         with self._connect() as conn:
+            prior = conn.execute(
+                """
+                SELECT resource_type, resource_id, request_digest, revoked_count
+                FROM public.acp_workload_credential_revocations
+                WHERE event_id = %s FOR UPDATE
+                """,
+                (event_id,),
+            ).fetchone()
+            if prior is not None:
+                if (
+                    prior["resource_type"] != "run"
+                    or prior["resource_id"] != run_id
+                    or prior["request_digest"] != request_digest
+                ):
+                    raise CredentialAuthorityConflict("revocation event ID was reused for another operation")
+                return int(prior["revoked_count"])
+
             rows = conn.execute(
                 """
                 UPDATE public.acp_workload_credentials
-                SET revoked_at = %s
+                SET revoked_at = %s, revoke_event_id = %s, revoked_by = %s
                 WHERE run_id = %s AND sandbox_revision <= %s
                   AND revoked_at IS NULL
                 RETURNING credential_id
                 """,
-                (now, run_id, sandbox_revision),
+                (now, event_id, actor_role, run_id, sandbox_revision),
             ).fetchall()
-        return len(rows)
+            count = len(rows)
+            conn.execute(
+                """
+                INSERT INTO public.acp_workload_credential_revocations
+                    (event_id, resource_type, resource_id, actor_role,
+                     request_digest, revoked_count, approval_version, created_at)
+                VALUES (%s, 'run', %s, %s, %s, %s, NULL, %s)
+                """,
+                (event_id, run_id, actor_role, request_digest, count, now),
+            )
+        return count
 
     def revoke_approval(
         self,
         approval_id: str,
         *,
         event_id: str,
+        actor_role: str,
         now: float,
     ) -> tuple[int, int]:
-        if not event_id.strip():
-            raise ValueError("stable approval revocation event_id is required")
+        if not event_id.strip() or not actor_role.strip():
+            raise ValueError("stable event ID and authenticated actor role are required")
+        request_digest = hashlib.sha256(
+            _canonical_json({"resource_type": "approval", "resource_id": approval_id})
+        ).hexdigest()
         with self._connect() as conn:
-            prior = conn.execute(
+            prior_operation = conn.execute(
                 """
-                SELECT approval_id, approval_version, revoked_count
-                FROM public.acp_workload_approval_revocation_events
+                SELECT resource_type, resource_id, request_digest,
+                       revoked_count, approval_version
+                FROM public.acp_workload_credential_revocations
                 WHERE event_id = %s FOR UPDATE
                 """,
                 (event_id,),
             ).fetchone()
-            if prior is not None:
-                if prior["approval_id"] != approval_id:
-                    raise CredentialAuthorityConflict("revocation event ID was reused for another approval")
-                return int(prior["approval_version"]), int(prior["revoked_count"])
+            if prior_operation is not None:
+                if (
+                    prior_operation["resource_type"] != "approval"
+                    or prior_operation["resource_id"] != approval_id
+                    or prior_operation["request_digest"] != request_digest
+                ):
+                    raise CredentialAuthorityConflict("revocation event ID was reused for another operation")
+                return (
+                    int(prior_operation["approval_version"] or 0),
+                    int(prior_operation["revoked_count"]),
+                )
 
             approval = conn.execute(
                 """
@@ -733,20 +854,30 @@ class PostgresCredentialAuthorityStore:
                 """
                 UPDATE public.acp_workload_credentials
                 SET revoked_at = COALESCE(revoked_at, %s),
-                    revoke_event_id = COALESCE(revoke_event_id, %s)
+                    revoke_event_id = COALESCE(revoke_event_id, %s),
+                    revoked_by = COALESCE(revoked_by, %s)
                 WHERE approval_id = %s AND revoked_at IS NULL
                 RETURNING credential_id
                 """,
-                (now, event_id, approval_id),
+                (now, event_id, actor_role, approval_id),
             ).fetchall()
             count = len(updated)
             conn.execute(
                 """
-                INSERT INTO public.acp_workload_approval_revocation_events
-                    (event_id, approval_id, approval_version, revoked_count, created_at)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO public.acp_workload_credential_revocations
+                    (event_id, resource_type, resource_id, actor_role,
+                     request_digest, revoked_count, approval_version, created_at)
+                VALUES (%s, 'approval', %s, %s, %s, %s, %s, %s)
                 """,
-                (event_id, approval_id, version, count, now),
+                (event_id, approval_id, actor_role, request_digest, count, version, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO public.acp_workload_approval_revocation_events
+                    (event_id, approval_id, approval_version, revoked_count, actor_role, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (event_id, approval_id, version, count, actor_role, now),
             )
             conn.execute(
                 """
@@ -847,6 +978,148 @@ class PostgresCredentialAuthorityStore:
         return row is not None
 
 
+class CredentialApprovalVerifier(Protocol):
+    """Verifies the existing ACP signed transition approval contract."""
+
+    def verify(
+        self,
+        signed: SignedTransitionApproval,
+        *,
+        now: datetime,
+    ) -> TransitionApproval:
+        ...
+
+
+def register_credential_approval_from_transition(
+    *,
+    store: PostgresCredentialAuthorityStore,
+    run_authority: RunAuthorityReader,
+    signed_approval: SignedTransitionApproval,
+    approval_verifier: CredentialApprovalVerifier,
+    action: ActionIntent,
+    now: datetime,
+) -> ApprovalGrantRecord:
+    """Project a verified ACP transition approval into the credential authority.
+
+    The signed ActionIntent itself must be specifically about a workload
+    credential issuance and carry every identity/scope field. This adapter is
+    called after the ACP's existing approval decision has been committed; the
+    approval table is a versioned credential-authority projection, not a second
+    place where an agent can create an approval. No HTTP route exposes this
+    function.
+    """
+    if (
+        not isinstance(now, datetime)
+        or now.tzinfo is None
+        or now.utcoffset() is None
+    ):
+        raise CredentialAuthorityProtocolError("approval registration time must be timezone-aware")
+    action.verify()
+    approval = approval_verifier.verify(signed_approval, now=now)
+    if approval.decision is not ApprovalDecision.APPROVE:
+        raise CredentialAuthorityDenied("credential issuance requires an APPROVE decision")
+    if (
+        action.provider != "agent-control-plane"
+        or action.operation != "issue_workload_credential"
+        or approval.action_hash != action.action_hash
+        or approval.transition_hash != action.transition_hash
+        or not approval.approval_hash.startswith("sha256:")
+        or not approval.policy_decision_hash.startswith("sha256:")
+    ):
+        raise CredentialAuthorityDenied("signed approval is not for this exact credential action")
+
+    params = action.parameters
+    required = (
+        "tenant_id",
+        "agent_id",
+        "release_id",
+        "session_id",
+        "run_id",
+        "sandbox_id",
+        "sandbox_revision",
+        "workspace_ref",
+        "binding_id",
+        "capability",
+        "audience",
+        "scopes",
+        "execution_principal_type",
+        "execution_principal_subject",
+    )
+    for key in required:
+        if key not in params:
+            raise CredentialAuthorityProtocolError(f"signed credential action omits {key}")
+
+    text_fields = required[:6] + required[7:8] + required[8:9] + required[9:11] + required[12:14]
+    if any(not isinstance(params[key], str) or not params[key].strip() for key in text_fields):
+        raise CredentialAuthorityProtocolError("signed credential action contains an empty identity field")
+    if type(params["sandbox_revision"]) is not int or params["sandbox_revision"] <= 0:
+        raise CredentialAuthorityProtocolError("signed sandbox revision must be positive")
+    if not isinstance(params["scopes"], list) or not params["scopes"] or any(
+        not isinstance(scope, str) or not scope.strip() for scope in params["scopes"]
+    ) or len(set(params["scopes"])) != len(params["scopes"]):
+        raise CredentialAuthorityProtocolError("signed credential scopes are invalid")
+    scopes = tuple(sorted(params["scopes"]))
+    if not any(_scope_needs_approval(scope) for scope in scopes):
+        raise CredentialAuthorityDenied("approval projection is only for approval-gated scopes")
+    if (
+        approval.execution_principal.type != params["execution_principal_type"]
+        or approval.execution_principal.subject != params["execution_principal_subject"]
+    ):
+        raise CredentialAuthorityDenied("approval execution principal does not match the signed action")
+
+    try:
+        canonical = run_authority.get_run_binding(params["run_id"])
+    except CredentialAuthorityError:
+        raise
+    except Exception:
+        raise CredentialAuthorityUnavailable("canonical Run authority is unavailable") from None
+    expected = {
+        "tenant_id": canonical.tenant_id,
+        "agent_id": canonical.agent_id,
+        "release_id": canonical.release_id,
+        "session_id": canonical.session_id,
+        "run_id": canonical.run_id,
+        "sandbox_id": canonical.sandbox_id,
+        "sandbox_revision": canonical.sandbox_revision,
+        "workspace_ref": canonical.workspace_ref,
+    }
+    if any(params[key] != value for key, value in expected.items()):
+        raise CredentialAuthorityDenied("signed approval target differs from canonical Run binding")
+    if canonical.status.lower() != "running" or canonical.session_status.lower() != "active":
+        raise CredentialAuthorityDenied("credential approval requires an active Session and running Run")
+
+    binding = store.get_binding(params["binding_id"])
+    if (
+        binding is None
+        or not binding.active
+        or binding.capability != params["capability"]
+        or binding.audience != params["audience"]
+        or set(scopes) - set(binding.allowed_scopes)
+    ):
+        raise CredentialAuthorityDenied("signed approval target is outside the current credential binding")
+
+    grant = ApprovalGrantRecord(
+        approval_id=approval.approval_id,
+        tenant_id=canonical.tenant_id,
+        agent_id=canonical.agent_id,
+        session_id=canonical.session_id,
+        run_id=canonical.run_id,
+        binding_id=binding.binding_id,
+        audience=binding.audience,
+        scopes=scopes,
+        approved_by=f"{approval.approver.type}:{approval.approver.subject}",
+        issued_at=approval.issued_at.timestamp(),
+        expires_at=approval.expires_at.timestamp(),
+        state="ACTIVE",
+        version=1,
+        approval_hash=approval.approval_hash,
+        action_hash=approval.action_hash,
+        transition_hash=approval.transition_hash,
+        policy_decision_hash=approval.policy_decision_hash,
+    )
+    return store._insert_verified_approval(grant)
+
+
 class WorkloadCredentialAuthority:
     """Fail-closed credential issuer/introspector backed by operator-owned state."""
 
@@ -881,6 +1154,8 @@ class WorkloadCredentialAuthority:
             or canonical.session_status.lower() != "active"
         ):
             raise CredentialAuthorityDenied("credentials require a running Run in an active Session")
+        if claims.get("sub") != f"run:{canonical.run_id}":
+            raise CredentialAuthorityDenied("workload subject does not match canonical Run")
         expected = {
             "tenant_id": canonical.tenant_id,
             "agent_id": canonical.agent_id,
@@ -958,6 +1233,8 @@ class WorkloadCredentialAuthority:
             canonical = self._runs.get_run_binding(claims["run_id"])
         except CredentialAuthorityError:
             raise
+        except LookupError:
+            raise CredentialAuthorityDenied("canonical Run does not exist") from None
         except Exception:
             raise CredentialAuthorityUnavailable("canonical Run authority is unavailable") from None
         self._assert_current_run(claims, canonical, require_running=True)
@@ -1091,11 +1368,15 @@ class WorkloadCredentialAuthority:
 
         try:
             canonical = self._runs.get_run_binding(record["run_id"])
-        except CredentialAuthorityNotFound:
+        except LookupError:
             return {"credential": {"active": False}}
         except Exception:
-            raise CredentialAuthorityUnavailable("canonical Run authority is unavailable") from None
+            # Introspection is a boolean authorization boundary. A missing or
+            # unavailable canonical Runtime source must never preserve an old
+            # permit; callers receive inactive instead of a fail-open fallback.
+            return {"credential": {"active": False}}
         claims = {
+            "sub": record["subject"],
             "tenant_id": record["tenant_id"],
             "agent_id": record["agent_id"],
             "release_id": record["release_id"],
@@ -1142,13 +1423,22 @@ class WorkloadCredentialAuthority:
 
     def revoke_credential(self, body: Mapping[str, Any]) -> Mapping[str, Any]:
         credential_id = _string(body, "credential_id")
+        event_id = _string(body, "event_id")
+        actor_role = _string(body, "_authenticated_service_role")
         return {
-            "revoked": self._store.revoke_credential(credential_id, now=self._clock())
+            "revoked": self._store.revoke_credential(
+                credential_id,
+                event_id=event_id,
+                actor_role=actor_role,
+                now=self._clock(),
+            )
         }
 
     def revoke_run(self, body: Mapping[str, Any]) -> Mapping[str, Any]:
         run_id = _string(body, "run_id")
         sandbox_revision = _positive_int(body, "sandbox_revision")
+        event_id = _string(body, "event_id")
+        actor_role = _string(body, "_authenticated_service_role")
         try:
             canonical = self._runs.get_run_binding(run_id)
         except CredentialAuthorityError:
@@ -1161,6 +1451,8 @@ class WorkloadCredentialAuthority:
             "revoked_count": self._store.revoke_run(
                 run_id,
                 sandbox_revision=sandbox_revision,
+                event_id=event_id,
+                actor_role=actor_role,
                 now=self._clock(),
             )
         }
@@ -1168,9 +1460,11 @@ class WorkloadCredentialAuthority:
     def revoke_approval(self, body: Mapping[str, Any]) -> Mapping[str, Any]:
         approval_id = _string(body, "approval_id")
         event_id = _string(body, "event_id")
+        actor_role = _string(body, "_authenticated_service_role")
         _, count = self._store.revoke_approval(
             approval_id,
             event_id=event_id,
+            actor_role=actor_role,
             now=self._clock(),
         )
         return {"revoked_count": count}
@@ -1179,8 +1473,10 @@ class WorkloadCredentialAuthority:
         grant = self._store.get_approval(approval_id)
         if grant is None:
             raise CredentialAuthorityNotFound("approval does not exist")
-        if grant.state != "ACTIVE" or grant.expires_at <= self._clock():
+        if grant.state != "ACTIVE":
             return {"state": grant.state, "version": grant.version}
+        if grant.expires_at <= self._clock():
+            return {"state": "EXPIRED", "version": grant.version}
         return {
             "state": "ACTIVE",
             "version": grant.version,
@@ -1203,9 +1499,11 @@ class WorkloadCredentialAuthority:
         self, approval_id: str, body: Mapping[str, Any]
     ) -> Mapping[str, Any]:
         event_id = _string(body, "event_id")
+        actor_role = _string(body, "_authenticated_service_role")
         version, _ = self._store.revoke_approval(
             approval_id,
             event_id=event_id,
+            actor_role=actor_role,
             now=self._clock(),
         )
         return {"state": "REVOKED", "version": version}

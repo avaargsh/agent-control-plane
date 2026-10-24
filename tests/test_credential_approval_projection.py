@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -59,13 +60,7 @@ class FakeApprovalStore:
         return grant
 
 
-def build_signed_credential_approval(
-    *,
-    canonical_run=None,
-    authority_run=None,
-    params_override=None,
-    decision=ApprovalDecision.APPROVE,
-):
+def build_signed_credential_approval(*, canonical_run=None, authority_run=None, params_override=None):
     fixture = build_transition()
     run = canonical_run or CanonicalRunBinding(
         tenant_id="tenant-a",
@@ -133,7 +128,7 @@ def build_signed_credential_approval(
     approval = TransitionApproval.seal(
         approval_id="approval-credential-001",
         approver=APPROVER,
-        decision=decision,
+        decision=ApprovalDecision.APPROVE,
         transition=fixture["transition"],
         action=action,
         policy_input=policy_input,
@@ -233,6 +228,8 @@ def test_signed_approval_projection_rejects_inactive_session_and_stale_sandbox_r
         status="RUNNING",
         session_status="ACTIVE",
     )
+    # Sign an approval for the original sandbox, then change only the live
+    # authority result. The stale signed target must not be projected.
     store, reader, action, signed, _ = build_signed_credential_approval(authority_run=current_run)
     with pytest.raises(CredentialAuthorityDenied, match="canonical Run binding"):
         register_credential_approval_from_transition(
@@ -246,14 +243,47 @@ def test_signed_approval_projection_rejects_inactive_session_and_stale_sandbox_r
 
 
 def test_non_approve_signed_decision_cannot_be_projected():
-    store, reader, action, signed, _ = build_signed_credential_approval(
-        decision=ApprovalDecision.DENY,
+    store, reader, action, signed, _ = build_signed_credential_approval()
+    approval = replace(signed.approval, decision=ApprovalDecision.DENY, approval_hash="")
+    # Re-seal the changed decision through the canonical constructor to ensure
+    # the denial is semantic rather than merely a bad signature.
+    fixture = build_transition()
+    policy_input = TransitionPolicyInput.seal(
+        policy_version=approval.policy_version,
+        evidence=fixture["evidence"],
+        transition=fixture["transition"],
+        action=action,
+        principal=Principal(type="agent", subject="agent-a"),
+        context={
+            "operation": "issue_workload_credential",
+            "run_id": "run-a",
+            "binding_id": "github-api",
+            "audience": "https://api.github.com",
+            "scopes": ["github:write"],
+        },
     )
+    policy_decision = PolicyDecisionRecord.seal(
+        policy_input=policy_input,
+        evaluation=PolicyEvaluation(effect=PolicyEffect.PERMIT),
+    )
+    deny_approval = TransitionApproval.seal(
+        approval_id="approval-credential-denied",
+        approver=APPROVER,
+        decision=ApprovalDecision.DENY,
+        transition=fixture["transition"],
+        action=action,
+        policy_input=policy_input,
+        policy_decision=policy_decision,
+        issued_at=NOW,
+        expires_at=NOW + timedelta(minutes=5),
+        reason="Denied",
+    )
+    deny_signed = SignedTransitionApproval.sign(deny_approval, key=KEY)
     with pytest.raises(CredentialAuthorityDenied, match="APPROVE"):
         register_credential_approval_from_transition(
             store=store,
             run_authority=reader,
-            signed_approval=signed,
+            signed_approval=deny_signed,
             approval_verifier=VERIFIER,
             action=action,
             now=NOW + timedelta(seconds=1),
