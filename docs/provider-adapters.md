@@ -95,10 +95,13 @@ RUNNING workflows can be attached only when the Memo matches. SDK
 `WorkflowIDReusePolicy.REJECT_DUPLICATE` prevent a duplicate or terminal
 Workflow ID from silently starting a replacement.
 
-This simple reference uses a fresh SDK connection per operation because the
-ACP API is synchronous. Do not call it on an asyncio event-loop thread
-(use `asyncio.to_thread`), and do not deploy it as a high-throughput shared
-transport without a proper async lifecycle.
+This simple reference is **loopback-only** and intentionally has no remote
+TLS/authentication configuration: non-loopback Temporal targets fail closed.
+It uses a fresh SDK connection per operation because the ACP API is
+synchronous. Do not call it on an asyncio event-loop thread
+(use `asyncio.to_thread`). Production connectivity requires a separate,
+authenticated TLS transport, proper async client lifecycle, and approval
+before any provider mutation.
 
 Termination is *only* a transport request: it must be entered through an
 already-authorized ACP exact-plan boundary. The adapter first requires
