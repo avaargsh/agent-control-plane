@@ -10,7 +10,13 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 
-SENSITIVE_SCOPE_SUFFIXES = frozenset({"write", "delete", "admin", "mutate"})
+# Scope names use the final colon-delimited component as the action verb.
+# Only this explicit read-only allowlist is approval-exempt. Unknown verbs must
+# require an exact approval; maintaining a denylist of write verbs is unsafe
+# because new verbs such as "transfer", "create", or "execute" would fail open.
+READ_ONLY_SCOPE_SUFFIXES = frozenset(
+    {"read", "list", "get", "describe", "inspect"}
+)
 
 
 class CredentialAuthorityError(RuntimeError):
@@ -75,7 +81,9 @@ def _scopes(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
 
 
 def _scope_needs_approval(scope: str) -> bool:
-    return scope.rsplit(":", 1)[-1].lower() in SENSITIVE_SCOPE_SUFFIXES
+    """Require exact approval unless the scope ends in a known read-only verb."""
+    action = scope.rsplit(":", 1)[-1].casefold()
+    return action not in READ_ONLY_SCOPE_SUFFIXES
 
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:
