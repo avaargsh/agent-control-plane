@@ -48,6 +48,9 @@ def _call_wsgi(app, *, path, token, body):
         "CONTENT_LENGTH": str(len(encoded)),
         "wsgi.input": io.BytesIO(encoded),
         "HTTP_AUTHORIZATION": f"Bearer {token}",
+        # Model the trusted TLS terminator setting the WSGI scheme. A random
+        # caller-provided X-Forwarded-Proto is deliberately not used as trust.
+        "wsgi.url_scheme": "https",
     }
     statuses = []
     headers = []
