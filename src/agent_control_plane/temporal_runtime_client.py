@@ -27,7 +27,14 @@ class TemporalApi(Protocol):
     ) -> Mapping[str, Any]:
         ...
 
-    def terminate(self, *, workflow_id: str, reason: str) -> Mapping[str, Any]:
+    def terminate(
+        self,
+        *,
+        workflow_id: str,
+        reason: str,
+        expected_operation_id: str | None = None,
+        expected_run_id: str | None = None,
+    ) -> Mapping[str, Any]:
         ...
 
 
@@ -224,26 +231,56 @@ class TemporalWorkflowClient:
             },
         )
 
-    def terminate_workflow(self, resource_ref: str) -> Mapping[str, Any]:
-        workflow_id = resource_ref.removeprefix("temporal://workflow/")
+    def terminate_workflow(
+        self,
+        resource_ref: str,
+        *,
+        expected_operation_id: str | None = None,
+        expected_run_id: str | None = None,
+    ) -> Mapping[str, Any]:
+        prefix = "temporal://workflow/"
+        if not resource_ref.startswith(prefix) or len(resource_ref) <= len(prefix):
+            raise ValueError("invalid Temporal Workflow resource_ref")
+        workflow_id = resource_ref[len(prefix):]
         try:
+            if expected_operation_id is not None or expected_run_id is not None:
+                return self.api.terminate(
+                    workflow_id=workflow_id,
+                    reason="agent control plane compensation",
+                    expected_operation_id=expected_operation_id,
+                    expected_run_id=expected_run_id,
+                )
             return self.api.terminate(
                 workflow_id=workflow_id,
                 reason="agent control plane compensation",
             )
-        except RuntimeMutationUncertain:
+        except RuntimeMutationOwnershipUncertain:
+            # Ownership failure is a denial, never a lost ACK to reconcile.
+            raise
+        except RuntimeMutationUncertain as exc:
             observed = self.api.describe(workflow_id=workflow_id)
-            if observed is not None and not _workflow_is_terminal(
+            if observed is None or not _workflow_is_terminal(
                 observed.get("status")
             ):
+                # Not found is not evidence that *this* operation terminated
+                # the Workflow. Do not turn unknown provider state into success.
                 raise
+            if (
+                expected_operation_id is not None
+                and observed.get("operationId") != expected_operation_id
+            ) or (
+                expected_run_id is not None
+                and observed.get("runId") != expected_run_id
+            ):
+                raise RuntimeMutationOwnershipUncertain(
+                    "Temporal terminal state belongs to a different operation",
+                    resource_ref=resource_ref,
+                    operation_id=expected_operation_id,
+                    observed_operation_id=observed.get("operationId"),
+                ) from exc
             return {
                 "terminated": True,
                 "workflowId": workflow_id,
-                "status": (
-                    observed.get("status")
-                    if observed is not None
-                    else None
-                ),
+                "status": observed["status"],
                 "verifiedAfterUncertainMutation": True,
             }

@@ -167,16 +167,13 @@ class MissingAfterTerminateApi(FakeTemporalApi):
         raise RuntimeMutationUncertain("connection reset")
 
 
-def test_temporal_terminate_accepts_absent_postcondition_after_uncertain_ack():
+def test_temporal_terminate_fails_closed_if_target_disappears_after_lost_ack():
     api = MissingAfterTerminateApi()
     client = TemporalWorkflowClient(api)
     result = client.ensure_workflow(desired())
 
-    terminated = client.terminate_workflow(result.resource_ref)
-
-    assert terminated["terminated"] is True
-    assert terminated["status"] is None
-    assert terminated["verifiedAfterUncertainMutation"] is True
+    with pytest.raises(RuntimeMutationUncertain):
+        client.terminate_workflow(result.resource_ref)
 
 
 
@@ -434,3 +431,23 @@ def test_temporal_client_rejects_start_receipt_without_matching_owner_identity()
     assert caught.value.observed_operation_id == "sha256:" + "e" * 64
     assert caught.value.operation_id != caught.value.observed_operation_id
     assert api.starts == 1
+
+
+class OwnershipDeniedTerminalTemporalApi(FakeTemporalApi):
+    def terminate(self, *, workflow_id, reason):
+        self.workflows[workflow_id]["status"] = "TERMINATED"
+        raise RuntimeMutationOwnershipUncertain(
+            "cannot authorize termination of foreign Workflow",
+            resource_ref=f"temporal://workflow/{workflow_id}",
+            operation_id="expected-owner",
+            observed_operation_id="foreign-owner",
+        )
+
+
+def test_temporal_termination_ownership_denial_is_never_reconciled_as_success():
+    api = OwnershipDeniedTerminalTemporalApi()
+    client = TemporalWorkflowClient(api)
+    result = client.ensure_workflow(desired())
+
+    with pytest.raises(RuntimeMutationOwnershipUncertain):
+        client.terminate_workflow(result.resource_ref)

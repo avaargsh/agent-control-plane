@@ -24,6 +24,10 @@ from temporalio.api.enums.v1 import EventType  # noqa: E402
 from temporalio.testing import WorkflowEnvironment  # noqa: E402
 from temporalio.worker import Worker  # noqa: E402
 
+from agent_control_plane.runtime_clients import TerminalRuntimeConflict  # noqa: E402
+from agent_control_plane.temporal_runtime_client import TemporalWorkflowClient  # noqa: E402
+from agent_control_plane.temporal_sdk_api import TemporalSDKApi  # noqa: E402
+
 from pr_watch_control_bridge import workflow_id  # noqa: E402
 from pr_watch_harness import PullSnapshot  # noqa: E402
 from pr_watch_pg_store import PostgresWatchStore  # noqa: E402
@@ -113,12 +117,28 @@ def test_os_worker_sigkill_and_temporal_activity_redelivery(tmp_path):
                 env=child_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
             try:
-                handle = await env.client.start_workflow(
-                    PRWatchWorkflow.run,
-                    {"user_id": USER, "goal_id": GOAL, "interval_seconds": 30},
-                    id=workflow_id(user_id=USER, goal_id=GOAL),
-                    task_queue=TASK_QUEUE,
-                )
+                # Start via the actual ACP SDK adapter, not a bare Temporal
+                # Client, so the kill/recovery path verifies Release/Run/Memo
+                # ownership through the production-facing provider boundary.
+                api = TemporalSDKApi(target_host=address)
+                controller = TemporalWorkflowClient(api)
+                desired = {
+                    "release": "pr-watch-test-release",
+                    "workflow_id": workflow_id(user_id=USER, goal_id=GOAL),
+                    "workflow_type": "PRWatchWorkflow",
+                    "task_queue": TASK_QUEUE,
+                    "input": {
+                        "user_id": USER,
+                        "goal_id": GOAL,
+                        "interval_seconds": 30,
+                    },
+                }
+                started = await asyncio.to_thread(controller.ensure_workflow, desired)
+                assert started.changed is True
+                assert started.evidence["status"] == "RUNNING"
+                assert started.evidence["runId"]
+                assert started.evidence["operationId"].startswith("sha256:")
+                handle = env.client.get_workflow_handle(desired["workflow_id"])
                 async def wait_for_marker():
                     for _ in range(120):
                         if marker.exists():
@@ -142,6 +162,18 @@ def test_os_worker_sigkill_and_temporal_activity_redelivery(tmp_path):
                 assert len(store.list_events(user_id=USER)) == 1
                 child.kill()  # Real SIGKILL; no graceful Worker shutdown.
                 await asyncio.to_thread(child.wait, timeout=5)
+                # A killed process must not erase the Temporal execution or
+                # allow the control-plane to adopt a different Run by ID.
+                recovered_before_takeover = await asyncio.to_thread(
+                    controller.ensure_workflow, desired
+                )
+                assert recovered_before_takeover.changed is False
+                assert recovered_before_takeover.evidence["runId"] == (
+                    started.evidence["runId"]
+                )
+                assert recovered_before_takeover.evidence["operationId"] == (
+                    started.evidence["operationId"]
+                )
 
                 @activity.defn(name="read_and_persist_pr")
                 async def recovered(spec: dict) -> dict:
@@ -185,6 +217,14 @@ def test_os_worker_sigkill_and_temporal_activity_redelivery(tmp_path):
                     if event.event_type == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED
                 ]
                 assert len(starts) == 1
+                final = await asyncio.to_thread(
+                    api.describe, workflow_id=desired["workflow_id"]
+                )
+                assert final["status"] == "COMPLETED"
+                assert final["runId"] == started.evidence["runId"]
+                assert final["operationId"] == started.evidence["operationId"]
+                with pytest.raises(TerminalRuntimeConflict):
+                    await asyncio.to_thread(controller.ensure_workflow, desired)
             finally:
                 if child.poll() is None:
                     child.kill()

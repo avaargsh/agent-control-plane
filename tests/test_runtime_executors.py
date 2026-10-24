@@ -1,4 +1,9 @@
-from agent_control_plane.runtime_clients import RuntimeApplyResult
+import pytest
+
+from agent_control_plane.runtime_clients import (
+    RuntimeApplyResult,
+    RuntimeMutationOwnershipUncertain,
+)
 from agent_control_plane.runtime_executors import (
     KubernetesSandboxExecutor,
     TemporalWorkflowExecutor,
@@ -33,7 +38,9 @@ class FakeTemporalClient:
             evidence={"workflowId": "run-001"},
         )
 
-    def terminate_workflow(self, resource_ref):
+    def terminate_workflow(
+        self, resource_ref, *, expected_operation_id=None, expected_run_id=None
+    ):
         self.terminated.append(resource_ref)
         return {"terminated": True}
 
@@ -242,6 +249,7 @@ class RecoveredTemporalClient(FakeTemporalClient):
             evidence={
                 "workflowId": "recovered",
                 "runId": "run-recovered",
+                "operationId": "sha256:" + "c" * 64,
                 "verifiedAfterUncertainMutation": True,
             },
         )
@@ -267,3 +275,75 @@ def test_recovered_temporal_mutation_receipt_remains_compensatable():
     assert receipt.changed is True
     assert rollback.rolled_back is True
     assert client.terminated == ["temporal://workflow/recovered"]
+
+
+
+class OwnedTemporalClient(FakeTemporalClient):
+    def __init__(self):
+        super().__init__()
+        self.termination_identity = []
+
+    def ensure_workflow(self, desired):
+        return RuntimeApplyResult(
+            resource_ref="temporal://workflow/owned-1",
+            changed=True,
+            evidence={
+                "workflowId": "owned-1",
+                "runId": "run-1",
+                "operationId": "sha256:" + "b" * 64,
+            },
+        )
+
+    def terminate_workflow(
+        self, resource_ref, *, expected_operation_id=None, expected_run_id=None
+    ):
+        self.termination_identity.append(
+            (resource_ref, expected_operation_id, expected_run_id)
+        )
+        return {"terminationRequested": True}
+
+
+def test_temporal_executor_forwards_exact_receipt_ownership_to_rollback():
+    client = OwnedTemporalClient()
+    executor = TemporalWorkflowExecutor(client)
+    plan = build_plan()
+    binding = plan.bindings["workflow"]
+    receipt = executor.apply(
+        plan=plan,
+        binding=binding,
+        prepared={"kind": "WorkflowPlan"},
+    )
+
+    rollback = executor.rollback(plan=plan, binding=binding, receipt=receipt)
+
+    assert rollback.evidence["terminationRequested"] is True
+    assert client.termination_identity == [
+        ("temporal://workflow/owned-1", "sha256:" + "b" * 64, "run-1")
+    ]
+
+
+
+class PartialIdentityTemporalClient(FakeTemporalClient):
+    def ensure_workflow(self, desired):
+        return RuntimeApplyResult(
+            resource_ref="temporal://workflow/unverified",
+            changed=True,
+            evidence={"runId": "run-only-no-owner"},
+        )
+
+
+def test_temporal_executor_rejects_half_bound_compensation_receipt():
+    client = PartialIdentityTemporalClient()
+    executor = TemporalWorkflowExecutor(client)
+    plan = build_plan()
+    binding = plan.bindings["workflow"]
+    receipt = executor.apply(
+        plan=plan,
+        binding=binding,
+        prepared={"kind": "WorkflowPlan"},
+    )
+
+    with pytest.raises(RuntimeMutationOwnershipUncertain):
+        executor.rollback(plan=plan, binding=binding, receipt=receipt)
+
+    assert client.terminated == []
