@@ -20,7 +20,7 @@ All bodies are bounded JSON objects. The service rejects unknown routes, checks 
 | POST /v1/workload-credentials:introspect | credential.introspector | Validate token digest, expiry, audience, requested scopes, credential revocation, current binding version, current approval version/state and canonical Run/Session/sandbox revision |
 | POST /v1/workload-credentials:revoke | credential.revoker | Revoke one credential with a stable event ID |
 | POST /v1/workload-credentials:revoke-run | credential.revoker | Revoke Run credentials from the specified sandbox revision and older, after matching the current canonical revision |
-| POST /v1/workload-credentials:revoke-approval | credential.revoker | Idempotently fan out an already authenticated approval-revocation event to all credentials bound to that approval |
+| POST /v1/workload-credentials:revoke-approval | approval.revoker | Apply a trusted, stable-ID approval revocation and invalidate all credentials bound to that approval |
 | POST /v1/workload-credential-requests:lookup | credential.issuer | Reconcile an ambiguous issuance by request identity; never returns a raw token |
 | GET /v1/authorization/approvals/{id} | approval.reader | Read current approval state/version, not a cached decision |
 | POST /v1/authorization/approvals/{id}:revoke | approval.revoker | Atomically mark approval revoked, increment version, invalidate associated credentials and enqueue one stable outbox event |
