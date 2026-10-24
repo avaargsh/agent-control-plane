@@ -8,7 +8,7 @@ This package is the first service-side implementation of the versioned Runtime W
 - **RunAuthorityReader** must fetch the canonical Run and Session independently of the assertion. It must return tenant, Agent, Release, Session, Run, sandbox ID/revision, workspace ref, Run state and Session state from the authoritative runtime store/API. Do not implement it by reading claims copied from the request.
 - **PostgresCredentialAuthorityStore** stores only a digest of an opaque random token. The raw bearer token is returned once and must not be written to logs, database rows, traces or outbox messages.
 - Schema creation is an explicit deployment/migration step. No HTTP request runs DDL or performs implicit migrations.
-- **WorkloadCredentialWSGI** is an application layer only. Deploy it behind a TLS listener with service-to-service mTLS or equivalent authenticated ingress, a network policy, strict request limits and operator-managed service secrets. Never expose it directly to untrusted networks.
+- **WorkloadCredentialWSGI** is an application layer only. It rejects requests unless the trusted WSGI environment reports `wsgi.url_scheme=https`; this is defense-in-depth, not TLS termination or certificate validation. Deploy it behind a TLS listener with service-to-service mTLS or equivalent authenticated ingress, configure the WSGI scheme only from that trusted termination point, apply a network policy, retain strict request limits and use operator-managed service secrets. Do not trust arbitrary `X-Forwarded-Proto` values. Never expose it directly to untrusted networks.
 
 ## Versioned routes and service roles
 
