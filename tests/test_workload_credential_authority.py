@@ -680,6 +680,17 @@ def test_http_service_roles_are_separated_and_errors_are_sanitized():
     assert status == 403
     assert headers["Cache-Control"] == "no-store"
 
+    status, _, payload = _invoke_wsgi(
+        app,
+        method="POST",
+        path="/v1/workload-credentials:issue",
+        token="long-test-token-credential.issuer-0123456789",
+        body={},
+    )
+    assert status == 400
+    assert "workload_assertion" not in json.dumps(payload)
+
+
 def test_http_service_rejects_plain_http_even_with_valid_role_token():
     clock, _, _, _, _, _, authority, _ = make_fixture()
     token = "long-test-token-credential.issuer-0123456789"
@@ -702,15 +713,6 @@ def test_http_service_rejects_plain_http_even_with_valid_role_token():
     assert headers["Cache-Control"] == "no-store"
     assert headers["X-Content-Type-Options"] == "nosniff"
 
-    status, _, payload = _invoke_wsgi(
-        app,
-        method="POST",
-        path="/v1/workload-credentials:issue",
-        token="long-test-token-credential.issuer-0123456789",
-        body={},
-    )
-    assert status == 400
-    assert "workload_assertion" not in json.dumps(payload)
 
 def test_unrecognized_scope_verbs_require_approval_even_when_binding_allows_them():
     _, binding, _, claims, store, _, authority, body = make_fixture()
