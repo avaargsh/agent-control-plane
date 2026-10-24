@@ -177,3 +177,21 @@ def test_explicit_read_only_scope_can_be_issued_without_approval():
     assert result["credential"]["scopes"] == ["payments:read"]
     assert len(store.issue_calls) == 1
     assert store.approval_lookups == []
+
+
+
+def test_unknown_scope_with_unresolvable_approval_is_not_issued():
+    authority, store, body = _build_issuer("payments:transfer")
+    body["approval_id"] = "missing-approval"
+    # Keep the test assertion aligned with the signed claims, so the failure
+    # occurs at the authoritative grant lookup rather than assertion binding.
+    authority._assertions.claims["approval_id"] = "missing-approval"
+
+    with pytest.raises(
+        CredentialAuthorityDenied,
+        match="approval is missing, expired, revoked or mismatched",
+    ):
+        authority.issue(body)
+
+    assert store.approval_lookups == ["missing-approval"]
+    assert store.issue_calls == []
