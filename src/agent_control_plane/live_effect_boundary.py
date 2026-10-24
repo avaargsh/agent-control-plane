@@ -1,4 +1,4 @@
-"""Opt-in last-moment authority check for Kubernetes Deployment mutations.
+"""Opt-in last-moment authority check for protected provider effects.
 
 This must read a distinct authoritative owner of *current* policy, approval
 and principal state. A past DSSE proof, approval signature or typed receipt
@@ -25,7 +25,7 @@ _UNSET = object()
 
 
 class LiveEffectAdmissionDenied(ProtocolViolation):
-    """The provider has not yet sent a PATCH; denial is definitely NOT_APPLIED."""
+    """The provider operation has not been entered; denial is NOT_APPLIED."""
 
 
 @dataclass(frozen=True)
@@ -87,11 +87,11 @@ class CurrentEffectAuthorityReader(Protocol):
 
 @dataclass(frozen=True)
 class LiveEffectBoundaryGate:
-    """Fail-closed opt-in read just before provider PATCH is sent.
+    """Fail-closed current-authority check immediately before a provider effect.
 
-    This prevents pre-existing stale/revoked authority at check time; it does
-    not make the policy read and Kubernetes PATCH an atomic transaction.
-    Kubernetes resourceVersion/UID/fence still protect provider state.
+    This prevents stale/revoked authority known at check time; it does not make
+    the policy read and provider effect an atomic transaction. Provider-native
+    fencing/CAS must still protect the external resource.
     """
 
     scope: EffectScope
@@ -202,10 +202,10 @@ class LiveEffectBoundaryGate:
             raise ProtocolViolation("live effect execution authorization expired")
 
 
-    def patch_with_current(
+    def invoke_with_current(
         self,
         *,
-        patch: Callable[[], _Result],
+        invoke: Callable[[], _Result],
         work_id: str,
         operation_id: str,
         subject: ResourceIdentity,
@@ -220,9 +220,9 @@ class LiveEffectBoundaryGate:
         """Admission in the final provider call path, optionally row-locked.
 
         If the reader exposes hold_current(), keep its exact DB row locks
-        across the provider PATCH. If the reader only implements read_current()
-        retain the PR #199 read-before-patch semantics (NO race guarantee).
-        A database failure after PATCH entry is never converted to NOT_APPLIED.
+        across the provider operation. A reader that only implements
+        read_current() provides no cross-system race guarantee. A database
+        failure after operation entry is never converted to NOT_APPLIED.
         """
         scope_keys = (
             self.scope.tenant_id, self.scope.project_id, self.scope.cluster_id,
@@ -240,15 +240,22 @@ class LiveEffectBoundaryGate:
             "active_lease": active_lease,
             "caller": caller,
         }
-        hold = getattr(self.reader, "hold_current", None)
+        try:
+            hold = getattr(self.reader, "hold_current", None)
+        except Exception as exc:
+            # Capability lookup happens before any provider request. Treat
+            # a broken optional lock API as a definitive pre-effect denial.
+            raise LiveEffectAdmissionDenied(
+                "live effect lock capability is unavailable"
+            ) from exc
         if not callable(hold):
             try:
                 self.assert_current(**args)
             except Exception as exc:
                 raise LiveEffectAdmissionDenied(str(exc)) from exc
-            return patch()
+            return invoke()
 
-        entered_patch = False
+        entered_effect = False
         try:
             with hold(
                 tenant_id=scope_keys[0] if scope_keys else "",
@@ -260,11 +267,11 @@ class LiveEffectBoundaryGate:
                 # IMPORTANT: validate the exact already-locked row. A second
                 # unprotected read would reintroduce a revocation race.
                 self.assert_current(**args, _locked_observation=snapshot)
-                entered_patch = True
-                return patch()
+                entered_effect = True
+                return invoke()
         except Exception as exc:
-            if not entered_patch:
+            if not entered_effect:
                 raise LiveEffectAdmissionDenied(str(exc)) from exc
             # This may be an ambiguous provider effect or a DB commit failure
-            # AFTER an actual PATCH; do not claim NOT_APPLIED.
+            # AFTER the provider call; do not claim NOT_APPLIED.
             raise

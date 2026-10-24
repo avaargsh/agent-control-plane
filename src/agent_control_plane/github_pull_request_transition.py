@@ -3,8 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Mapping, Protocol
 
+from .live_effect_boundary import (
+    LiveEffectAdmissionDenied,
+    LiveEffectBoundaryGate,
+)
 from .provable_execution import (
     ObservationSnapshot,
+    PlanAuthorizationBinding,
+    PlanExecutionFence,
     ProviderReceipt,
     ReconciliationResult,
     ReconciliationStatus,
@@ -12,15 +18,20 @@ from .provable_execution import (
     VerificationCondition,
     VerificationReport,
     VerificationStatus,
+    validate_plan_execution,
 )
 from .runtime_clients import (
     RuntimeMutationOwnershipUncertain,
     RuntimeMutationUncertain,
 )
 from .state_transition_protocol import (
+    ActionIntent,
+    AuthorizationBinding,
+    ExecutionLease,
     Principal,
     ProtocolViolation,
     ResourceIdentity,
+    StateTransition,
 )
 
 
@@ -185,8 +196,88 @@ def _message_owns_operation(
 class GitHubPullRequestMergeProvider:
     """Provider-neutral proof slice for one GitHub PR merge side effect."""
 
-    def __init__(self, api: GitHubPullRequestApi) -> None:
+    def __init__(
+        self,
+        api: GitHubPullRequestApi,
+        *,
+        effect_gate: LiveEffectBoundaryGate | None = None,
+    ) -> None:
         self.api = api
+        # The gate is configured by trusted service wiring, not by a merge
+        # request. Without a current-authority source this adapter is
+        # intentionally read-only: callers cannot opt into unchecked writes.
+        self._effect_gate = effect_gate
+
+    @property
+    def effect_gate(self) -> LiveEffectBoundaryGate | None:
+        """Trusted service configuration; never supplied by a merge request."""
+        return self._effect_gate
+
+    def _validate_execution_admission(
+        self,
+        *,
+        plan: TransitionPlan,
+        transition: StateTransition | None,
+        action: ActionIntent | None,
+        authorization: AuthorizationBinding | None,
+        active_lease: ExecutionLease | None,
+        actor: Principal,
+        caller: Principal | None,
+        work_id: str | None,
+        policy_input_hash: str | None,
+        now: datetime,
+    ) -> LiveEffectBoundaryGate:
+        gate = self.effect_gate
+        if type(gate) is not LiveEffectBoundaryGate:
+            raise LiveEffectAdmissionDenied(
+                "current effect authority gate is required for GitHub merge"
+            )
+        if (
+            type(transition) is not StateTransition
+            or type(action) is not ActionIntent
+            or type(authorization) is not AuthorizationBinding
+            or type(active_lease) is not ExecutionLease
+            or type(actor) is not Principal
+            or type(caller) is not Principal
+            or not isinstance(work_id, str)
+            or not work_id.strip()
+            or not isinstance(policy_input_hash, str)
+            or not policy_input_hash.strip()
+        ):
+            raise LiveEffectAdmissionDenied(
+                "exact transition, action, authorization, lease, caller and "
+                "current policy binding are required for GitHub merge"
+            )
+        if actor != caller:
+            raise LiveEffectAdmissionDenied(
+                "GitHub merge actor must match the lease-holding caller"
+            )
+        try:
+            plan_authorization = PlanAuthorizationBinding.derive(
+                plan=plan,
+                transition=transition,
+                action=action,
+                authorization=authorization,
+            )
+            plan_fence = PlanExecutionFence.bind(
+                plan=plan,
+                authorization=plan_authorization,
+                lease=active_lease,
+            )
+            validate_plan_execution(
+                plan=plan,
+                authorization=plan_authorization,
+                fence=plan_fence,
+                active_lease=active_lease,
+                caller=caller,
+                now=now,
+            )
+        except Exception as exc:
+            # All checks here happen before the provider write is entered.
+            raise LiveEffectAdmissionDenied(
+                "GitHub merge exact-plan execution admission failed"
+            ) from exc
+        return gate
 
     def observe(
         self,
@@ -365,9 +456,28 @@ class GitHubPullRequestMergeProvider:
         operation_id: str,
         actor: Principal,
         now: datetime,
+        transition: StateTransition | None = None,
+        action: ActionIntent | None = None,
+        authorization: AuthorizationBinding | None = None,
+        active_lease: ExecutionLease | None = None,
+        caller: Principal | None = None,
+        work_id: str | None = None,
+        policy_input_hash: str | None = None,
     ) -> ProviderReceipt:
         owner, repo, number, head_sha, merge_method = (
             self._validate_plan(plan)
+        )
+        gate = self._validate_execution_admission(
+            plan=plan,
+            transition=transition,
+            action=action,
+            authorization=authorization,
+            active_lease=active_lease,
+            actor=actor,
+            caller=caller,
+            work_id=work_id,
+            policy_input_hash=policy_input_hash,
+            now=now,
         )
 
         live = self.observe(
@@ -410,20 +520,36 @@ class GitHubPullRequestMergeProvider:
                 observed_operation_id=None,
             )
 
-        self._validate_live_precondition(plan=plan, live=live)
+        try:
+            self._validate_live_precondition(plan=plan, live=live)
+        except ProtocolViolation as exc:
+            # The merge API call has not been entered: this denial is definitive.
+            raise LiveEffectAdmissionDenied(str(exc)) from exc
         commit_message = _owned_commit_message(
             operation_id=operation_id,
             plan_hash=plan.plan_hash,
         )
 
         try:
-            response = self.api.merge_pull_request(
-                owner=owner,
-                repo=repo,
-                number=number,
-                head_sha=head_sha,
-                merge_method=merge_method,
-                commit_message=commit_message,
+            response = gate.invoke_with_current(
+                invoke=lambda: self.api.merge_pull_request(
+                    owner=owner,
+                    repo=repo,
+                    number=number,
+                    head_sha=head_sha,
+                    merge_method=merge_method,
+                    commit_message=commit_message,
+                ),
+                work_id=work_id or "",
+                operation_id=operation_id,
+                subject=plan.subject,
+                resource_generation=transition.expected_generation,
+                action=action,
+                authorization=authorization,
+                approval_hash=authorization.approval_hash or "",
+                policy_input_hash=policy_input_hash,
+                active_lease=active_lease,
+                caller=caller,
             )
         except RuntimeMutationUncertain as exc:
             observed = self.observe(

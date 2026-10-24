@@ -1,4 +1,5 @@
 """Negative-first reference integration: current authority vs Kubernetes PATCH."""
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import timedelta
 
@@ -245,3 +246,133 @@ def test_denied_effect_cannot_be_represented_as_committed_success(tmp_path):
         _execute(coordinator, fixture, context)
     assert fixture["api"].patch_calls == 0
     assert journal.get(prepared.attempt.attempt_id).state is ExecutionAttemptState.ABORTED
+
+
+
+class LockedAuthorityReader(AuthoritativeReaderFixture):
+    """Test adapter modeling an authority row lock held across the provider call."""
+
+    def __init__(self, snapshot):
+        super().__init__(snapshot)
+        self.hold_calls = []
+        self.inside_lock = False
+
+    @contextmanager
+    def hold_current(self, **kwargs):
+        self.hold_calls.append(kwargs)
+        self.inside_lock = True
+        try:
+            yield self.snapshot
+        finally:
+            self.inside_lock = False
+
+
+def _with_locked_reader(scenario):
+    _, _, _, context, _, _, _, _, original_reader = scenario
+    reader = LockedAuthorityReader(original_reader.snapshot)
+    gate = replace(context.live_effect_gate, reader=reader)
+    changed = list(scenario)
+    changed[3] = replace(context, live_effect_gate=gate)
+    changed[-1] = reader
+    return tuple(changed), reader
+
+
+def _call_live_gate(scenario, patch):
+    fixture, _, proposal, context, _, _, _, prepared, _ = scenario
+    return context.live_effect_gate.invoke_with_current(
+        invoke=patch,
+        work_id=proposal.work_id,
+        operation_id=prepared.attempt.operation_id,
+        subject=fixture["resource"],
+        resource_generation=fixture["transition"].expected_generation,
+        action=fixture["action"],
+        authorization=fixture["authorization"],
+        approval_hash=context.signed_approval.approval.approval_hash,
+        policy_input_hash=context.policy_input.input_hash,
+        active_lease=fixture["lease"],
+        caller=fixture["holder"],
+    )
+
+
+def test_locked_current_authority_is_the_snapshot_used_for_patch(tmp_path):
+    scenario, reader = _with_locked_reader(_scenario(tmp_path))
+    fixture, _, _, _, _, _, _, prepared, _ = scenario
+
+    def patch_under_lock():
+        assert reader.inside_lock is True
+        assert fixture["api"].patch_calls == 0
+        return "provider-result"
+
+    result = _call_live_gate(scenario, patch_under_lock)
+
+    assert result == "provider-result"
+    assert reader.hold_calls == [{
+        "tenant_id": SCOPE.tenant_id,
+        "project_id": SCOPE.project_id,
+        "cluster_id": SCOPE.cluster_id,
+        "work_id": scenario[2].work_id,
+        "operation_id": prepared.attempt.operation_id,
+    }]
+    # The gate must validate the yielded, locked row—not perform a second
+    # unprotected read that would reintroduce a revocation race.
+    assert reader.calls == []
+    assert reader.inside_lock is False
+
+
+def test_revoked_locked_authority_denies_before_provider_patch(tmp_path):
+    scenario, reader = _with_locked_reader(_scenario(tmp_path))
+    reader.snapshot = replace(reader.snapshot, approval_state="REVOKED")
+
+    def must_not_patch():
+        pytest.fail("provider patch called after locked authority was revoked")
+
+    with pytest.raises(LiveEffectAdmissionDenied):
+        _call_live_gate(scenario, must_not_patch)
+
+    assert reader.calls == []
+    assert len(reader.hold_calls) == 1
+    assert reader.inside_lock is False
+
+
+def test_provider_exception_after_patch_entry_is_not_relabelled_not_applied(
+    tmp_path,
+):
+    scenario, reader = _with_locked_reader(_scenario(tmp_path))
+
+    def ambiguous_provider_call():
+        assert reader.inside_lock is True
+        raise RuntimeError("provider timed out after request dispatch")
+
+    with pytest.raises(RuntimeError, match="after request dispatch") as error:
+        _call_live_gate(scenario, ambiguous_provider_call)
+
+    assert not isinstance(error.value, LiveEffectAdmissionDenied)
+    assert reader.calls == []
+    assert len(reader.hold_calls) == 1
+    assert reader.inside_lock is False
+
+
+
+class BrokenLockedCapabilityReader(AuthoritativeReaderFixture):
+    @property
+    def hold_current(self):
+        raise RuntimeError("cannot inspect authority lock capability")
+
+
+def test_broken_lock_capability_fails_closed_before_provider_patch(tmp_path):
+    scenario = _scenario(tmp_path)
+    reader = BrokenLockedCapabilityReader(scenario[-1].snapshot)
+    changed = list(scenario)
+    changed[3] = replace(
+        scenario[3],
+        live_effect_gate=replace(scenario[3].live_effect_gate, reader=reader),
+    )
+    changed[-1] = reader
+
+    def must_not_patch():
+        pytest.fail("provider patch called when lock capability discovery failed")
+
+    with pytest.raises(LiveEffectAdmissionDenied, match="lock capability"):
+        _call_live_gate(tuple(changed), must_not_patch)
+
+    assert reader.calls == []
