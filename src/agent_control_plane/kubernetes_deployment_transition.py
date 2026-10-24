@@ -789,8 +789,8 @@ class KubernetesDeploymentScaleProvider:
                 context_binding is not None
                 and context_binding.live_effect_gate is not None
             ):
-                changed = context_binding.live_effect_gate.patch_with_current(
-                    patch=lambda: self.api.patch_deployment(
+                changed = context_binding.live_effect_gate.invoke_with_current(
+                    invoke=lambda: self.api.patch_deployment(
                         namespace=transition.subject.namespace,
                         name=transition.subject.name,
                         patch=patch,
