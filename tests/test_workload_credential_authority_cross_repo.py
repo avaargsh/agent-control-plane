@@ -38,7 +38,7 @@ from cloud_agent_runtime.models import (
     Session,
     SessionStatus,
 )
-from cloud_agent_runtime.store import InMemoryStore
+from cloud_agent_runtime.store import SQLiteStore
 
 from agent_control_plane.workload_credentials import (
     CredentialAuthorityDenied,
@@ -68,7 +68,7 @@ def _sign_assertion(private_key: Ed25519PrivateKey, claims: dict[str, object]) -
 
 
 @pytest.fixture
-def integration_context():
+def integration_context(tmp_path):
     dsn = os.environ.get("ACP_WORKLOAD_CREDENTIAL_DATABASE_URL")
     if not dsn:
         pytest.skip("dedicated PostgreSQL authority workflow is required")
@@ -84,7 +84,8 @@ def integration_context():
     workspace_ref = f"sandbox://kubernetes/{sandbox_id}"
     binding_id = f"cross-binding-{suffix}"
 
-    runtime_store = InMemoryStore()
+    runtime_store_path = tmp_path / f"runtime-authority-{suffix}.sqlite"
+    runtime_store = SQLiteStore(runtime_store_path)
     runtime_store.save_session(Session(
         session_id=session_id,
         tenant_id=tenant_id,
@@ -133,6 +134,26 @@ def integration_context():
         clock=lambda: now,
         token_factory=lambda: "cross-repo-test-token-" + secrets.token_urlsafe(32),
     )
+    context = {}
+
+    def reopen_runtime_authority():
+        """Simulate Runtime and the authority reader losing their process state."""
+        nonlocal runtime_store, run_reader, authority
+        runtime_store.close()
+        runtime_store = SQLiteStore(runtime_store_path)
+        run_reader = RuntimeStoreRunAuthorityReader(runtime_store)
+        authority = WorkloadCredentialAuthority(
+            store=credential_store,
+            assertion_verifier=verifier,
+            run_authority=run_reader,
+            clock=lambda: now,
+            token_factory=lambda: "cross-repo-test-token-" + secrets.token_urlsafe(32),
+        )
+        context.update(
+            runtime_store=runtime_store,
+            run_reader=run_reader,
+            authority=authority,
+        )
 
     def request(*, request_id: str | None = None, overrides: dict[str, object] | None = None):
         canonical = run_reader.get_run_binding(run_id)
@@ -175,16 +196,22 @@ def integration_context():
         }
         return body
 
-    return {
+    context.update({
         "authority": authority,
         "request": request,
         "runtime_store": runtime_store,
         "run_reader": run_reader,
+        "runtime_store_path": runtime_store_path,
+        "reopen_runtime_authority": reopen_runtime_authority,
         "run_id": run_id,
         "session_id": session_id,
         "sandbox_id": sandbox_id,
         "workspace_ref": workspace_ref,
-    }
+    })
+    try:
+        yield context
+    finally:
+        runtime_store.close()
 
 
 @pytest.mark.parametrize(
@@ -238,6 +265,15 @@ def test_runtime_authority_can_issue_then_fence_credential_after_sandbox_rebind(
         revision=old.revision + 1,
     )
     store.save_run(run)
+
+    # The authoritative Run, Session and SandboxBinding must survive closing
+    # the Runtime process/store and constructing a fresh canonical reader and
+    # authority process. A same-process object graph is not enough evidence.
+    integration_context["reopen_runtime_authority"]()
+    authority = integration_context["authority"]
+    assert integration_context["run_reader"].get_run_binding(
+        integration_context["run_id"]
+    ).sandbox_revision == 8
 
     inactive = authority.introspect(introspection_request)["credential"]
     assert inactive["active"] is False
