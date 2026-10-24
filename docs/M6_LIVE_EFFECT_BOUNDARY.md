@@ -1,4 +1,4 @@
-# M6 — Opt-in live effect-boundary authority check
+# M6 — Live effect-boundary authority check
 
 Status: experimental reference contract, NOT production issuer identity,
 GitHub webhook acceptance, independent proof signer authorization or M6 GO.
@@ -7,18 +7,26 @@ GitHub webhook acceptance, independent proof signer authorization or M6 GO.
 
 ACP #196–#198 authenticate a **historical** signed execution proof reference.
 A DSSE signature or persisted receipt is NOT permission to perform a new
-write. Existing Kubernetes execution already checks signed approval,
-plan, lease, UID/generation, CAS and v3 authority reservations.
-Those checks do not, by themselves, read a separately governed **current**
-policy/approval/principal/operation state immediately before the provider
-mutates a resource.
+write. The Kubernetes execution path already checks signed approval, plan, lease,
+UID/generation, CAS and v3 authority reservations. Those checks do not, by
+themselves, read a separately governed **current** policy/approval/principal/
+operation state immediately before a provider mutates a resource. The GitHub
+pull-request merge adapter previously relied on plan/head/replay checks alone;
+it now requires the same current-authority gate before a new merge request.
 
 ## Narrow integration contract
 
-ContextBoundExecutionContext now has an optional live_effect_gate field.
-Only when the caller explicitly opts in does the existing provider invoke
-LiveEffectBoundaryGate.assert_current() immediately before its Kubernetes
-patch_deployment call, after all existing plan and context validations.
+The gate is configured by trusted service wiring, not by an incoming provider
+request. The Kubernetes context-bound path invokes
+`LiveEffectBoundaryGate.invoke_with_current()` immediately before
+`patch_deployment()` when `live_effect_gate` is configured. The GitHub
+pull-request merge adapter is stricter: it refuses a new merge unless a gate
+is configured and the caller supplies a coherent `StateTransition`,
+`ActionIntent`, `AuthorizationBinding`, active lease, caller, work ID and
+current policy-input hash. It derives and validates `PlanAuthorizationBinding`
+and `PlanExecutionFence` before observing/mutating the PR, then runs the merge
+API call inside `invoke_with_current()`. A gate cannot be passed in an
+individual merge request.
 
 The gate is configured out of band with a trusted EffectScope (tenant,
 project, cluster, operation nonce), a trusted timezone-aware clock, and
@@ -37,20 +45,23 @@ reader exception or clock outage are all DENY.
 
 ## Terminalization and replay
 
-On a live gate rejection **before any Kubernetes PATCH attempt**,
-the coordinator catches a dedicated LiveEffectAdmissionDenied, records
-an auditable ABORTED/NOT_APPLIED terminal attempt and releases the v3
-AuthorityReservation. The denied attempt cannot later become COMMITTED.
-An entirely new authorized attempt gets a different operation identity.
+For Kubernetes, a gate rejection **before any PATCH attempt** reaches the
+execution coordinator as `LiveEffectAdmissionDenied`; the coordinator records
+an auditable `ABORTED/NOT_APPLIED` attempt and releases the authority
+reservation. The denied attempt cannot later become COMMITTED.
 
-**Only** this typed, pre-patch exception can trigger the deterministic
-NOT_APPLIED path. Actual provider errors, a lost ACK or ownership ambiguity
-retain the original reconciliation/UNKNOWN protections.
+For GitHub, the merge provider raises the same typed denial before entering
+`merge_pull_request()`. This provider adapter does not itself own a durable
+execution journal, so its caller must preserve that typed pre-effect outcome
+and must not claim a durable terminal record that was never written.
 
-An already-applied replay path returns a historical provider receipt and
-does not issue a second PATCH. It is not a new live write or evidence of
-new authorization. A later independent verifier must still check actual
-observed business state before claiming success.
+Once a provider call has been entered, a timeout, lost ACK or ownership
+ambiguity keeps its original reconciliation/UNKNOWN semantics. The gate never
+rewrites post-entry provider exceptions into `NOT_APPLIED`.
+
+An already-applied replay returns a historical receipt and does not issue a
+second mutation. It is not new authorization or independent outcome proof; a
+later independent verifier must still observe the business state.
 
 ## Read authority must be genuinely independent
 
@@ -60,22 +71,28 @@ registry. Do NOT instantiate a reader from browser/chat messages, DSSE
 payloads, model-generated JSON, or cached pre-approval objects. This PR
 does not provide or deploy that source-of-truth adapter; the tests use
 an intentionally mutable fake to verify the fail-closed call site.
-Default operation is unchanged when no live_effect_gate is supplied.
+The Kubernetes context path remains opt-in for compatibility. The GitHub
+merge provider instead fails closed: a missing gate denies a new merge before
+the merge API can be called. Tests use a deliberately mutable fake reader;
+they do not prove a production authority service has been deployed.
 
 ## Race and production boundaries
 
-This is a latest-moment read check, **not an atomic transaction** spanning
-the authority database and Kubernetes API server. Revocation that commits
-after the read but before the patch is not fully fenced by this adapter.
-For strong guarantees, external authority must provide a side-effect
-fencing token/revision recognized by the executing provider, plus
-CAS/resourceVersion and uid/generation checking and rollback procedures.
+This is a latest-moment authority check, **not an atomic transaction** spanning
+the authority database and an external provider. A `hold_current()` reader
+can keep the exact authority row lock until the provider call returns; a
+read-only reader preserves a check/use race. Provider-native preconditions
+still matter (Kubernetes resourceVersion/UID/generation; GitHub approved head
+SHA), and accepted side effects cannot be undone by revocation. Production
+wiring must document lock duration, provider-side fencing/CAS, timeout and
+compensation behavior.
 
 Do not present synthetic read fixtures as production RBAC, a persistent
-trusted authority source, or real Kubernetes/GitHub delivery.
-No change is made to frozen ACP v0.1 schemas or the pre-existing DSSE
-proof format. No new Task ledger, user-facing write API or automatic
-GitHub write path is created. ACP #185 and #192 remain NO-GO.
+trusted authority source, or live Kubernetes/GitHub delivery. No frozen ACP
+v0.1 schema or DSSE proof format is changed. No new Task ledger or user-facing
+write API is created. The guarded GitHub provider is not production-integrated
+until trusted reader configuration, durable execution/reconciliation wiring
+and a live GitHub acceptance run exist. ACP #185 and #192 remain NO-GO.
 
 ## Developer tests
 
