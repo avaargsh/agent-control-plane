@@ -262,7 +262,14 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         )
         reader = HttpsRuntimeStoreRunAuthorityReader(transport)
 
-        binding = reader.get_run_binding(RUN_ID)
+        try:
+            binding = reader.get_run_binding(RUN_ID)
+        except Exception as exc:
+            pytest.fail(
+                f"first HTTPS read failed: {type(exc).__name__}: {exc}; "
+                f"calls={wsgi_app.calls!r}; statuses={wsgi_app.statuses!r}; "
+                f"roles={authenticator.roles!r}"
+            )
         assert binding.tenant_id == "tenant-tls"
         assert binding.agent_id == "agent-tls"
         assert binding.run_id == RUN_ID
