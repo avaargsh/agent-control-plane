@@ -1,15 +1,16 @@
-# M6 PG16 Current Authority — scoped, row-locked Kubernetes effect gate
+# M6 PG16 Current Authority — scoped, row-locked provider effect gate
 
 **Status: opt-in reference integration only. No production issuer, deployed
 approval service, new Task ledger or M6 production GO.**
 
 ## Why
 
-ACP PR #199 added an optional read of current policy, principal and approval
-state just before the Kubernetes Deployment PATCH. A single read is not
-atomic with the following network call. This slice supplies an independent
-operator-owned PostgreSQL 16 row as the current authority and an OPTIONAL
-transaction-held shared lock across the provider's PATCH invocation.
+ACP PR #199 added a current policy, principal and approval-state check just
+before Kubernetes Deployment PATCH. The GitHub PR merge adapter now requires
+this gate too before a new merge request. A single read is not atomic with the
+following network call. This slice supplies an independent operator-owned
+PostgreSQL 16 row as current authority and an optional transaction-held shared
+lock across the provider invocation.
 
 ## Authority ownership and boundaries
 
@@ -50,23 +51,30 @@ Operator must populate current authority records through separately
 reviewed policy+approval governance. **This PR intentionally does not
 provide that policy decision service, authorization API or signer issuer.**
 
-Configure the provider's existing ContextBoundExecutionContext.live_effect_gate
-with LiveEffectBoundaryGate(scope=operator_pinned_EffectScope,
+For the Kubernetes context-bound path, configure
+ContextBoundExecutionContext.live_effect_gate with
+LiveEffectBoundaryGate(scope=operator_pinned_EffectScope,
 reader=PostgresCurrentEffectAuthorityReader(runtime_dsn),
-clock=trusted_UTC_clock). Existing signed approvals, v3 reservations,
-leases, UID/generation, Kubernetes resourceVersion CAS and journal remain.
+clock=trusted_UTC_clock). The GitHub merge provider receives its gate from
+trusted service construction; merge requests cannot replace that gate and
+must carry exact plan/transition/action/authorization/lease bindings that
+match the current row. The GitHub caller still owns its durable lifecycle and
+reconciliation record. Existing signed approvals, v3 reservations, leases,
+UID/generation, Kubernetes resourceVersion CAS and journal remain.
 
-### Read versus locked PATCH
+### Read versus locked provider call
 
 - read_current(): one authorized, scoped PG snapshot; releases row locks
   when the read returns. Useful for observability only, not a revocation fence.
 - hold_current(): transaction context yields the exact locked row; SQL
-  row locks remain until the context ends. The provider uses
-  LiveEffectBoundaryGate.patch_with_current() to validate this exact row
-  and invoke Kubernetes patch_deployment() while locks remain held.
+  row locks remain until the context ends. Provider adapters use
+  LiveEffectBoundaryGate.invoke_with_current() to validate this exact row
+  and invoke the protected operation while locks remain held (Kubernetes
+  Deployment PATCH or GitHub PR merge API call).
 - A revocation that updates this **same PostgreSQL authority/scope row**
   must wait for its shared lock to be released; once it commits, later
-  attempts see the revoked state and are rejected before PATCH.
+  attempts see the revoked state and are rejected before entering the provider
+  operation.
 - A pre-PATCH denial is journaled ABORTED/NOT_APPLIED with reservation
   release. Any exception AFTER PATCH was entered, including losing the
   database commit acknowledgment, retains the PREPARED/UNKNOWN
@@ -86,13 +94,14 @@ after PATCH. Additional GitHub Actions: m6-current-authority-postgres.
 
 ### Explicit remaining risks
 
-- This is NOT an atomic PostgreSQL/Kubernetes transaction or complete
-  end-to-end revocation guarantee: a revoked upstream identity or policy
-  not yet materialized in this operator-owned row is invisible here.
-- A DB session lock/transaction can be lost during an in-flight network
-  call (e.g. connection loss or timeout). The Kubernetes API must enforce
-  UID, resourceVersion and independent fencing; strong global revocation
-  requires provider-recognized revision/fencing or an outbox design.
+- This is NOT an atomic PostgreSQL/provider transaction or complete end-to-end
+  revocation guarantee: a revoked upstream identity or policy not yet
+  materialized in this operator-owned row is invisible here.
+- A DB session lock/transaction can be lost during an in-flight network call
+  (e.g. connection loss or timeout). Kubernetes must enforce UID,
+  resourceVersion and independent fencing; GitHub must preserve its approved
+  head-SHA precondition. Strong global revocation requires provider-recognized
+  revision/fencing or an outbox design.
 - Holding a PG transaction across a network PATCH is deliberately bounded
   with lock/statement/idle timeout. Configure an independently bounded
   Kubernetes call deadline; if the DB lock expires first, fail as
