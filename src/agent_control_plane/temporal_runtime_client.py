@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Mapping, Protocol
-from uuid import uuid4
 
 from .runtime_clients import (
     RuntimeApplyResult,
@@ -65,6 +66,31 @@ def _workflow_is_running(status: Any) -> bool:
     return _normalized_workflow_status(status) == "RUNNING"
 
 
+def _operation_identity(
+    *,
+    release: str,
+    workflow_id: str,
+    workflow_type: str,
+    task_queue: str,
+    workflow_input: Mapping[str, Any],
+) -> str:
+    """Stable idempotency/ownership identity for one immutable desired workflow."""
+    canonical = json.dumps(
+        {
+            "release": release,
+            "workflow_id": workflow_id,
+            "workflow_type": workflow_type,
+            "task_queue": task_queue,
+            "input": workflow_input,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class TemporalWorkflowClient:
     """SDK-neutral Temporal adapter; Temporal owns continuation, not desired state."""
 
@@ -75,6 +101,18 @@ class TemporalWorkflowClient:
     def ensure_workflow(self, desired: Mapping[str, Any]) -> RuntimeApplyResult:
         release = str(desired["release"])
         workflow_id = str(desired.get("workflow_id") or f"agent-release/{release}")
+        workflow_type = str(
+            desired.get("workflow_type", "AgentRunWorkflow")
+        )
+        task_queue = str(desired.get("task_queue", self.task_queue))
+        workflow_input = dict(desired.get("input", {}))
+        operation_id = _operation_identity(
+            release=release,
+            workflow_id=workflow_id,
+            workflow_type=workflow_type,
+            task_queue=task_queue,
+            workflow_input=workflow_input,
+        )
         existing = self.api.describe(workflow_id=workflow_id)
         if existing is not None:
             status = existing.get("status")
@@ -88,6 +126,19 @@ class TemporalWorkflowClient:
                     "temporal workflow status is not safely attachable: "
                     f"{workflow_id} status={status}"
                 )
+            observed_operation_id = existing.get("operationId")
+            if observed_operation_id != operation_id:
+                raise RuntimeMutationOwnershipUncertain(
+                    "temporal workflow exists but its operation identity "
+                    "does not match the requested desired state",
+                    resource_ref=f"temporal://workflow/{workflow_id}",
+                    operation_id=operation_id,
+                    observed_operation_id=(
+                        str(observed_operation_id)
+                        if observed_operation_id is not None
+                        else None
+                    ),
+                )
             return RuntimeApplyResult(
                 resource_ref=f"temporal://workflow/{workflow_id}",
                 changed=False,
@@ -95,21 +146,17 @@ class TemporalWorkflowClient:
                     "workflowId": workflow_id,
                     "runId": existing.get("runId"),
                     "status": status,
+                    "operationId": observed_operation_id,
                 },
             )
 
         verified_after_uncertain_mutation = False
-        operation_id = uuid4().hex
         try:
             started = self.api.start(
                 workflow_id=workflow_id,
-                workflow_type=str(
-                    desired.get("workflow_type", "AgentRunWorkflow")
-                ),
-                task_queue=str(
-                    desired.get("task_queue", self.task_queue)
-                ),
-                input=dict(desired.get("input", {})),
+                workflow_type=workflow_type,
+                task_queue=task_queue,
+                input=workflow_input,
                 operation_id=operation_id,
             )
         except RuntimeMutationUncertain as exc:
@@ -149,6 +196,18 @@ class TemporalWorkflowClient:
             raise TerminalRuntimeConflict(
                 "temporal workflow start returned terminal execution: "
                 f"{workflow_id} status={started.get('status')}"
+            )
+        if started.get("operationId") != operation_id:
+            observed_operation_id = started.get("operationId")
+            raise RuntimeMutationOwnershipUncertain(
+                "temporal workflow start returned without proving operation ownership",
+                resource_ref=f"temporal://workflow/{workflow_id}",
+                operation_id=operation_id,
+                observed_operation_id=(
+                    str(observed_operation_id)
+                    if observed_operation_id is not None
+                    else None
+                ),
             )
 
         return RuntimeApplyResult(
