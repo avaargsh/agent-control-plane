@@ -167,3 +167,49 @@ def test_sdk_transport_rejects_workflow_with_foreign_server_memo():
 def test_sdk_reference_requires_loopback_without_tls(remote):
     with pytest.raises(ValueError, match="loopback"):
         TemporalSDKApi(target_host=remote)
+
+
+
+def test_sdk_termination_rejects_foreign_operation_and_run_identity():
+    async def scenario() -> None:
+        async with await WorkflowEnvironment.start_local() as env:
+            api = TemporalSDKApi(
+                target_host=env.client.service_client.config.target_host,
+                namespace=env.client.namespace,
+            )
+            spec = _spec("test-sdk/fenced-terminate-" + uuid.uuid4().hex)
+            first = await asyncio.to_thread(
+                TemporalWorkflowClient(api).ensure_workflow, spec
+            )
+            owner = first.evidence["operationId"]
+            run_id = first.evidence["runId"]
+
+            for expected_operation_id, expected_run_id in (
+                (None, None),
+                ("sha256:" + "f" * 64, run_id),
+                (owner, "wrong-run-id"),
+            ):
+                with pytest.raises(RuntimeMutationOwnershipUncertain):
+                    await asyncio.to_thread(
+                        api.terminate,
+                        workflow_id=spec["workflow_id"],
+                        reason="regression-test",
+                        expected_operation_id=expected_operation_id,
+                        expected_run_id=expected_run_id,
+                    )
+                observed = await asyncio.to_thread(
+                    api.describe, workflow_id=spec["workflow_id"]
+                )
+                assert observed["status"] == "RUNNING"
+                assert observed["runId"] == run_id
+
+            terminated = await asyncio.to_thread(
+                TemporalWorkflowClient(api).terminate_workflow,
+                first.resource_ref,
+                expected_operation_id=owner,
+                expected_run_id=run_id,
+            )
+            assert terminated["terminationRequested"] is True
+            assert terminated["runId"] == run_id
+
+    asyncio.run(scenario())
