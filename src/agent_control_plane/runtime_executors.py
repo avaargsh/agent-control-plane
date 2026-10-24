@@ -4,7 +4,11 @@ from typing import Any
 
 from .executors import ExecutionReceipt, RollbackReceipt
 from .plan import ResolvedReleasePlan
-from .runtime_clients import KubernetesRuntimeClient, TemporalRuntimeClient
+from .runtime_clients import (
+    KubernetesRuntimeClient,
+    RuntimeMutationOwnershipUncertain,
+    TemporalRuntimeClient,
+)
 
 
 class KubernetesSandboxExecutor:
@@ -93,7 +97,14 @@ class TemporalWorkflowExecutor:
             )
         expected_operation_id = receipt.evidence.get("operationId")
         expected_run_id = receipt.evidence.get("runId")
-        if expected_operation_id is not None or expected_run_id is not None:
+        if (expected_operation_id is None) != (expected_run_id is None):
+            raise RuntimeMutationOwnershipUncertain(
+                "Temporal rollback receipt must include both operationId "
+                "and runId, or neither for legacy synthetic adapters",
+                resource_ref=receipt.resource_ref,
+                operation_id=expected_operation_id,
+            )
+        if expected_operation_id is not None:
             evidence = self.client.terminate_workflow(
                 receipt.resource_ref,
                 expected_operation_id=expected_operation_id,
