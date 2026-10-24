@@ -209,6 +209,8 @@ def test_unknown_scope_with_unresolvable_approval_is_not_issued():
     authority, store, body = _build_issuer(
         "payments:transfer", approval_id="missing-approval"
     )
+    # The signed request names an approval, but the authority has no such grant.
+    store.approval = None
 
     with pytest.raises(
         CredentialAuthorityDenied,
