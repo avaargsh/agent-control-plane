@@ -39,6 +39,9 @@ def test_explicit_read_only_scope_verbs_do_not_require_approval(scope):
         "resource:mutate",
         "custom:unknown",
         "legacy-scope-with-no-action-verb",
+        "read",
+        ":read",
+        "payments:",
     ],
 )
 def test_mutating_or_unknown_scope_verbs_require_approval(scope):
