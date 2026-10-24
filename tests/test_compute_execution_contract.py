@@ -281,3 +281,65 @@ def test_compute_error_codes_freeze_outcome_and_retry_meaning() -> None:
     )
     for document in invalid:
         assert validation_errors(document, validator)
+
+
+
+RELEASE_SCHEMA_PATH = ROOT / "contracts" / "compute-execution" / "release-request-v0.1.schema.json"
+RELEASE_SCHEMA = json.loads(RELEASE_SCHEMA_PATH.read_text(encoding="utf-8"))
+RELEASE_VALIDATOR = Draft202012Validator(RELEASE_SCHEMA, format_checker=FormatChecker())
+
+
+def release_request() -> dict[str, Any]:
+    return {
+        "apiVersion": "compute.release-request/v0.1",
+        "requestId": "fedcba9876543210fedcba9876543210",
+        "sourceRequestId": "0123456789abcdef0123456789abcdef",
+        "intentDigest": "sha256:" + ("c" * 64),
+        "projectId": "project-a",
+        "computePoolId": "pool-a",
+        "workloadId": "workload-a",
+        "expectedGeneration": 3,
+        "correlation": {
+            "agentId": "agent-a",
+            "sessionId": "session-a",
+            "runId": "run-a",
+        },
+    }
+
+
+def test_release_request_schema_is_valid_draft_2020_12() -> None:
+    Draft202012Validator.check_schema(RELEASE_SCHEMA)
+
+
+def test_release_request_requires_distinct_128_bit_key_and_server_generation() -> None:
+    valid = release_request()
+    assert valid["requestId"] != valid["sourceRequestId"]
+    assert validation_errors(valid, RELEASE_VALIDATOR) == []
+
+    bad_request_id = copy.deepcopy(valid)
+    bad_request_id["requestId"] = "not-a-request-key"
+    assert validation_errors(bad_request_id, RELEASE_VALIDATOR)
+
+    bad_source_id = copy.deepcopy(valid)
+    bad_source_id["sourceRequestId"] = "not-a-create-key"
+    assert validation_errors(bad_source_id, RELEASE_VALIDATOR)
+
+    generation_zero = copy.deepcopy(valid)
+    generation_zero["expectedGeneration"] = 0
+    assert validation_errors(generation_zero, RELEASE_VALIDATOR)
+
+    negative_generation = copy.deepcopy(valid)
+    negative_generation["expectedGeneration"] = -1
+    assert validation_errors(negative_generation, RELEASE_VALIDATOR)
+
+
+def test_release_request_rejects_unknown_or_malformed_correlation_fields() -> None:
+    valid = release_request()
+
+    unknown = copy.deepcopy(valid)
+    unknown["clusterId"] = "caller-controlled-cluster"
+    assert validation_errors(unknown, RELEASE_VALIDATOR)
+
+    malformed_correlation = copy.deepcopy(valid)
+    malformed_correlation["correlation"]["runId"] = "run id with whitespace"
+    assert validation_errors(malformed_correlation, RELEASE_VALIDATOR)
