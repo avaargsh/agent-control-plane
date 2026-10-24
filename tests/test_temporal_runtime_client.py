@@ -207,20 +207,25 @@ def test_temporal_client_rejects_terminal_existing_workflow(status):
     assert api.starts == 0
 
 
-def test_temporal_client_allows_nonterminal_existing_workflow():
+def test_temporal_client_allows_existing_workflow_with_matching_operation_identity():
     api = FakeTemporalApi()
+    client = TemporalWorkflowClient(api)
+    first = client.ensure_workflow(desired())
     workflow_id = "agent-release/gpu-xid-remediation-v1"
     api.workflows[workflow_id] = {
+        **api.workflows[workflow_id],
         "runId": "run-live-001",
         "status": "RUNNING",
+        "operationId": first.evidence["operationId"],
     }
-    client = TemporalWorkflowClient(api)
+    api.starts = 0
 
     result = client.ensure_workflow(desired())
 
     assert result.changed is False
     assert result.evidence["runId"] == "run-live-001"
     assert result.evidence["status"] == "RUNNING"
+    assert result.evidence["operationId"] == first.evidence["operationId"]
     assert api.starts == 0
 
 
@@ -407,3 +412,25 @@ def test_temporal_client_operation_identity_changes_when_desired_payload_changes
 
     assert len(api.operation_ids) == 2
     assert api.operation_ids[0] != api.operation_ids[1]
+
+
+class ForeignReceiptTemporalApi(FakeTemporalApi):
+    def start(self, *, workflow_id, workflow_type, task_queue, input, operation_id):
+        self.starts += 1
+        return {
+            "runId": "run-foreign-receipt",
+            "status": "RUNNING",
+            "operationId": "sha256:" + "e" * 64,
+        }
+
+
+def test_temporal_client_rejects_start_receipt_without_matching_owner_identity():
+    api = ForeignReceiptTemporalApi()
+    client = TemporalWorkflowClient(api)
+
+    with pytest.raises(RuntimeMutationOwnershipUncertain) as caught:
+        client.ensure_workflow(desired())
+
+    assert caught.value.observed_operation_id == "sha256:" + "e" * 64
+    assert caught.value.operation_id != caught.value.observed_operation_id
+    assert api.starts == 1
