@@ -81,9 +81,15 @@ def _scopes(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
 
 
 def _scope_needs_approval(scope: str) -> bool:
-    """Require approval unless a resource:action scope names a read-only verb."""
+    """Require approval unless a canonical resource:action scope is read-only."""
     resource, separator, action = scope.rpartition(":")
-    if not separator or not resource.strip() or not action.strip():
+    if (
+        not separator
+        or not resource.strip()
+        or not action.strip()
+        or resource != resource.strip()
+        or action != action.strip()
+    ):
         return True
     return action.casefold() not in READ_ONLY_SCOPE_SUFFIXES
 
