@@ -45,8 +45,10 @@ creating duplicate identity, approval, or operation ledgers.
 
 ## Credential scope risk classification
 
-A scope uses its final colon-delimited component as the action verb. Only these
-explicitly known read-only verbs are exempt from the exact-approval requirement:
+A scope must be resource-qualified as `resource:action`; its final
+colon-delimited component is the action verb. A scope missing the separator,
+resource, or action is approval-required. Only these explicitly known read-only
+verbs are exempt from the exact-approval requirement:
 
 - `read`
 - `list`
@@ -63,8 +65,9 @@ silently classify unknown operations such as `transfer`, `create`, or
 This is a narrow credential-scope policy, not a general-purpose semantic
 classifier. Operator-reviewed CredentialBinding scope allowlists remain
 required. The terminal-action convention must be documented by scope issuers;
-a scope whose name does not reliably encode its operation must be treated as
-approval-required or redesigned before use.
+a scope whose name does not reliably encode both its resource and operation
+must be treated as approval-required or redesigned before use. Bare `read`,
+`:read`, and `payments:` are not read-only exemptions.
 
 ## P0 authorization invariants
 
