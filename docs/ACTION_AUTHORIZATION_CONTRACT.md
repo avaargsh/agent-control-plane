@@ -57,9 +57,9 @@ creating duplicate identity, approval, or operation ledgers.
 ## Credential scope risk classification
 
 A scope must be resource-qualified as `resource:action`; its final
-colon-delimited component is the action verb. A scope missing the separator,
-resource, or action is approval-required. Only these explicitly known read-only
-verbs are exempt from the scope-approval requirement:
+colon-delimited component is the action verb. A missing separator/resource/action
+or leading/trailing whitespace in either component is approval-required. Only
+these explicitly known read-only verbs are exempt from the scope-approval requirement:
 
 - `read`
 - `list`
