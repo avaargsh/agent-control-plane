@@ -17,8 +17,15 @@ import uuid
 
 import pytest
 
-pytest.importorskip("cloud_agent_runtime.canonical_runtime_identity")
-pytest.importorskip("cryptography")
+# Generic ACP unit-test jobs do not install the Runtime checkout. The dedicated
+# PostgreSQL integration job sets the DSN and must fail closed if its pinned
+# Runtime commit lacks the canonical reader or cryptography dependency; never
+# convert a broken cross-repo integration into a green importorskip.
+if not os.environ.get("ACP_WORKLOAD_CREDENTIAL_DATABASE_URL"):
+    pytest.skip(
+        "dedicated PostgreSQL authority workflow is required",
+        allow_module_level=True,
+    )
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
