@@ -26,7 +26,8 @@ The plan stage:
 1. validates each portable document,
 2. resolves `bundleRef`,
 3. resolves all named runtime bindings,
-4. produces a deterministic `ResolvedReleasePlan`.
+4. resolves every `contextProjectionPolicyRefs` entry to its full policy document,
+5. produces a deterministic `ResolvedReleasePlan` containing the selected context policies.
 
 It performs no external mutation.
 
