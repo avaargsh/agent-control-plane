@@ -7,6 +7,7 @@ from .plan import ResolvedReleasePlan
 from .runtime_clients import (
     KubernetesRuntimeClient,
     RuntimeMutationOwnershipUncertain,
+    RuntimeMutationUncertain,
     TemporalRuntimeClient,
 )
 
@@ -114,6 +115,13 @@ class TemporalWorkflowExecutor:
             # Backward-compatible synthetic adapters; the official SDK
             # rejects unbound termination before any provider mutation.
             evidence = self.client.terminate_workflow(receipt.resource_ref)
+        if evidence.get("terminated") is not True:
+            # A provider acknowledging a terminate request is not evidence
+            # that the exact execution actually terminated. The reconciler
+            # must record a rollback error and remain BLOCKED, not ROLLED_BACK.
+            raise RuntimeMutationUncertain(
+                "Temporal termination postcondition not verified"
+            )
         return RollbackReceipt(
             binding_name=receipt.binding_name,
             provider_type=self.provider_type,
