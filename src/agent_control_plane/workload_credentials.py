@@ -974,7 +974,7 @@ class WorkloadCredentialAuthority:
 
         needs_approval = any(_scope_needs_approval(scope) for scope in requested_scopes)
         if needs_approval != (approval_id is not None):
-            raise CredentialAuthorityDenied("sensitive credentials require an exact approval reference")
+            raise CredentialAuthorityDenied("sensitive credential scopes require a matching scope-approval reference")
         grant = None
         if approval_id is not None:
             grant = self._store.get_approval(approval_id)
