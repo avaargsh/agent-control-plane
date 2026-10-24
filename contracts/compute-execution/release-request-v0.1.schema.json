@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:avaargsh:compute-release-request:v0.1",
+  "title": "Compute release request v0.1",
+  "description": "A durable, separately keyed release intent for a previously committed ComputeRequest. It is persisted before DELETE, reuses its requestId on retry/restart, and never replaces the immutable create request identity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "requestId",
+    "sourceRequestId",
+    "intentDigest",
+    "projectId",
+    "computePoolId",
+    "workloadId",
+    "expectedGeneration",
+    "correlation"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "compute.release-request/v0.1"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "New random 128-bit release operation identity, reused verbatim as the Management API Idempotency-Key."
+    },
+    "sourceRequestId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "Original create ComputeRequest key. Must differ from requestId."
+    },
+    "intentDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^\\S+$"
+    },
+    "computePoolId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^\\S+$"
+    },
+    "workloadId": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "expectedGeneration": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Server-issued current Workload Generation from receipt + authorized Desired reconciliation."
+    },
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agentId",
+        "sessionId",
+        "runId"
+      ],
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^\\S+$"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^\\S+$"
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^\\S+$"
+        }
+      }
+    }
+  }
+}
