@@ -42,6 +42,8 @@ class ServiceRoleAuthenticator:
             if not isinstance(digest, str) or not _DIGEST_PATTERN.fullmatch(digest):
                 raise ValueError("service role token digests must be lowercase SHA-256 hex")
             normalized[role] = digest
+        if len(set(normalized.values())) != len(normalized):
+            raise ValueError("each service role requires a distinct token digest")
         self._digests = normalized
 
     @staticmethod
