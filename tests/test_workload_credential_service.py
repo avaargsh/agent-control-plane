@@ -150,10 +150,28 @@ def test_production_factory_configuration_fails_closed(changes):
 @pytest.mark.parametrize(
     ("changes", "message"),
     [
-        ({"ACP_WORKLOAD_ASSERTION_AUDIENCE": "   "}, "audience"),
-        ({"ACP_WORKLOAD_ASSERTION_ISSUER": " https://runtime.example.test"}, "issuer"),
-        ({"ACP_RUNTIME_IDENTITY_SERVICE_TOKEN": " runtime-identity-reader-token-0123456789"}, "whitespace"),
-        ({"ACP_CREDENTIAL_ISSUER_TOKEN": "credential-issuer-role-token-0123456789 "}, "whitespace"),
+        (
+            {"ACP_WORKLOAD_ASSERTION_AUDIENCE": "   "},
+            "audience",
+        ),
+        (
+            {"ACP_WORKLOAD_ASSERTION_ISSUER": " https://runtime.example.test"},
+            "issuer",
+        ),
+        (
+            {
+                "ACP_RUNTIME_IDENTITY_SERVICE_TOKEN":
+                    " runtime-identity-reader-token-0123456789",
+            },
+            "whitespace",
+        ),
+        (
+            {
+                "ACP_CREDENTIAL_ISSUER_TOKEN":
+                    "credential-issuer-role-token-0123456789 ",
+            },
+            "whitespace",
+        ),
         (
             {
                 "ACP_WORKLOAD_ASSERTION_PUBLIC_KEYS_JSON": (
