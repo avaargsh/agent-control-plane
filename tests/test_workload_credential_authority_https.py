@@ -117,6 +117,9 @@ def _write_cert(path: Path, cert) -> None:
 
 
 class _HttpsRequestHandler(WSGIRequestHandler):
+    def get_scheme(self):
+        return "https"
+
     def get_environ(self):
         environ = super().get_environ()
         # This handler is only installed on the socket wrapped by the test TLS
@@ -144,7 +147,7 @@ class _RoleAuthenticator:
 class _RecordingApp:
     def __init__(self, app):
         self.app = app
-        self.calls: list[tuple[str, str | None, str]] = []
+        self.calls: list[tuple[str, str | None, str, str | None]] = []
         self.statuses: list[str] = []
 
     def __call__(self, environ, start_response):
@@ -152,6 +155,7 @@ class _RecordingApp:
             environ.get("REQUEST_METHOD", ""),
             environ.get("HTTP_AUTHORIZATION"),
             environ.get("PATH_INFO", ""),
+            environ.get("wsgi.url_scheme"),
         ))
 
         def record(status, headers, exc_info=None):
@@ -277,7 +281,7 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         assert binding.sandbox_revision == 7
         assert binding.status == "running"
         assert wsgi_app.calls == [(
-            "GET", f"Bearer {SERVICE_TOKEN}", CANONICAL_RUN_ROUTE_PREFIX + RUN_ID
+            "GET", f"Bearer {SERVICE_TOKEN}", CANONICAL_RUN_ROUTE_PREFIX + RUN_ID, "https"
         )]
         assert wsgi_app.statuses == ["200 OK"]
         assert authenticator.roles == ["runtime.identity.reader"]
@@ -306,7 +310,7 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         with pytest.raises(RuntimeIdentityUnavailableError):
             HttpsRuntimeStoreRunAuthorityReader(denied_transport).get_run_binding(RUN_ID)
         assert wsgi_app.calls[-1] == (
-            "GET", "Bearer wrong-service-token", CANONICAL_RUN_ROUTE_PREFIX + RUN_ID
+            "GET", "Bearer wrong-service-token", CANONICAL_RUN_ROUTE_PREFIX + RUN_ID, "https"
         )
         assert wsgi_app.statuses[-1] == "403 Forbidden"
 
