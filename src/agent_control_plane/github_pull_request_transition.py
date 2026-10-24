@@ -520,7 +520,11 @@ class GitHubPullRequestMergeProvider:
                 observed_operation_id=None,
             )
 
-        self._validate_live_precondition(plan=plan, live=live)
+        try:
+            self._validate_live_precondition(plan=plan, live=live)
+        except ProtocolViolation as exc:
+            # The merge API call has not been entered: this denial is definitive.
+            raise LiveEffectAdmissionDenied(str(exc)) from exc
         commit_message = _owned_commit_message(
             operation_id=operation_id,
             plan_hash=plan.plan_hash,

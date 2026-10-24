@@ -50,10 +50,7 @@ execution coordinator as `LiveEffectAdmissionDenied`; the coordinator records
 an auditable `ABORTED/NOT_APPLIED` attempt and releases the authority
 reservation. The denied attempt cannot later become COMMITTED.
 
-For GitHub, the merge provider raises the same typed denial before entering
-`merge_pull_request()`. This provider adapter does not itself own a durable
-execution journal, so its caller must preserve that typed pre-effect outcome
-and must not claim a durable terminal record that was never written.
+For GitHub, `GitHubPullRequestExecutionCoordinator` writes the existing provider-neutral `ExecutionAttempt` as `PREPARED` before calling the guarded merge provider. A typed denial before `merge_pull_request()` becomes durable `ABORTED/NOT_APPLIED`. A successful response is not enough for `COMMITTED`: the coordinator independently observes GitHub and requires exact operation/plan ownership markers. A crash after provider success but before journal commit is recovered from observation with the same operation ID and no second merge request; unresolved outcomes become terminal `UNKNOWN` and cannot be automatically retried.
 
 Once a provider call has been entered, a timeout, lost ACK or ownership
 ambiguity keeps its original reconciliation/UNKNOWN semantics. The gate never
