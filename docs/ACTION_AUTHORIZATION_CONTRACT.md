@@ -30,9 +30,20 @@ creating duplicate identity, approval, or operation ledgers.
 ## Current enforcement seams
 
 - `WorkloadCredentialAuthority` validates issuer/audience/expiry, canonical
-  Run binding, active CredentialBinding, allowed scopes and exact approval
-  references before issuance. Durable issuance rechecks binding and approval
-  versions under database locks.
+  Run binding, active CredentialBinding, allowed scopes and matching **scope
+  approval** references before issuance. Durable issuance rechecks binding and
+  approval versions under database locks.
+- A workload `ApprovalGrantRecord` is scope-level authority: it binds the
+  principal/tenant/Session/Run, credential binding, audience, scopes, lifetime
+  and version. It does **not** carry a target `ResourceIdentity`,
+  `ActionIntent.action_hash`, or canonical parameter digest. Therefore it is
+  not, by itself, approval for one specific high-risk side effect.
+- For ACP state-transition effects, the action-specific confirmation remains
+  the verified `TransitionApproval` / `AuthorizationBinding` chain over the
+  exact transition, `ActionIntent`, policy input/decision and expiry, checked
+  again at the current effect boundary. An API/MCP/GUI adapter must enforce an
+  equivalent action-and-parameter-bound grant before a high-risk effect; a
+  workload credential with a write scope alone is insufficient.
 - `LiveEffectBoundaryGate` is an **opt-in, provider-specific** last-moment
   check for the Kubernetes Deployment PATCH path. It binds operator-pinned
   tenant/project/cluster scope, exact action/authorization/approval/policy,
@@ -48,7 +59,7 @@ creating duplicate identity, approval, or operation ledgers.
 A scope must be resource-qualified as `resource:action`; its final
 colon-delimited component is the action verb. A scope missing the separator,
 resource, or action is approval-required. Only these explicitly known read-only
-verbs are exempt from the exact-approval requirement:
+verbs are exempt from the scope-approval requirement:
 
 - `read`
 - `list`
@@ -57,7 +68,7 @@ verbs are exempt from the exact-approval requirement:
 - `inspect`
 
 Every other action verb, including an unrecognized or newly introduced verb,
-requires an exact approval reference. This is deliberately fail-closed: a
+requires a matching scope-approval reference. This is deliberately fail-closed: a
 denylist containing only `write`, `delete`, `admin`, and `mutate` would
 silently classify unknown operations such as `transfer`, `create`, or
 `execute` as non-sensitive.
@@ -103,9 +114,10 @@ must be treated as approval-required or redesigned before use. Bare `read`,
 |---|---|
 | Caller forges Agent or tenant identity | Deny based on canonical authority; do not call provider |
 | Read-only scope is used for a write | Deny before effect |
-| Unknown credential scope action (e.g. `payments:transfer`) | Exact approval required |
+| Unknown credential scope action (e.g. `payments:transfer`) | Matching scope approval required; a high-risk effect still needs action-specific approval |
 | Wrong audience, expiry, revocation or stale policy/binding | Deny before new effect |
-| Parameter or target changes after confirmation | Digest/binding verification fails |
+| Parameter or target changes after action-specific confirmation | Digest/binding verification fails |
+| Workload scope approval presented as the only approval for a high-risk effect | Deny at the protected effect boundary; scope grant is not an action grant |
 | Executor changes from native API to MCP/GUI | No authority increase; recheck same action binding |
 | Duplicate request with same identity and digest | Return/reconcile the same durable operation |
 | Same idempotency identity with changed digest | Hard conflict; do not issue second effect |
