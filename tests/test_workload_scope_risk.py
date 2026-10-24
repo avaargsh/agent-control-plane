@@ -94,6 +94,7 @@ class _RunAuthority:
 
 
 def _build_issuer(scope, *, approval_id=None):
+    scopes = [scope] if isinstance(scope, str) else list(scope)
     now = 1_800_000_000.0
     claims = {
         "sub": "workload-subject",
@@ -111,8 +112,8 @@ def _build_issuer(scope, *, approval_id=None):
         "audience": "payments-api",
         "request_id": "request-a",
         "requested_ttl_seconds": 60,
-        "allowed_scopes": [scope],
-        "scopes": [scope],
+        "allowed_scopes": scopes,
+        "scopes": scopes,
         "approval_id": approval_id,
         "exp": now + 120,
     }
@@ -120,7 +121,7 @@ def _build_issuer(scope, *, approval_id=None):
         binding_id="binding-a",
         capability="payments-api",
         audience="payments-api",
-        allowed_scopes=(scope,),
+        allowed_scopes=tuple(scopes),
         max_ttl_seconds=120,
         active=True,
         version=1,
@@ -149,7 +150,7 @@ def _build_issuer(scope, *, approval_id=None):
         "request_id": "request-a",
         "binding_id": "binding-a",
         "audience": "payments-api",
-        "scopes": [scope],
+        "scopes": scopes,
         "requested_ttl_seconds": 60,
         "workload_assertion": "signed-test-assertion",
         **({"approval_id": approval_id} if approval_id is not None else {}),
@@ -194,3 +195,19 @@ def test_unknown_scope_with_unresolvable_approval_is_not_issued():
 
     assert store.approval_lookups == ["missing-approval"]
     assert store.issue_calls == []
+
+
+
+def test_mixed_read_only_and_unknown_scopes_require_exact_approval():
+    authority, store, body = _build_issuer(
+        ["payments:read", "payments:transfer"]
+    )
+
+    with pytest.raises(
+        CredentialAuthorityDenied,
+        match="sensitive credentials require an exact approval reference",
+    ):
+        authority.issue(body)
+
+    assert store.issue_calls == []
+    assert store.approval_lookups == []
