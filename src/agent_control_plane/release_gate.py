@@ -23,6 +23,8 @@ def evaluate_release_gate(
     evidence: Mapping[str, Any],
     *,
     expected_authority_digest: str | None = None,
+    expected_release_ref: str | None = None,
+    expected_runtime_run_id: str | None = None,
 ) -> ReleaseGateDecision:
     """Fail-closed promotion decision over metrics + sealed runtime evidence."""
     release_ref = evidence.get("release_ref")
@@ -56,6 +58,28 @@ def evaluate_release_gate(
             release_ref,
             runtime_run_id,
             "INVALID_RELEASE_EVIDENCE",
+            empty_eval,
+        )
+
+    # A valid digest proves integrity, not that these bytes belong to the
+    # Release/Run being promoted. Targets must come from the trusted caller,
+    # never from the evidence itself.
+    if expected_release_ref is not None and release_ref != expected_release_ref:
+        return ReleaseGateDecision(
+            "BLOCK",
+            False,
+            release_ref,
+            runtime_run_id,
+            "RELEASE_REF_MISMATCH",
+            empty_eval,
+        )
+    if expected_runtime_run_id is not None and runtime_run_id != expected_runtime_run_id:
+        return ReleaseGateDecision(
+            "BLOCK",
+            False,
+            release_ref,
+            runtime_run_id,
+            "RUNTIME_RUN_ID_MISMATCH",
             empty_eval,
         )
 
