@@ -158,3 +158,12 @@ def test_sdk_transport_rejects_workflow_with_foreign_server_memo():
             assert denied.value.observed_operation_id == "sha256:" + "e" * 64
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "remote",
+    ["temporal.example.com:7233", "10.12.0.8:7233", "192.168.1.4:7233"],
+)
+def test_sdk_reference_requires_loopback_without_tls(remote):
+    with pytest.raises(ValueError, match="loopback"):
+        TemporalSDKApi(target_host=remote)
