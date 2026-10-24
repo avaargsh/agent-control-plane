@@ -13,6 +13,7 @@ class ResolvedReleasePlan:
     authority_ref: str | None = None
     authority_digest: str | None = None
     policy_refs: tuple[str, ...] = field(default_factory=tuple)
+    context_projection_policies: Mapping[str, dict[str, Any]] = field(default_factory=dict)
     capability_intent_refs: tuple[str, ...] = field(default_factory=tuple)
     evidence_requirements: Mapping[str, Any] = field(default_factory=dict)
     eval_gates: tuple[str, ...] = field(default_factory=tuple)
