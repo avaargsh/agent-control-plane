@@ -175,11 +175,37 @@ class TemporalSDKApi:
             )
         return observed
 
-    def terminate(self, *, workflow_id: str, reason: str) -> Mapping[str, Any]:
-        return self._invoke("terminate", workflow_id=workflow_id, reason=reason)
+    def terminate(
+        self,
+        *,
+        workflow_id: str,
+        reason: str,
+        expected_operation_id: str | None = None,
+        expected_run_id: str | None = None,
+    ) -> Mapping[str, Any]:
+        if not expected_operation_id or not expected_run_id:
+            raise RuntimeMutationOwnershipUncertain(
+                "Temporal termination requires the exact operation and Run IDs "
+                "from an authorized execution receipt",
+                resource_ref=f"temporal://workflow/{workflow_id}",
+                operation_id=expected_operation_id,
+            )
+        return self._invoke(
+            "terminate",
+            workflow_id=workflow_id,
+            reason=reason,
+            expected_operation_id=expected_operation_id,
+            expected_run_id=expected_run_id,
+        )
 
     async def _async_terminate(
-        self, client: Any, *, workflow_id: str, reason: str
+        self,
+        client: Any,
+        *,
+        workflow_id: str,
+        reason: str,
+        expected_operation_id: str,
+        expected_run_id: str,
     ) -> dict:
         from temporalio.service import RPCError
 
@@ -187,16 +213,27 @@ class TemporalSDKApi:
         if observed is None:
             # Not found does not prove that this operation ever terminated it.
             raise RuntimeMutationUncertain("Temporal termination target not found")
-        if not observed.get("operationId"):
+        observed_operation_id = observed.get("operationId")
+        if (
+            observed_operation_id != expected_operation_id
+            or observed.get("runId") != expected_run_id
+        ):
             raise RuntimeMutationOwnershipUncertain(
-                "refusing to terminate Workflow without ACP operation ownership",
+                "Temporal termination target identity differs from the "
+                "authorized operation receipt",
                 resource_ref=f"temporal://workflow/{workflow_id}",
+                operation_id=expected_operation_id,
+                observed_operation_id=observed_operation_id,
+            )
+        if observed.get("status") != "RUNNING":
+            raise RuntimeMutationUncertain(
+                "Temporal termination target is not a running Workflow"
             )
         try:
             # Run-ID pinning prevents a stale Workflow ID from terminating a
             # replacement execution with a different Temporal Run ID.
             await client.get_workflow_handle(
-                workflow_id, run_id=observed["runId"]
+                workflow_id, run_id=expected_run_id
             ).terminate(reason=reason, rpc_timeout=self.rpc_timeout)
         except RPCError as exc:
             raise RuntimeMutationUncertain(
@@ -204,7 +241,7 @@ class TemporalSDKApi:
             ) from exc
         return {
             "workflowId": workflow_id,
-            "runId": observed["runId"],
-            "operationId": observed["operationId"],
+            "runId": expected_run_id,
+            "operationId": expected_operation_id,
             "terminationRequested": True,
         }
