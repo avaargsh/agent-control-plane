@@ -8,6 +8,7 @@ on:
       - "tests/test_temporal_sdk_api.py"
       - "tests/test_temporal_sdk_worker_handoff.py"
       - "tests/test_temporal_sdk_server_restart.py"
+      - "tests/test_temporal_sdk_server_sigkill.py"
       - "pyproject.toml"
       - ".github/workflows/temporal-sdk-adapter.yml"
   workflow_dispatch:
@@ -31,6 +32,6 @@ jobs:
       - name: Install optional Temporal SDK
         run: python -m pip install -e ".[dev,temporal]"
       - name: Validate SDK adapter and server memo binding
-        run: python -m pytest -q tests/test_temporal_sdk_api.py tests/test_temporal_sdk_worker_handoff.py tests/test_temporal_sdk_server_restart.py
+        run: python -m pytest -q tests/test_temporal_sdk_api.py tests/test_temporal_sdk_worker_handoff.py tests/test_temporal_sdk_server_restart.py tests/test_temporal_sdk_server_sigkill.py
       - name: Check narrow adapter lint
-        run: python -m ruff check src/agent_control_plane/temporal_sdk_api.py tests/test_temporal_sdk_api.py tests/test_temporal_sdk_worker_handoff.py tests/test_temporal_sdk_server_restart.py
+        run: python -m ruff check src/agent_control_plane/temporal_sdk_api.py tests/test_temporal_sdk_api.py tests/test_temporal_sdk_worker_handoff.py tests/test_temporal_sdk_server_restart.py tests/test_temporal_sdk_server_sigkill.py
