@@ -91,7 +91,18 @@ class TemporalWorkflowExecutor:
                     "reason": "resource-preexisted",
                 },
             )
-        evidence = self.client.terminate_workflow(receipt.resource_ref)
+        expected_operation_id = receipt.evidence.get("operationId")
+        expected_run_id = receipt.evidence.get("runId")
+        if expected_operation_id is not None or expected_run_id is not None:
+            evidence = self.client.terminate_workflow(
+                receipt.resource_ref,
+                expected_operation_id=expected_operation_id,
+                expected_run_id=expected_run_id,
+            )
+        else:
+            # Backward-compatible synthetic adapters; the official SDK
+            # rejects unbound termination before any provider mutation.
+            evidence = self.client.terminate_workflow(receipt.resource_ref)
         return RollbackReceipt(
             binding_name=receipt.binding_name,
             provider_type=self.provider_type,
