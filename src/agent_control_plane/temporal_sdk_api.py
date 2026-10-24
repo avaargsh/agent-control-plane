@@ -211,8 +211,12 @@ class TemporalSDKApi:
 
         observed = await self._describe_client(client, workflow_id, self.rpc_timeout)
         if observed is None:
-            # Not found does not prove that this operation ever terminated it.
-            raise RuntimeMutationUncertain("Temporal termination target not found")
+            # Precondition failure, not an ambiguous post-mutation response.
+            raise RuntimeMutationOwnershipUncertain(
+                "Temporal termination target not found; ownership cannot be proven",
+                resource_ref=f"temporal://workflow/{workflow_id}",
+                operation_id=expected_operation_id,
+            )
         observed_operation_id = observed.get("operationId")
         if (
             observed_operation_id != expected_operation_id
@@ -226,8 +230,11 @@ class TemporalSDKApi:
                 observed_operation_id=observed_operation_id,
             )
         if observed.get("status") != "RUNNING":
-            raise RuntimeMutationUncertain(
-                "Temporal termination target is not a running Workflow"
+            raise RuntimeMutationOwnershipUncertain(
+                "Temporal termination requires the exact running execution",
+                resource_ref=f"temporal://workflow/{workflow_id}",
+                operation_id=expected_operation_id,
+                observed_operation_id=observed_operation_id,
             )
         try:
             # Run-ID pinning prevents a stale Workflow ID from terminating a
