@@ -97,7 +97,7 @@ For example, after an operator has independently resolved the intended
 AgentRelease, current Runtime Run and trusted authority digest:
 
 ```sh
-agent-control-plane gate examples/golden-slice.yaml \
+agent-control-plane gate /path/to/validated-eval-gate.yaml \
   --metrics /path/to/metrics.json \
   --evidence /path/to/sealed-release-evidence.json \
   --authority-digest "sha256:${TRUSTED_AUTHORITY_SHA256}" \
