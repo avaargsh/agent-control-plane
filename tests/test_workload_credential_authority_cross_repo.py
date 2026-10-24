@@ -205,7 +205,7 @@ def test_runtime_authority_can_issue_then_fence_credential_after_sandbox_rebind(
     integration_context,
 ):
     authority = integration_context["authority"]
-    result = authority.issue(integration_context["request"])
+    result = authority.issue(integration_context["request"]())
     credential = result["credential"]
     assert credential["run_id"] == integration_context["run_id"]
     assert credential["session_id"] == integration_context["session_id"]
