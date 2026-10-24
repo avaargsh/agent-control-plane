@@ -51,7 +51,11 @@ def evaluate_release_gate(
         )
 
     evidence_required = bool(gate.get("spec", {}).get("evidenceRequired", True))
-    if evidence_required and not verify_release_evidence(evidence):
+    target_bound = (
+        expected_release_ref is not None
+        or expected_runtime_run_id is not None
+    )
+    if (evidence_required or target_bound) and not verify_release_evidence(evidence):
         return ReleaseGateDecision(
             "BLOCK",
             False,
