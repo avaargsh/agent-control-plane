@@ -776,3 +776,13 @@ def test_credential_revoker_cannot_revoke_approval_authority():
     )
     assert status == 200
     assert payload == {"revoked_count": 0}
+
+
+def test_service_role_authenticator_rejects_a_digest_shared_by_roles():
+    shared_token = "shared-service-token-that-is-long-enough-0123456789"
+    shared_digest = ServiceRoleAuthenticator.digest_token(shared_token)
+    with pytest.raises(ValueError, match="distinct"):
+        ServiceRoleAuthenticator({
+            "credential.revoker": shared_digest,
+            "approval.revoker": shared_digest,
+        })
