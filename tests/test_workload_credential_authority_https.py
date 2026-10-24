@@ -144,13 +144,14 @@ class _RoleAuthenticator:
 class _RecordingApp:
     def __init__(self, app):
         self.app = app
-        self.calls: list[tuple[str, str | None]] = []
+        self.calls: list[tuple[str, str | None, str]] = []
         self.statuses: list[str] = []
 
     def __call__(self, environ, start_response):
         self.calls.append((
             environ.get("REQUEST_METHOD", ""),
             environ.get("HTTP_AUTHORIZATION"),
+            environ.get("PATH_INFO", ""),
         ))
 
         def record(status, headers, exc_info=None):
@@ -268,7 +269,9 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         assert binding.sandbox_id == "tls-sandbox-1"
         assert binding.sandbox_revision == 7
         assert binding.status == "running"
-        assert wsgi_app.calls == [("GET", f"Bearer {SERVICE_TOKEN}")]
+        assert wsgi_app.calls == [(
+            "GET", f"Bearer {SERVICE_TOKEN}", CANONICAL_RUN_ROUTE_PREFIX + RUN_ID
+        )]
         assert wsgi_app.statuses == ["200 OK"]
         assert authenticator.roles == ["runtime.identity.reader"]
 
@@ -295,7 +298,9 @@ def test_remote_reader_uses_verified_https_mutual_tls_and_service_role(tmp_path)
         )
         with pytest.raises(RuntimeIdentityUnavailableError):
             HttpsRuntimeStoreRunAuthorityReader(denied_transport).get_run_binding(RUN_ID)
-        assert wsgi_app.calls[-1] == ("GET", "Bearer wrong-service-token")
+        assert wsgi_app.calls[-1] == (
+            "GET", "Bearer wrong-service-token", CANONICAL_RUN_ROUTE_PREFIX + RUN_ID
+        )
         assert wsgi_app.statuses[-1] == "403 Forbidden"
 
         # A peer certificate not rooted in the configured trust store is also
