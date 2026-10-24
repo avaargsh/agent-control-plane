@@ -29,7 +29,7 @@ _DEFAULT_ASSERTION_AUDIENCE = "urn:acp:workload-credential-authority"
 class WorkloadCredentialServiceConfig:
     """Validated process configuration; secret-bearing fields are hidden from repr."""
 
-    database_url: str
+    database_url: str = field(repr=False)
     assertion_issuer: str
     assertion_audience: str
     assertion_public_keys: Mapping[str, bytes]
