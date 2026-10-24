@@ -25,6 +25,16 @@ _ROLE_ENV = {
 _DEFAULT_ASSERTION_AUDIENCE = "urn:acp:workload-credential-authority"
 
 
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("JSON configuration object contains a duplicate key")
+        result[key] = value
+    return result
+
+
 @dataclass(frozen=True)
 class WorkloadCredentialServiceConfig:
     """Validated process configuration; secret-bearing fields are hidden from repr."""
@@ -53,7 +63,10 @@ class WorkloadCredentialServiceConfig:
 
         public_keys_raw = required("ACP_WORKLOAD_ASSERTION_PUBLIC_KEYS_JSON")
         try:
-            parsed_keys = json.loads(public_keys_raw)
+            parsed_keys = json.loads(
+                public_keys_raw,
+                object_pairs_hook=_unique_json_object,
+            )
         except json.JSONDecodeError:
             raise ValueError("ACP_WORKLOAD_ASSERTION_PUBLIC_KEYS_JSON must be a JSON object") from None
         if not isinstance(parsed_keys, dict) or not parsed_keys:
@@ -64,9 +77,10 @@ class WorkloadCredentialServiceConfig:
             if (
                 not isinstance(kid, str)
                 or not kid.strip()
-                or not isinstance(encoded, str)
-                or len(encoded) != 64
+                or kid != kid.strip()
             ):
+                raise ValueError("assertion public key IDs must be non-empty and trimmed")
+            if not isinstance(encoded, str) or len(encoded) != 64:
                 raise ValueError("assertion public key entries must map key IDs to 32-byte hex keys")
             try:
                 raw_key = bytes.fromhex(encoded)
@@ -78,12 +92,36 @@ class WorkloadCredentialServiceConfig:
         if len(set(public_keys.values())) != len(public_keys):
             raise ValueError("assertion public key values must be unique across key IDs")
 
+        assertion_issuer = required("ACP_WORKLOAD_ASSERTION_ISSUER")
+        if assertion_issuer != assertion_issuer.strip():
+            raise ValueError("ACP_WORKLOAD_ASSERTION_ISSUER cannot contain surrounding whitespace")
+
+        audience_raw = env.get(
+            "ACP_WORKLOAD_ASSERTION_AUDIENCE",
+            _DEFAULT_ASSERTION_AUDIENCE,
+        )
+        if not isinstance(audience_raw, str) or not audience_raw.strip():
+            raise ValueError("ACP_WORKLOAD_ASSERTION_AUDIENCE must be non-empty")
+        if audience_raw != audience_raw.strip():
+            raise ValueError("ACP_WORKLOAD_ASSERTION_AUDIENCE cannot contain surrounding whitespace")
+        assertion_audience = audience_raw
+
+        runtime_identity_base_url = required("ACP_RUNTIME_IDENTITY_BASE_URL")
+        if runtime_identity_base_url != runtime_identity_base_url.strip():
+            raise ValueError("ACP_RUNTIME_IDENTITY_BASE_URL cannot contain surrounding whitespace")
+        runtime_identity_service_token = required("ACP_RUNTIME_IDENTITY_SERVICE_TOKEN")
         role_tokens = {role: required(env_name) for role, env_name in _ROLE_ENV.items()}
-        all_service_tokens = [*role_tokens.values(), required("ACP_RUNTIME_IDENTITY_SERVICE_TOKEN")]
+        all_service_tokens = [*role_tokens.values(), runtime_identity_service_token]
         if any(len(token) < 32 for token in all_service_tokens):
             raise ValueError("service tokens must contain at least 32 characters")
+        if any(any(char.isspace() for char in token) for token in all_service_tokens):
+            raise ValueError("service tokens must not contain whitespace")
         if len(set(all_service_tokens)) != len(all_service_tokens):
             raise ValueError("Runtime identity and each authority service role require distinct tokens")
+
+        database_url = required("ACP_WORKLOAD_CREDENTIAL_DATABASE_URL")
+        if database_url != database_url.strip():
+            raise ValueError("ACP_WORKLOAD_CREDENTIAL_DATABASE_URL cannot contain surrounding whitespace")
 
         timeout_raw = env.get("ACP_RUNTIME_IDENTITY_TIMEOUT_SECONDS", "3")
         try:
@@ -94,15 +132,12 @@ class WorkloadCredentialServiceConfig:
             raise ValueError("ACP_RUNTIME_IDENTITY_TIMEOUT_SECONDS must be in (0, 15]")
 
         return cls(
-            database_url=required("ACP_WORKLOAD_CREDENTIAL_DATABASE_URL"),
-            assertion_issuer=required("ACP_WORKLOAD_ASSERTION_ISSUER"),
-            assertion_audience=env.get(
-                "ACP_WORKLOAD_ASSERTION_AUDIENCE",
-                _DEFAULT_ASSERTION_AUDIENCE,
-            ).strip(),
+            database_url=database_url,
+            assertion_issuer=assertion_issuer,
+            assertion_audience=assertion_audience,
             assertion_public_keys=public_keys,
-            runtime_identity_base_url=required("ACP_RUNTIME_IDENTITY_BASE_URL"),
-            runtime_identity_service_token=env["ACP_RUNTIME_IDENTITY_SERVICE_TOKEN"],
+            runtime_identity_base_url=runtime_identity_base_url,
+            runtime_identity_service_token=runtime_identity_service_token,
             service_role_tokens=role_tokens,
             runtime_identity_timeout_seconds=timeout,
         )
