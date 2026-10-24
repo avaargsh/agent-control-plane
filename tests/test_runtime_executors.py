@@ -33,7 +33,9 @@ class FakeTemporalClient:
             evidence={"workflowId": "run-001"},
         )
 
-    def terminate_workflow(self, resource_ref):
+    def terminate_workflow(
+        self, resource_ref, *, expected_operation_id=None, expected_run_id=None
+    ):
         self.terminated.append(resource_ref)
         return {"terminated": True}
 
@@ -242,6 +244,7 @@ class RecoveredTemporalClient(FakeTemporalClient):
             evidence={
                 "workflowId": "recovered",
                 "runId": "run-recovered",
+                "operationId": "sha256:" + "c" * 64,
                 "verifiedAfterUncertainMutation": True,
             },
         )
