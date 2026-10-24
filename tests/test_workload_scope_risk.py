@@ -1,6 +1,7 @@
 import pytest
 
 from agent_control_plane.workload_credentials import (
+    ApprovalGrantRecord,
     CanonicalRunBinding,
     CredentialAuthorityDenied,
     CredentialBindingRecord,
@@ -67,8 +68,9 @@ class _AssertionVerifier:
 
 
 class _CredentialStore:
-    def __init__(self, binding):
+    def __init__(self, binding, approval=None):
         self.binding = binding
+        self.approval = approval
         self.issue_calls = []
         self.approval_lookups = []
 
@@ -78,7 +80,9 @@ class _CredentialStore:
 
     def get_approval(self, approval_id):
         self.approval_lookups.append(approval_id)
-        return None
+        if self.approval is None or self.approval.approval_id != approval_id:
+            return None
+        return self.approval
 
     def issue_credential(self, **kwargs):
         self.issue_calls.append(kwargs)
@@ -138,7 +142,24 @@ def _build_issuer(scope, *, approval_id=None):
         status="RUNNING",
         session_status="ACTIVE",
     )
-    store = _CredentialStore(binding)
+    approval = None
+    if approval_id is not None:
+        approval = ApprovalGrantRecord(
+            approval_id=approval_id,
+            tenant_id="tenant-a",
+            agent_id="agent-a",
+            session_id="session-a",
+            run_id="run-a",
+            binding_id="binding-a",
+            audience="payments-api",
+            scopes=tuple(scopes),
+            approved_by="test-operator",
+            issued_at=now - 1,
+            expires_at=now + 30,
+            state="ACTIVE",
+            version=4,
+        )
+    store = _CredentialStore(binding, approval=approval)
     authority = WorkloadCredentialAuthority(
         store=store,
         assertion_verifier=_AssertionVerifier(claims),
@@ -211,3 +232,18 @@ def test_mixed_read_only_and_unknown_scopes_require_exact_approval():
 
     assert store.issue_calls == []
     assert store.approval_lookups == []
+
+
+
+def test_unknown_scope_with_exact_active_approval_can_be_issued():
+    authority, store, body = _build_issuer(
+        "payments:transfer", approval_id="approval-1"
+    )
+
+    result = authority.issue(body)
+
+    assert result["credential"]["scopes"] == ["payments:transfer"]
+    assert result["credential"]["expires_at"] == 1_800_000_030.0
+    assert store.approval_lookups == ["approval-1"]
+    assert len(store.issue_calls) == 1
+    assert store.issue_calls[0]["approval_version"] == 4
