@@ -286,3 +286,23 @@ def test_sealed_evidence_from_another_run_cannot_promote_target():
     assert result.passed is False
     assert result.decision == "BLOCK"
     assert result.reason == "RUNTIME_RUN_ID_MISMATCH"
+
+
+def test_target_pinning_requires_valid_evidence_even_if_gate_marks_it_optional():
+    optional_evidence_gate = {
+        **GATE,
+        "spec": {**GATE["spec"], "evidenceRequired": False},
+    }
+    unsealed = dict(evidence())
+    unsealed.pop("replay_digest")
+    result = evaluate_release_gate(
+        optional_evidence_gate,
+        {"recovery_success_rate": 1.0, "false_automation_rate": 0.0},
+        unsealed,
+        expected_authority_digest="sha256:" + "a" * 64,
+        expected_release_ref="checkout-sre-golden-v1",
+        expected_runtime_run_id="run-001",
+    )
+    assert result.passed is False
+    assert result.decision == "BLOCK"
+    assert result.reason == "INVALID_RELEASE_EVIDENCE"
