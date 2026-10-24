@@ -632,7 +632,7 @@ def test_pinned_ed25519_verifier_rejects_tampered_and_untrusted_assertions():
         untrusted.verify(token, now=clock())
 
 
-def _invoke_wsgi(app, *, method, path, token, body=None, query=""):
+def _invoke_wsgi(app, *, method, path, token, body=None, query="", scheme="https"):
     raw = b"" if body is None else json.dumps(body).encode()
     environ = {
         "REQUEST_METHOD": method,
@@ -642,6 +642,7 @@ def _invoke_wsgi(app, *, method, path, token, body=None, query=""):
         "CONTENT_LENGTH": str(len(raw)) if body is not None else "",
         "wsgi.input": io.BytesIO(raw),
         "HTTP_AUTHORIZATION": f"Bearer {token}",
+        "wsgi.url_scheme": scheme,
     }
     status = []
     headers = []
@@ -678,6 +679,28 @@ def test_http_service_roles_are_separated_and_errors_are_sanitized():
     )
     assert status == 403
     assert headers["Cache-Control"] == "no-store"
+
+def test_http_service_rejects_plain_http_even_with_valid_role_token():
+    clock, _, _, _, _, _, authority, _ = make_fixture()
+    token = "long-test-token-credential.issuer-0123456789"
+    authn = ServiceRoleAuthenticator({
+        "credential.issuer": ServiceRoleAuthenticator.digest_token(token),
+    })
+    app = WorkloadCredentialWSGI(authority, authenticator=authn, clock=clock)
+
+    status, headers, payload = _invoke_wsgi(
+        app,
+        method="POST",
+        path="/v1/workload-credentials:issue",
+        token=token,
+        body={},
+        scheme="http",
+    )
+
+    assert status == 403
+    assert payload["error"]["code"] == "secure_transport_required"
+    assert headers["Cache-Control"] == "no-store"
+    assert headers["X-Content-Type-Options"] == "nosniff"
 
     status, _, payload = _invoke_wsgi(
         app,
