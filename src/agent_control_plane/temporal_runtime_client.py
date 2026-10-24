@@ -254,19 +254,33 @@ class TemporalWorkflowClient:
                 workflow_id=workflow_id,
                 reason="agent control plane compensation",
             )
-        except RuntimeMutationUncertain:
+        except RuntimeMutationOwnershipUncertain:
+            # Ownership failure is a denial, never a lost ACK to reconcile.
+            raise
+        except RuntimeMutationUncertain as exc:
             observed = self.api.describe(workflow_id=workflow_id)
-            if observed is not None and not _workflow_is_terminal(
+            if observed is None or not _workflow_is_terminal(
                 observed.get("status")
             ):
+                # Not found is not evidence that *this* operation terminated
+                # the Workflow. Do not turn unknown provider state into success.
                 raise
+            if (
+                expected_operation_id is not None
+                and observed.get("operationId") != expected_operation_id
+            ) or (
+                expected_run_id is not None
+                and observed.get("runId") != expected_run_id
+            ):
+                raise RuntimeMutationOwnershipUncertain(
+                    "Temporal terminal state belongs to a different operation",
+                    resource_ref=resource_ref,
+                    operation_id=expected_operation_id,
+                    observed_operation_id=observed.get("operationId"),
+                ) from exc
             return {
                 "terminated": True,
                 "workflowId": workflow_id,
-                "status": (
-                    observed.get("status")
-                    if observed is not None
-                    else None
-                ),
+                "status": observed["status"],
                 "verifiedAfterUncertainMutation": True,
             }
