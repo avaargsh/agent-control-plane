@@ -117,13 +117,19 @@ controller.terminate_workflow(
     expected_run_id=result.evidence["runId"],
 )
 ```
-The adapter pins the termination RPC to that exact Temporal Run ID and
-returns `terminationRequested`, **not** independently verified completion.
-An ambiguous ACK and missing follow-up observation stay UNKNOWN; an explicit
-ownership denial can never be reconciled into success. These IDs are
-idempotency/ownership fences, not authentication credentials. External ACP
-authorization is still required before invoking the transport. Do not expose
-this adapter directly as a public mutation API.
+The SDK transport pins the termination RPC to that exact Temporal Run ID
+and returns `terminationRequested`, **not** a completed rollback. The
+`TemporalWorkflowClient` then re-reads Temporal state and accepts only a
+matching `TERMINATED` postcondition with the original operation and Run IDs.
+An ACK alone, missing observation or a different terminal state (for example
+`FAILED` or `COMPLETED`) remains uncertain; `TemporalWorkflowExecutor`
+refuses `rolled_back=True` without an explicit verified termination receipt,
+so `ApplyReconciler` stays `BLOCKED` with `ROLLBACK_INCOMPLETE`.
+A matching Temporal provider observation is not the v0.1 independent
+execution proof. These IDs are idempotency/ownership fences, not
+authentication credentials. External ACP authorization is still required
+before invoking the transport. Do not expose this adapter directly as a
+public mutation API.
 
 The focused integration test starts the Temporal SDK local test server (not
 Temporal Cloud or a production server):
