@@ -21,6 +21,7 @@ plan = compile_release_plan(
     release=docs.by_kind("AgentRelease")[0],
     bundles=docs.by_kind("AgentBundle"),
     bindings=docs.by_kind("RuntimeBinding"),
+    context_projection_policies=docs.by_kind("ContextProjectionPolicy"),
 )
 
 registry = ProviderRegistry()
