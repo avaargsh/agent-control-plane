@@ -128,4 +128,7 @@ def test_plan_cli_resolves_context_projection_policy_from_manifest(tmp_path):
 
     assert result.returncode == 0, result.stderr
     plan = json.loads(result.stdout)
-    assert plan["context_projection_policies"]["support-context"] == context_policy()
+    assert (
+        plan["context_projection_policies"]["support-context"]
+        == context_policy()
+    )
