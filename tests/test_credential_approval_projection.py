@@ -60,7 +60,7 @@ class FakeApprovalStore:
         return grant
 
 
-def build_signed_credential_approval(*, canonical_run=None, params_override=None):
+def build_signed_credential_approval(*, canonical_run=None, authority_run=None, params_override=None):
     fixture = build_transition()
     run = canonical_run or CanonicalRunBinding(
         tenant_id="tenant-a",
@@ -139,7 +139,7 @@ def build_signed_credential_approval(*, canonical_run=None, params_override=None
     )
     signed = SignedTransitionApproval.sign(approval, key=KEY)
     store = FakeApprovalStore(binding)
-    reader = FakeRunReader(run)
+    reader = FakeRunReader(authority_run or run)
     return store, reader, action, signed, run
 
 
@@ -228,7 +228,9 @@ def test_signed_approval_projection_rejects_inactive_session_and_stale_sandbox_r
         status="RUNNING",
         session_status="ACTIVE",
     )
-    store, reader, action, signed, _ = build_signed_credential_approval(canonical_run=current_run)
+    # Sign an approval for the original sandbox, then change only the live
+    # authority result. The stale signed target must not be projected.
+    store, reader, action, signed, _ = build_signed_credential_approval(authority_run=current_run)
     with pytest.raises(CredentialAuthorityDenied, match="canonical Run binding"):
         register_credential_approval_from_transition(
             store=store,
