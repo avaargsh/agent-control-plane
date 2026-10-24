@@ -184,7 +184,7 @@ def test_unknown_scope_is_denied_by_credential_issuance_boundary():
 
     with pytest.raises(
         CredentialAuthorityDenied,
-        match="sensitive credentials require an exact approval reference",
+        match="sensitive credential scopes require a matching scope-approval reference",
     ):
         authority.issue(body)
 
@@ -226,7 +226,7 @@ def test_mixed_read_only_and_unknown_scopes_require_exact_approval():
 
     with pytest.raises(
         CredentialAuthorityDenied,
-        match="sensitive credentials require an exact approval reference",
+        match="sensitive credential scopes require a matching scope-approval reference",
     ):
         authority.issue(body)
 
