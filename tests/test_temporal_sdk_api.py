@@ -69,7 +69,12 @@ def test_sdk_transport_preserves_server_memo_and_rejects_foreign_adoption():
                     operation_id=first.evidence["operationId"],
                 )
 
-            terminated = await asyncio.to_thread(controller.terminate_workflow, first.resource_ref)
+            terminated = await asyncio.to_thread(
+                controller.terminate_workflow,
+                first.resource_ref,
+                expected_operation_id=first.evidence["operationId"],
+                expected_run_id=first.evidence["runId"],
+            )
             assert terminated["workflowId"] == spec["workflow_id"]
             assert terminated["terminationRequested"] is True
             final = await asyncio.to_thread(api.describe, workflow_id=spec["workflow_id"])
@@ -92,6 +97,8 @@ def test_sdk_transport_missing_workflow_is_not_claimed_as_terminated():
                     api.terminate,
                     workflow_id=missing,
                     reason="test-only",
+                    expected_operation_id="sha256:" + "a" * 64,
+                    expected_run_id="known-test-run",
                 )
 
     asyncio.run(scenario())
